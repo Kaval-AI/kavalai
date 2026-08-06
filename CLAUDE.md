@@ -56,10 +56,9 @@ Claude Code's static command analysis and forces a manual permission prompt.
 - `kavalai/agent_service.py` — `AgentService`: all runtime persistence (agents, sessions, runs, chat history, tasks, model-call stats) over a plain `async_sessionmaker`; sessions reusable by caller-supplied `external_id`
 - `kavalai/db.py` — ORM models + `DatabaseManager`; `get_sqlite_compat_sessionmaker()` runs `AgentService` over the sync SQLite engine via `AsyncSessionShim` (Pyodide/browser, where greenlet/aiosqlite don't exist)
 - `kavalai/workflow/engine.py` — core workflow engine (`WorkflowEngine.from_yaml_path`, YAML → execution)
-- `kavalai/workflow/models.py` — Pydantic data models for workflows
+- `kavalai/workflow/models.py` — Pydantic data models for workflows: shared building blocks (`ArgumentInfo`, `RestServer`, `McpServer`, `PythonFunction`, `TemplateModel`, `WorkflowException`) and the v2 graph (`WorkflowGraph`, nodes)
 - `kavalai/agent.py` — modular planning agent (uses the native LLM clients)
 - `kavalai/functionkernel.py` — tool registration and execution (REST, MCP, Python); unified tool URI format `protocol://[name|module].function_name(args: type) -> return_type`; duplicate tool/server names raise `WorkflowException`; `get_tool_descriptions()` takes an explicit `allowed_tools` filter (`None`/empty → no tools)
-- `kavalai/workflow_model.py` — legacy workflow data models
 - `kavalai/run_context.py` — RunContext model and context resolution helpers
 - `kavalai/workflow/render.py` — renders a workflow graph to an SVG diagram (`render_workflow_svg`); used by the docs build (`docs/_ext/workflow_svgs.py`) and the backoffice `POST /workflows/render-svg` endpoint. The frontend `workflow-graph` component displays that backend SVG.
 - `kavalai/migrate_db.py` — Alembic migration runner (`python -m kavalai.migrate_db {app|backoffice}`); only its `main()` reads env vars

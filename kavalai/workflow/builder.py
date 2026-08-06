@@ -20,20 +20,18 @@ from pydantic import BaseModel
 
 from kavalai.workflow.models import (
     AgentNode,
+    ArgumentInfo,
     EndNode,
     FunctionNode,
     IfNode,
     LLMNode,
-    StartNode,
-    SwitchNode,
-    WorkflowGraph,
-)
-from kavalai.workflow_model import (
-    ArgumentInfo,
     McpServer,
     PythonFunction,
     RestServer,
+    StartNode,
+    SwitchNode,
     TemplateModel,
+    WorkflowGraph,
 )
 
 # Python types accepted as a shorthand for a JSON-schema scalar type.

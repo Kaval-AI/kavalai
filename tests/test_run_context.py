@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from unittest.mock import AsyncMock
 
 from kavalai.run_context import RunContext
-from kavalai.workflow_model import ArgumentInfo
+from kavalai.workflow.models import ArgumentInfo
 
 
 class MockModel(BaseModel):

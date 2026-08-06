@@ -44,6 +44,12 @@ from kavalai.workflow import (
     FunctionNode,
     IfNode,
     SwitchNode,
+    RestServer,
+    McpServer,
+    PythonFunction,
+    TemplateModel,
+    ArgumentInfo,
+    WorkflowException,
     evaluate_expression,
     evaluate_bool,
     evaluate_value,
@@ -58,14 +64,6 @@ from kavalai.workflow.clients import make_client
 # --- Agent & tools ---------------------------------------------------------
 from kavalai.agent import Agent, ToolCall
 from kavalai.run_context import RunContext
-from kavalai.workflow_model import (
-    RestServer,
-    McpServer,
-    PythonFunction,
-    TemplateModel,
-    ArgumentInfo,
-    WorkflowException,
-)
 from kavalai.functionkernel import (
     FunctionKernel,
     FunctionKernelException,
