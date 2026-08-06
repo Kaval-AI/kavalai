@@ -1,6 +1,7 @@
 import pytest
 
 from kavalai.workflow import clients
+from kavalai.llm_clients.anthropic_client import AnthropicClient
 from kavalai.llm_clients.base_client import LlmClientParameters
 from kavalai.llm_clients.browser_client import BrowserLLMClient
 from kavalai.llm_clients.gemini_client import GeminiClient
@@ -36,6 +37,13 @@ def test_make_client_gemini(monkeypatch):
     assert client.model == "gemini-2.0"
 
 
+def test_make_client_anthropic(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    client = clients.make_client("anthropic/claude-opus-5")
+    assert isinstance(client, AnthropicClient)
+    assert client.model == "claude-opus-5"
+
+
 def test_make_client_ollama():
     client = clients.make_client("ollama/llama3")
     assert isinstance(client, OllamaClient)
@@ -55,4 +63,4 @@ def test_make_client_requires_provider():
 
 def test_make_client_unsupported_provider():
     with pytest.raises(ValueError, match="Unsupported LLM provider"):
-        clients.make_client("anthropic/claude")
+        clients.make_client("mistral/mistral-large")

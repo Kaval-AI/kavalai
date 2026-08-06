@@ -73,6 +73,53 @@ def test_gemini_reasoning_budget_mapping():
     assert mapped.get("thinking_budget") == 300
 
 
+def test_anthropic_reasoning_and_stops_and_max_tokens_mapping():
+    kwargs = {
+        "reasoning": "high",
+        "temperature": 0.2,
+        "stop": "#END",
+        "max_tokens": 100,
+        "presence_penalty": 0.1,  # should be stripped for anthropic
+    }
+    mapped = LLMKWargsMapper.map("anthropic", "claude-haiku-4-5", kwargs)
+
+    assert mapped.get("effort") == "high"
+    assert mapped.get("temperature") == 0.2
+    assert mapped.get("stop_sequences") == ["#END"]
+    assert mapped.get("max_tokens") == 100
+    assert "presence_penalty" not in mapped
+    assert "stop" not in mapped
+
+
+def test_anthropic_stop_list_mapping():
+    mapped = LLMKWargsMapper.map(
+        "anthropic", "claude-haiku-4-5", {"stop": ["END", "STOP"]}
+    )
+    assert mapped.get("stop_sequences") == ["END", "STOP"]
+
+
+def test_anthropic_reasoning_dict_and_effort_synonyms():
+    mapped = LLMKWargsMapper.map(
+        "anthropic", "claude-haiku-4-5", {"reasoning": {"effort": "LOW"}}
+    )
+    assert mapped.get("effort") == "low"
+
+    mapped = LLMKWargsMapper.map(
+        "anthropic", "claude-haiku-4-5", {"reasoning_effort": "Medium"}
+    )
+    assert mapped.get("effort") == "medium"
+
+
+def test_anthropic_keeps_sampling_params():
+    # Sampling params pass through untouched; models that reject them will
+    # fail loudly at the API rather than have them silently dropped.
+    kwargs = {"top_p": 0.2, "temperature": 0.7, "top_k": 40}
+    mapped = LLMKWargsMapper.map("anthropic", "claude-opus-5", kwargs)
+    assert mapped.get("top_p") == 0.2
+    assert mapped.get("temperature") == 0.7
+    assert mapped.get("top_k") == 40
+
+
 def test_passthrough_existing_specific_keys():
     # If user already provided provider-specific key, do not override
     oa_kwargs = {"reasoning_effort": "low"}
@@ -101,6 +148,26 @@ def test_priority_mapping():
             "service_tier"
         )
         == "default"
+    )
+
+    # Anthropic
+    assert (
+        LLMKWargsMapper.map("anthropic", "claude-haiku-4-5", {"priority": "high"}).get(
+            "service_tier"
+        )
+        == "auto"
+    )
+    assert (
+        LLMKWargsMapper.map("anthropic", "claude-haiku-4-5", {"priority": "low"}).get(
+            "service_tier"
+        )
+        is None
+    )  # standard processing (no service_tier set)
+    assert (
+        LLMKWargsMapper.map(
+            "anthropic", "claude-haiku-4-5", {"priority": "normal"}
+        ).get("service_tier")
+        is None
     )
 
     # Gemini

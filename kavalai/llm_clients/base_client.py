@@ -25,8 +25,15 @@ from kavalai.llm_clients.with_retry import with_retry
 
 
 class LlmClientParameters(BaseModel):
-    temperature: Optional[float] = 1.0
-    top_p: Optional[float] = 0.2
+    """Optional per-call LLM parameters.
+
+    Sampling parameters default to ``None`` and are only sent to a provider
+    when explicitly set, so each provider's own defaults apply otherwise
+    (some models, e.g. recent Claude models, reject sampling params outright).
+    """
+
+    temperature: Optional[float] = None
+    top_p: Optional[float] = None
     reasoning_effort: Optional[str] = None
     service_tier: Optional[str] = None
     timeout_seconds: Optional[float] = 30.0

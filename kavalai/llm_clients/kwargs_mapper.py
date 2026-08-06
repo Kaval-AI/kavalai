@@ -8,7 +8,8 @@ llm_kwargs:
   temperature: 0.2
   max_tokens: 512
 
-and have them mapped correctly for different providers (OpenAI, Gemini).
+and have them mapped correctly for different providers (OpenAI, Gemini,
+Anthropic, Ollama).
 """
 
 from __future__ import annotations
@@ -79,6 +80,18 @@ class LLMKWargsMapper:
         "system_instruction",
     }
 
+    _ANTHROPIC_KEYS: set[str] = {
+        "temperature",
+        "top_p",
+        "top_k",
+        "max_tokens",
+        "stop_sequences",
+        # Reasoning
+        "effort",
+        # Service Tier
+        "service_tier",
+    }
+
     _OLLAMA_KEYS: set[str] = {
         "temperature",
         "top_p",
@@ -124,6 +137,8 @@ class LLMKWargsMapper:
             return cls._map_openai(out, model)
         elif provider == "gemini":
             return cls._map_gemini(out)
+        elif provider == "anthropic":
+            return cls._map_anthropic(out)
         elif provider == "ollama":
             return cls._map_ollama(out)
         else:
@@ -243,6 +258,68 @@ class LLMKWargsMapper:
             k: v
             for k, v in out.items()
             if k in cls._GEMINI_KEYS or k.startswith("x_") or k in ("stream_delta",)
+        }
+        return filtered or out
+
+    @classmethod
+    def _map_anthropic(cls, out: Dict[str, Any]) -> Dict[str, Any]:
+        # Convert max_output_tokens (normalized in map()) -> max_tokens
+        if "max_tokens" not in out and "max_output_tokens" in out:
+            out["max_tokens"] = out.pop("max_output_tokens")
+
+        # Convert stop -> stop_sequences
+        if "stop_sequences" not in out and "stop" in out:
+            stop = out.pop("stop")
+            if isinstance(stop, str):
+                out["stop_sequences"] = [stop]
+            else:
+                out["stop_sequences"] = stop
+
+        # Convert priority -> service_tier
+        # priority: high -> service_tier: auto (use priority capacity if available)
+        # priority: normal/low -> no service_tier set (standard processing)
+        if "service_tier" not in out and "priority" in out:
+            val = out.pop("priority")
+            if val == "high":
+                out["service_tier"] = "auto"
+
+        # Convert reasoning / reasoning_effort -> effort
+        if "effort" not in out and "reasoning" in out:
+            val = out.pop("reasoning")
+            if isinstance(val, dict):
+                effort = val.get("effort") or val.get("level")
+                if effort is not None:
+                    out["effort"] = str(effort).lower()
+            elif isinstance(val, str):
+                out["effort"] = val.lower()
+        if "effort" not in out and "reasoning_effort" in out:
+            out["effort"] = str(out.pop("reasoning_effort")).lower()
+
+        # Remove OpenAI/Gemini/Ollama-only keys
+        for k in [
+            "presence_penalty",
+            "frequency_penalty",
+            "logit_bias",
+            "seed",
+            "reasoning_effort",
+            "candidate_count",
+            "thinking_budget",
+            "thinking_level",
+            "response_mime_type",
+            "response_schema",
+            "system_instruction",
+            "num_ctx",
+            "num_predict",
+            "repeat_penalty",
+            "format",
+        ]:
+            out.pop(k, None)
+
+        # Filter to allowed keys (keep x_* custom as above)
+        filtered = {
+            k: v
+            for k, v in out.items()
+            if k in cls._ANTHROPIC_KEYS or k.startswith("x_") or k in ("stream_delta",)
         }
         return filtered or out
 

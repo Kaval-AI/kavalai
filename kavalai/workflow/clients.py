@@ -45,7 +45,8 @@ def make_client(
 ) -> BaseLlmClient:
     """Construct a v2 LLM client from a ``provider/model`` string.
 
-    Supported providers: ``openai``, ``gemini``, ``ollama``, ``browser``.
+    Supported providers: ``openai``, ``gemini``, ``anthropic``, ``ollama``,
+    ``browser``.
     The ``browser`` provider runs inference client-side via a WebLLM bridge
     (Pyodide only) and needs no API key — see
     :class:`~kavalai.llm_clients.browser_client.BrowserLLMClient`.
@@ -66,6 +67,14 @@ def make_client(
         from kavalai.llm_clients.gemini_client import GeminiClient
 
         return GeminiClient(
+            model_name,
+            llm_client_parameters=parameters,
+            model_stats_receiver=stats_receiver,
+        )
+    if provider == "anthropic":
+        from kavalai.llm_clients.anthropic_client import AnthropicClient
+
+        return AnthropicClient(
             model_name,
             llm_client_parameters=parameters,
             model_stats_receiver=stats_receiver,
