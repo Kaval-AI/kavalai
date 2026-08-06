@@ -35,8 +35,9 @@ class _NeverRaised(Exception):
 def _retriable_exceptions() -> tuple:
     """Collect retriable exception types from whichever LLM SDKs are installed.
 
-    ``openai`` and ``google-genai`` are optional extras; when a package is
-    absent its exception types simply do not contribute to the retry set.
+    ``openai``, ``google-genai`` and ``anthropic`` are optional extras; when a
+    package is absent its exception types simply do not contribute to the
+    retry set.
     """
     exceptions: list = []
     try:
@@ -55,6 +56,17 @@ def _retriable_exceptions() -> tuple:
         from google.genai import errors
 
         exceptions += [errors.ServerError, errors.ClientError]
+    except ImportError:
+        pass
+    try:
+        import anthropic
+
+        exceptions += [
+            anthropic.RateLimitError,
+            anthropic.InternalServerError,
+            anthropic.APIConnectionError,
+            anthropic.APITimeoutError,
+        ]
     except ImportError:
         pass
     return tuple(exceptions) or (_NeverRaised,)

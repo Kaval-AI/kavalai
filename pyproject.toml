@@ -45,7 +45,8 @@ dependencies = [
 openai = ["openai"]
 gemini = ["google-genai"]
 ollama = ["ollama"]
-llm = ["openai", "google-genai", "ollama"]
+anthropic = ["anthropic"]
+llm = ["openai", "google-genai", "ollama", "anthropic"]
 # Embeddings / RAG (native extensions).
 rag = ["fastembed", "scikit-learn", "sqliteai-vector"]
 # PostgreSQL drivers (native extensions).

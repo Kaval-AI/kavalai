@@ -23,7 +23,7 @@ limitations under the License.
 #   * ``WorkflowEngine`` / ``WorkflowBuilder`` -- define and run workflows.
 #   * ``Agent``                                -- the multi-step tool-calling agent.
 #   * ``FunctionKernel`` / ``pythontool``      -- register and call tools.
-#   * ``OpenAIClient`` / ``GeminiClient`` / ``OllamaClient`` -- LLM backends.
+#   * ``OpenAIClient`` / ``GeminiClient`` / ``AnthropicClient`` / ``OllamaClient`` -- LLM backends.
 #   * ``PostgresRagService``                   -- index and query embeddings.
 #
 # The persistence-layer ORM table classes (Agent row, Run, Task, ...) live in
@@ -93,14 +93,16 @@ from kavalai.llm_clients.embeddings import (
 from kavalai.llm_clients.browser_client import BrowserLLMClient
 
 # The provider LLM clients (``OpenAIClient`` / ``GeminiClient`` /
-# ``OllamaClient``) pull in optional SDKs that are not part of the
-# pyodide-compatible core (``openai`` / ``google-genai`` / ``ollama``). They are
-# resolved lazily via ``__getattr__`` below so that ``import kavalai`` works in
-# lightweight / pyodide environments where only the core dependencies are
-# installed. Install the matching extra (e.g. ``kavalai[openai]``) to use them.
+# ``AnthropicClient`` / ``OllamaClient``) pull in optional SDKs that are not
+# part of the pyodide-compatible core (``openai`` / ``google-genai`` /
+# ``anthropic`` / ``ollama``). They are resolved lazily via ``__getattr__``
+# below so that ``import kavalai`` works in lightweight / pyodide environments
+# where only the core dependencies are installed. Install the matching extra
+# (e.g. ``kavalai[openai]``) to use them.
 _LAZY_CLIENTS = {
     "OpenAIClient": ("kavalai.llm_clients.openai_client", "openai"),
     "GeminiClient": ("kavalai.llm_clients.gemini_client", "gemini"),
+    "AnthropicClient": ("kavalai.llm_clients.anthropic_client", "anthropic"),
     "OllamaClient": ("kavalai.llm_clients.ollama_client", "ollama"),
 }
 
@@ -191,6 +193,7 @@ __all__ = [
     "ModelStatsLogger",
     "OpenAIClient",
     "GeminiClient",
+    "AnthropicClient",
     "OllamaClient",
     "BrowserLLMClient",
     "make_embedding_client",
