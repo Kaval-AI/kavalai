@@ -38,12 +38,12 @@ from kavalai.workflow.models import (
     LLMNode,
     Node,
     SwitchNode,
+    WorkflowException,
     WorkflowGraph,
 )
 from kavalai.agent_service import AgentService
 from kavalai.workflow.state import WorkflowState
 from kavalai.workflow.tasklog.base import TaskLogger, TokenAccumulator
-from kavalai.workflow_model import WorkflowException
 from kavalai.functionkernel import FunctionKernel, pythontool
 from kavalai.llm_clients.base_client import BaseLlmClient, ChatHistory, ChatMessage
 

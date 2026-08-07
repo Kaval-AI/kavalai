@@ -16,11 +16,6 @@ Run context
 
 .. automodule:: kavalai.run_context
 
-Workflow configuration models
------------------------------
-
-.. automodule:: kavalai.workflow_model
-
 Agent service & persistence
 ---------------------------
 

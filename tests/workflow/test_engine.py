@@ -7,7 +7,7 @@ from sqlalchemy import select
 from kavalai.agent_service import AgentService
 from kavalai.db import DatabaseManager, Run
 from kavalai.workflow import WorkflowEngine, SqliteTaskLogger
-from kavalai.workflow_model import WorkflowException
+from kavalai.workflow.models import WorkflowException
 from kavalai.functionkernel import pythontool
 from kavalai.llm_clients.base_client import BaseLlmClient, ModelCallStat
 from pydantic import BaseModel

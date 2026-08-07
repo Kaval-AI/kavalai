@@ -19,7 +19,7 @@ from kavalai.functionkernel import (
     ToolDefinition,
     FunctionKernelException,
 )
-from kavalai.workflow_model import RestServer, McpServer
+from kavalai.workflow.models import RestServer, McpServer
 
 
 def find_free_port():

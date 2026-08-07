@@ -22,7 +22,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
 from kavalai.resolvers import resolve_path
-from kavalai.workflow_model import ArgumentInfo
+from kavalai.workflow.models import ArgumentInfo
 
 
 class RunContext(BaseModel):

@@ -9,7 +9,7 @@ from kavalai.workflow.models import (
     LLMNode,
     SwitchNode,
 )
-from kavalai.workflow_model import ArgumentInfo
+from kavalai.workflow.models import ArgumentInfo
 
 
 def _base(builder: WorkflowBuilder) -> WorkflowBuilder:
