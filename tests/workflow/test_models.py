@@ -3,11 +3,14 @@ import yaml
 from pydantic import ValidationError
 
 from kavalai.workflow.models import (
+    AgentNode,
     EndNode,
     IfNode,
+    LLMNode,
     StartNode,
     SwitchNode,
     WorkflowGraph,
+    WorkflowStreamEvent,
 )
 
 BASE_DATA_TYPES = {
@@ -195,3 +198,50 @@ nodes:
     assert graph.llm_model == "openai/x"
     assert graph.start == "s"
     assert graph.output_type == "output"
+
+
+def test_stream_flags_default_off():
+    llm = LLMNode(name="n", prompt="p", output="output", next="e")
+    assert llm.stream_output is False
+    assert llm.stream_delta is False
+
+    agent = AgentNode(name="a", prompt="p", output="output", next="e")
+    assert agent.stream_output is False
+    assert agent.stream_delta is False
+    assert agent.stream_instructions is False
+    assert agent.stream_partials is False
+
+
+def test_stream_flags_parse_from_yaml():
+    text = """
+name: n
+type: agent
+prompt: p
+output: output
+next: e
+stream_output: true
+stream_instructions: true
+stream_partials: true
+stream_delta: true
+"""
+    node = AgentNode(**yaml.safe_load(text))
+    assert node.stream_output and node.stream_instructions
+    assert node.stream_partials and node.stream_delta
+
+
+def test_workflow_stream_event_optional_fields_and_types():
+    event = WorkflowStreamEvent(type="partial", name="node")
+    assert event.value is None and event.session_id is None
+    assert event.output_data is None and event.token_usage is None
+
+    completed = WorkflowStreamEvent(
+        type="workflow_completed",
+        name="wf",
+        session_id="s",
+        output_data={"a": 1},
+        token_usage={"total_tokens": 2},
+    )
+    assert completed.output_data == {"a": 1}
+
+    with pytest.raises(ValidationError):
+        WorkflowStreamEvent(type="not_a_type", name="x")

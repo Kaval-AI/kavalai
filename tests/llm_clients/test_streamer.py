@@ -198,3 +198,46 @@ async def test_streamer_value_override_delta():
     assert contents[0].value == "h"
     assert contents[1].type == "complete"
     assert contents[1].value is None
+
+
+@pytest.mark.asyncio
+async def test_streamer_restart_passes_through_and_reset_active():
+    """A retried attempt resets the active accounting and re-registers its
+    streams; the restart chunk flows to the consumer and iteration still
+    terminates on the new attempt's complete."""
+    streamer = Streamer()
+    v1 = streamer.get_value_streamer("response")
+    await v1.stream_partial("gar")
+
+    # Simulate a retry: forget the failed attempt, announce the restart.
+    streamer.reset_active()
+    await streamer.stream_restart("attempt 1: boom")
+    v2 = streamer.get_value_streamer("response")
+    await v2.stream_partial("ok")
+    await v2.stream_complete()
+
+    contents = []
+    async for content in streamer:
+        contents.append(content)
+
+    assert [c.type for c in contents] == ["partial", "restart", "partial", "complete"]
+    assert contents[1].name == "response"
+    assert contents[1].value == "attempt 1: boom"
+    # Without reset_active() the stale name would keep iteration alive.
+    assert contents[-1].type == "complete"
+
+
+@pytest.mark.asyncio
+async def test_streamer_stale_complete_after_reset_is_harmless():
+    """A streamer completing after reset_active() dropped its name must not
+    raise from the accounting callback."""
+    streamer = Streamer()
+    stale = streamer.get_value_streamer("response")
+    streamer.reset_active()
+
+    await stale.stream_complete()  # discard-if-present: no ValueError
+
+    contents = []
+    async for content in streamer:
+        contents.append(content)
+    assert [c.type for c in contents] == ["complete"]

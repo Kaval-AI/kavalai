@@ -37,6 +37,11 @@ class LlmClientParameters(BaseModel):
     reasoning_effort: Optional[str] = None
     service_tier: Optional[str] = None
     timeout_seconds: Optional[float] = 30.0
+    # Reviewer: We don't actually initialize the timeout here, so the comment here is not useful.
+    # Inter-chunk inactivity timeout for streaming consumers. Defaults to
+    # 2 x timeout_seconds so the stream survives one timed-out attempt plus
+    # its retry backoff (timeout_seconds alone would kill retries).
+    stream_timeout_seconds: Optional[float] = None
 
 
 class ChatMessage(BaseModel):
@@ -108,6 +113,7 @@ class BaseLlmClient:
         *,
         chat_history: ChatHistory,
         response_model: Optional[Type[BaseModel]] = None,
+        stream_delta: bool = False,
     ) -> Streamer:
         """
         Execute a chat completion and return a Streamer.
@@ -115,15 +121,31 @@ class BaseLlmClient:
         Args:
             chat_history: The history of messages.
             response_model: Optional Pydantic model for structured output.
+            stream_delta: When True, partial chunks carry only the newly
+                generated text and consumers reassemble; otherwise each partial
+                carries the full accumulated (safe-parsed) content so far.
 
         Returns:
             A Streamer instance that will yield the completion events.
         """
-        timeout = 30.0
+        llm_timeout = 30.0
         if self.parameters and self.parameters.timeout_seconds:
-            timeout = self.parameters.timeout_seconds
+            llm_timeout = self.parameters.timeout_seconds
 
-        streamer = Streamer(timeout_seconds=timeout)
+        # The inactivity timeout must outlast a single timed-out attempt plus
+        # its retry backoff; retries reset the clock via the restart chunk.
+        stream_timeout = None
+        if self.parameters and self.parameters.stream_timeout_seconds:
+            stream_timeout = self.parameters.stream_timeout_seconds
+        timeout = stream_timeout or 2 * llm_timeout
+
+        streamer = Streamer(stream_delta=stream_delta, timeout_seconds=timeout)
+
+        async def _on_retry(attempt: int, error: Exception):
+            # The next attempt re-registers its value streamers and re-sends
+            # content from scratch; tell consumers to discard what they have.
+            streamer.reset_active()
+            await streamer.stream_restart(f"attempt {attempt}: {error}")
 
         async def _run():
             try:
@@ -132,6 +154,7 @@ class BaseLlmClient:
                     chat_history=chat_history,
                     response_model=response_model,
                     streamer=streamer,
+                    on_retry=_on_retry,
                 )
             except Exception as e:
                 await streamer.stream_error(e)

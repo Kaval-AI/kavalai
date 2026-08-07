@@ -1,6 +1,6 @@
 import asyncio
 import json
-from typing import Any, Optional, Type
+from typing import Any, AsyncGenerator, Optional, Type
 import os
 
 from loguru import logger
@@ -10,6 +10,8 @@ from kavalai.run_context import RunContext
 from kavalai.utils import to_plain
 from kavalai.functionkernel import FunctionKernel
 from kavalai.llm_clients.base_client import BaseLlmClient, ChatHistory, ChatMessage
+from kavalai.llm_clients.common import safe_parse_json
+from kavalai.llm_clients.streamer import StreamContent
 from jinja2 import Template
 
 
@@ -56,6 +58,139 @@ def get_step_output_type(ResponseModel=Type[BaseModel]):
     return StepOutput
 
 
+class StepStreamDemuxer:
+    """Routes one agent step's raw LLM stream into named sub-streams.
+
+    Consumes the step's :class:`StreamContent` chunks (the step is always
+    streamed in raw-delta mode) and returns the chunks to emit, gated by the
+    stream flags:
+
+    - the step's raw model output under ``step<N>`` (``stream_partials``),
+    - the ``instructions`` field under ``instructions``, with a per-step
+      ``complete`` (``stream_instructions``),
+    - the ``output`` field under ``response`` as full safe-parsed JSON
+      (``stream_output``),
+    - pass-through of auxiliary provider streams (e.g. Gemini thoughts) and
+      of ``restart`` chunks, which also reset the accumulated state.
+
+    One instance handles exactly one step; the raw text accumulates in
+    ``buffer`` and the completed step's JSON is exposed as ``step_json``.
+    """
+
+    def __init__(
+        self,
+        step_idx: int,
+        *,
+        stream_output: bool = False,
+        stream_instructions: bool = False,
+        stream_partials: bool = False,
+        stream_delta: bool = False,
+    ):
+        self.step_idx = step_idx
+        self.stream_output = stream_output
+        self.stream_instructions = stream_instructions
+        self.stream_partials = stream_partials
+        self.stream_delta = stream_delta
+        self.buffer = ""
+        self.step_json: Optional[str] = None
+        self._sent_instructions = ""
+        self._sent_output_json: Optional[str] = None
+
+    def on_chunk(self, chunk: StreamContent) -> list[StreamContent]:
+        """Process one incoming chunk and return the chunks to emit."""
+        if chunk.type == "restart":
+            self.buffer = ""
+            self._sent_instructions = ""
+            self._sent_output_json = None
+            return [chunk]
+        if chunk.name != "response":
+            # Auxiliary provider streams (e.g. Gemini thoughts).
+            return [chunk] if self.stream_output else []
+        if chunk.type == "partial":
+            return self._on_partial(chunk)
+        if chunk.type == "complete":
+            self.step_json = self.buffer
+        return []
+
+    def step_completed(self, step_output) -> list[StreamContent]:
+        """Per-step closing chunks, once the parsed ``StepOutput`` is known."""
+        events: list[StreamContent] = []
+        if self.stream_instructions and step_output.instructions:
+            events.append(
+                StreamContent(
+                    type="complete",
+                    name="instructions",
+                    value=step_output.instructions,
+                )
+            )
+        if self.stream_partials:
+            events.append(
+                StreamContent(
+                    type="complete",
+                    name=f"step{self.step_idx}",
+                    value=None if self.stream_delta else self.step_json,
+                )
+            )
+        return events
+
+    def _on_partial(self, chunk: StreamContent) -> list[StreamContent]:
+        self.buffer += chunk.value or ""
+        events: list[StreamContent] = []
+        if self.stream_partials:
+            events.append(
+                StreamContent(
+                    type="partial",
+                    name=f"step{self.step_idx}",
+                    value=chunk.value if self.stream_delta else self.buffer,
+                )
+            )
+        if self.stream_instructions or self.stream_output:
+            parsed = safe_parse_json(self.buffer)
+            if isinstance(parsed, dict):
+                events += self._demux_fields(parsed)
+        return events
+
+    def _demux_fields(self, parsed: dict) -> list[StreamContent]:
+        """Route the fields of the partially parsed ``StepOutput`` to streams."""
+        events: list[StreamContent] = []
+
+        instructions = parsed.get("instructions")
+        if (
+            self.stream_instructions
+            and isinstance(instructions, str)
+            and instructions != self._sent_instructions
+        ):
+            if self.stream_delta and instructions.startswith(self._sent_instructions):
+                value = instructions[len(self._sent_instructions) :]
+            else:
+                if self.stream_delta and self._sent_instructions:
+                    # Non-monotonic change: tell the client to start over.
+                    events.append(StreamContent(type="restart", name="instructions"))
+                value = instructions
+            if value:
+                events.append(
+                    StreamContent(type="partial", name="instructions", value=value)
+                )
+            self._sent_instructions = instructions
+
+        # The output field streams under the main stream name as full JSON;
+        # an output produced alongside tool calls is forwarded as-is and may
+        # be superseded by the final complete.
+        output_value = parsed.get("output")
+        if self.stream_output and output_value is not None:
+            out_json = (
+                output_value
+                if isinstance(output_value, str)
+                else json.dumps(output_value)
+            )
+            if out_json != self._sent_output_json:
+                events.append(
+                    StreamContent(type="partial", name="response", value=out_json)
+                )
+                self._sent_output_json = out_json
+        return events
+
+
 class Agent:
     def __init__(
         self,
@@ -80,13 +215,18 @@ class Agent:
                 prompt_template = Template(f.read())
         self.prompt_template = prompt_template
 
-    async def prompt(
+    async def prompt_stream(
         self,
         prompt: str,
         response_model: Optional[Type[BaseModel]] = None,
         max_steps: int = 10,
-    ) -> str | BaseModel:
-        """Run the agent loop, calling tools until it produces a final output.
+        *,
+        stream_output: bool = False,
+        stream_instructions: bool = False,
+        stream_partials: bool = False,
+        stream_delta: bool = False,
+    ) -> AsyncGenerator[StreamContent, None]:
+        """Run the agent loop, streaming progress as :class:`StreamContent`.
 
         The agent iterates up to ``max_steps`` times. On each step the LLM
         returns a ``StepOutput`` with optional ``tool_calls`` and an optional
@@ -96,21 +236,31 @@ class Agent:
         the model returns an ``output`` without requesting further tool calls,
         or when ``max_steps`` is reached.
 
+        The final chunk is always ``complete``/``response`` carrying the final
+        output (JSON for structured outputs, the plain string otherwise, or
+        ``None`` when no output was produced). The flags gate the optional
+        progress streams; their semantics (including the naming and the
+        full-JSON structured output stream) are documented on
+        :class:`kavalai.workflow.models.AgentNode`. Stream names here are
+        unscoped (``response``, ``instructions``, ``step<N>``); the workflow
+        engine prefixes them with the node name.
+
         Args:
             prompt: The task description for the agent.
             response_model: Optional Pydantic model describing the structured
-                final output. When omitted, a plain string is returned.
+                final output. When omitted, a plain string is produced.
             max_steps: Maximum number of reasoning/tool-calling iterations.
-
-        Returns:
-            The structured ``response_model`` instance, or a string when no
-            ``response_model`` is provided. ``None`` if no output was produced.
+            stream_output: Stream the step's ``output`` field as it is written.
+            stream_instructions: Stream each step's ``instructions`` field.
+            stream_partials: Stream each step's raw model output.
+            stream_delta: Emit deltas instead of full accumulated values on the
+                ``instructions`` and ``step<N>`` streams.
         """
         StepOutput = get_step_output_type(response_model or str)
 
         # Per-invocation working memory: tool call results keyed by call_id,
         # referenced via `planner_context_args`. Created fresh for each
-        # `prompt()` call (up to `max_steps`) and discarded afterwards, unlike
+        # invocation (up to `max_steps`) and discarded afterwards, unlike
         # `self.run_context` which is passed in at construction.
         planner_context: dict[str, Any] = {}
         # Record of executed steps, rendered back into the prompt template.
@@ -143,13 +293,32 @@ class Agent:
             )
 
             logger.info(f"Agent step {step_idx}/{max_steps}")
-            step_output = await self.llm_client.chat_completions(
-                chat_history=chat_history, response_model=StepOutput
+            # Always consume the step in raw-delta mode: the demuxer needs the
+            # full raw text to safe-parse, and its buffer doubles as the value
+            # to validate on completion.
+            streamer = await self.llm_client.stream_chat_completions(
+                chat_history=chat_history,
+                response_model=StepOutput,
+                stream_delta=True,
             )
+            demux = StepStreamDemuxer(
+                step_idx,
+                stream_output=stream_output,
+                stream_instructions=stream_instructions,
+                stream_partials=stream_partials,
+                stream_delta=stream_delta,
+            )
+            async for chunk in streamer:
+                for event in demux.on_chunk(chunk):
+                    yield event
 
-            if step_output is None:
+            if demux.step_json is None or not demux.step_json.strip():
                 logger.warning("LLM returned no step output, stopping.")
                 break
+            step_output = StepOutput.model_validate(safe_parse_json(demux.step_json))
+
+            for event in demux.step_completed(step_output):
+                yield event
 
             # Ensure every tool call has a stable id for context lookups.
             for idx, tool_call in enumerate(step_output.tool_calls):
@@ -191,7 +360,47 @@ class Agent:
                 if not step_output.tool_calls:
                     break
 
-        return final_output
+        value = None
+        if final_output is not None:
+            value = (
+                final_output
+                if isinstance(final_output, str)
+                else final_output.model_dump_json()
+            )
+        yield StreamContent(type="complete", name="response", value=value)
+
+    async def prompt(
+        self,
+        prompt: str,
+        response_model: Optional[Type[BaseModel]] = None,
+        max_steps: int = 10,
+    ) -> str | BaseModel:
+        """Run the agent loop and return the final output (blocking wrapper).
+
+        Drains :meth:`prompt_stream` with all progress streams disabled.
+
+        Args:
+            prompt: The task description for the agent.
+            response_model: Optional Pydantic model describing the structured
+                final output. When omitted, a plain string is returned.
+            max_steps: Maximum number of reasoning/tool-calling iterations.
+
+        Returns:
+            The structured ``response_model`` instance, or a string when no
+            ``response_model`` is provided. ``None`` if no output was produced.
+        """
+        final_value = None
+        async for chunk in self.prompt_stream(
+            prompt, response_model=response_model, max_steps=max_steps
+        ):
+            if chunk.type == "complete" and chunk.name == "response":
+                final_value = chunk.value
+
+        if final_value is None:
+            return None
+        if response_model:
+            return response_model.model_validate_json(final_value)
+        return final_value
 
     def _resolve_args(
         self, tool_call: ToolCall, planner_context: dict[str, Any]

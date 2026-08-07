@@ -221,8 +221,14 @@ def test_data_model_validates_input_at_runtime():
         def __init__(self, *a, **k):
             super().__init__()
 
-        async def chat_completions(self, *, chat_history, response_model=None):
-            return response_model(agent_response="ok")
+        async def _run_chat_completions(self, chat_history, response_model, streamer):
+            value_streamer = streamer.get_value_streamer(
+                "response", response_model=response_model
+            )
+            await value_streamer.stream_partial(
+                response_model(agent_response="ok").model_dump_json()
+            )
+            await value_streamer.stream_complete()
 
     engine = (
         WorkflowBuilder("e", llm_model="openai/fake")

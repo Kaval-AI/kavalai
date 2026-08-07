@@ -171,6 +171,20 @@ class LLMNode(BaseNode):
     Resolves ``inputs`` from context, renders ``prompt`` and calls the LLM,
     storing the structured result in the ``output`` context variable, then
     transitions to ``next``.
+
+    Streaming (see :class:`WorkflowStreamEvent` for the event contract):
+
+    ``stream_output``
+        Stream the completion as ``partial`` events named after this node
+        while it is generated; auxiliary provider streams (e.g. Gemini
+        thoughts) are streamed as ``<node>_<stream>`` (``<node>_thought``).
+    ``stream_delta``
+        When True, each ``partial`` carries only the newly generated text and
+        the client reassembles the value. When False (default), each
+        ``partial`` carries the full accumulated, safe-parsed value so far —
+        render-ready with no client-side assembly, at the cost of re-sending
+        the whole buffer on every chunk (O(n^2) wire traffic over the stream;
+        prefer ``stream_delta: true`` for long outputs).
     """
 
     type: Literal["llm"] = "llm"
@@ -182,6 +196,7 @@ class LLMNode(BaseNode):
     llm_model: Optional[str] = None
     llm_kwargs: dict[str, Any] = Field(default_factory=dict)
     stream_output: bool = False
+    stream_delta: bool = False
 
 
 class AgentNode(BaseNode):
@@ -189,6 +204,26 @@ class AgentNode(BaseNode):
 
     Runs the v2 :class:`~kavalai.agent.Agent` loop (tool calling) up
     to ``max_steps`` and stores the final result in ``output``.
+
+    Streaming (see :class:`WorkflowStreamEvent` for the event contract):
+
+    ``stream_output``
+        Stream the step's ``output`` field as ``partial`` events named after
+        this node while the model writes it. The streamed value is always the
+        full safe-parsed JSON of the output so far (partial objects are not
+        delta-able); the final ``complete`` event is authoritative — a
+        provisional output produced alongside tool calls may be superseded.
+    ``stream_instructions``
+        Stream each step's ``instructions`` as ``<node>_instructions``
+        partials, completed once per step — an "ideating…" status line the UI
+        replaces each step.
+    ``stream_partials``
+        Stream each step's raw model output as ``<node>_step<N>`` — a debug
+        firehose including tool-call JSON.
+    ``stream_delta``
+        As on :class:`LLMNode` (including the O(n^2) full-buffer trade-off);
+        applies to the ``_instructions`` and ``_step<N>`` streams, not to the
+        structured output stream.
     """
 
     type: Literal["agent"] = "agent"
@@ -200,6 +235,10 @@ class AgentNode(BaseNode):
     max_steps: int = 10
     llm_model: Optional[str] = None
     llm_kwargs: dict[str, Any] = Field(default_factory=dict)
+    stream_output: bool = False
+    stream_delta: bool = False
+    stream_instructions: bool = False
+    stream_partials: bool = False
 
 
 class FunctionNode(BaseNode):
@@ -259,6 +298,48 @@ Node = Annotated[
     ],
     Field(discriminator="type"),
 ]
+
+
+class WorkflowStreamEvent(BaseModel):
+    """One event in a streamed workflow run (the SSE payload of
+    ``POST /stream_agent``, yielded by ``WorkflowEngine.run_stream``).
+
+    Event types and their ``name``:
+
+    - ``workflow_started`` / ``workflow_completed`` / ``workflow_failed``:
+      run lifecycle; ``name`` is the workflow name. ``workflow_started``
+      carries ``session_id``/``run_id``; ``workflow_completed`` carries
+      ``output_data`` and ``token_usage``; ``workflow_failed`` carries the
+      error message in ``value``.
+    - ``node_started`` / ``node_completed``: node lifecycle; ``name`` is the
+      node name.
+    - ``partial`` / ``complete``: streamed content. The node's own output
+      streams under the node name; auxiliary streams are prefixed with it
+      (``<node>_thought``, ``<node>_instructions``, ``<node>_step<N>``).
+      Whether ``value`` is a delta or the full accumulated content depends on
+      the node's ``stream_delta`` setting.
+    - ``restart``: the named stream is starting over (an LLM call was retried
+      after a transient error; ``value`` describes the attempt). Clients must
+      discard content accumulated for streams under this name — it will be
+      re-sent.
+    """
+
+    type: Literal[
+        "partial",
+        "complete",
+        "restart",
+        "node_started",
+        "node_completed",
+        "workflow_started",
+        "workflow_completed",
+        "workflow_failed",
+    ]
+    name: str
+    value: Optional[str] = None
+    session_id: Optional[str] = None
+    run_id: Optional[str] = None
+    output_data: Optional[dict] = None
+    token_usage: Optional[dict] = None
 
 
 class WorkflowGraph(BaseModel):

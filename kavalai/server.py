@@ -16,9 +16,10 @@ limitations under the License.
 """
 
 from loguru import logger
+import asyncio
 import secrets
 from contextlib import asynccontextmanager
-from typing import Annotated, Callable
+from typing import Annotated, AsyncGenerator, AsyncIterable, Callable
 from typing import Optional, Union
 from uuid import UUID
 
@@ -26,6 +27,7 @@ import uvicorn
 from environs import Env
 from fastapi import Depends
 from fastapi import HTTPException, status, FastAPI, Response, APIRouter
+from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 from sqlalchemy import text
@@ -34,7 +36,11 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from kavalai.agent_service import AgentService
 from kavalai.db import db_manager
 from kavalai.workflow import WorkflowEngine
+from kavalai.workflow.models import WorkflowException, WorkflowStreamEvent
 from kavalai.workflow.tasklog.postgres import PostgresTaskLogger
+
+
+SSE_PING_INTERVAL_SECONDS = 15.0
 
 
 security = HTTPBasic(auto_error=False)
@@ -133,6 +139,64 @@ async def handle_agent_run(
     return state.session_id, state.output_data
 
 
+def format_sse_event(event: WorkflowStreamEvent) -> str:
+    """Render one WorkflowStreamEvent as an SSE frame."""
+    return f"event: {event.type}\ndata: {event.model_dump_json(exclude_none=True)}\n\n"
+
+
+async def stream_sse_events(
+    events: AsyncIterable[WorkflowStreamEvent],
+    ping_interval: float = SSE_PING_INTERVAL_SECONDS,
+) -> AsyncGenerator[str, None]:
+    """Format a workflow event stream as SSE frames with keepalive pings.
+
+    A ``: ping`` comment frame is emitted whenever no event arrives within
+    ``ping_interval`` seconds (silent stretches such as long tool calls), so
+    proxies don't drop the connection. A ``WorkflowException`` from the engine
+    ends the stream quietly — the engine has already emitted the
+    ``workflow_failed`` event, and an SSE response cannot change its status
+    code after the headers are sent.
+
+    The event stream is consumed by a single pump task (an async generator's
+    frames must run in one task — the engine binds task-scoped log context),
+    while this generator races the queue against the ping timer. Closing this
+    generator cancels the pump, which aborts the workflow run.
+    """
+    queue: asyncio.Queue = asyncio.Queue()
+    _END = ("end", None)
+
+    async def pump():
+        try:
+            async for event in events:
+                await queue.put(("event", event))
+        except WorkflowException as e:
+            logger.error(f"Workflow failed during streaming: {e}")
+        except Exception:
+            logger.exception("Unexpected error while streaming workflow events")
+        finally:
+            queue.put_nowait(_END)
+
+    pump_task = asyncio.create_task(pump())
+    try:
+        while True:
+            try:
+                kind, event = await asyncio.wait_for(queue.get(), timeout=ping_interval)
+            except asyncio.TimeoutError:
+                yield ": ping\n\n"
+                continue
+            if kind == "end":
+                return
+            yield format_sse_event(event)
+    finally:
+        # On early consumer exit (client disconnect), cancel the pump so the
+        # engine generator aborts and records the run.
+        pump_task.cancel()
+        try:
+            await pump_task
+        except BaseException:  # noqa: BLE001 - teardown is best-effort
+            pass
+
+
 def create_default_auth_dependency() -> Callable:
     """Create the default HTTP Basic Auth dependency using environment variables.
 
@@ -218,6 +282,29 @@ def create_agent_router(
             external_id=input_data.external_id,
         )
         return OutputType(session_id=session_id, data=data)
+
+    @router.post("/stream_agent")
+    async def stream_agent(
+        input_data: InputType,
+        _auth: Annotated[None, Depends(auth_dependency)],
+    ) -> StreamingResponse:
+        """Execute the agent workflow, streaming progress as SSE.
+
+        Each frame is a ``WorkflowStreamEvent`` JSON payload under
+        ``event: <type>``; see that model for the event contract. Browsers
+        must consume this with ``fetch()`` streaming — ``EventSource`` cannot
+        send a POST body or auth headers. Disconnecting aborts the run.
+        """
+        events = engine.run_stream(
+            input_data=input_data.data.model_dump(),
+            session_id=str(input_data.session_id) if input_data.session_id else None,
+            external_id=input_data.external_id,
+        )
+        return StreamingResponse(
+            stream_sse_events(events),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     @router.get("/workflow")
     async def get_workflow(

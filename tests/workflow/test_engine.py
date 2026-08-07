@@ -51,7 +51,8 @@ def _build(model, value_map):
 
 
 class FakeLLMClient(BaseLlmClient):
-    """Deterministic client that fills response models from a value map and
+    """Deterministic streaming client: fills response models from a value map,
+    streams the JSON in two chunks through the real Streamer machinery, and
     emits one ModelCallStat per call (so the StatsBridge path is exercised)."""
 
     def __init__(self, model, parameters=None, stats_receiver=None, value_map=None):
@@ -59,7 +60,7 @@ class FakeLLMClient(BaseLlmClient):
         self.value_map = value_map or {}
         self.calls = []
 
-    async def chat_completions(self, *, chat_history, response_model=None):
+    async def _run_chat_completions(self, chat_history, response_model, streamer):
         self.calls.append(chat_history)
         if self.model_stats_receiver is not None:
             self.model_stats_receiver.receive_model_stats(
@@ -70,9 +71,15 @@ class FakeLLMClient(BaseLlmClient):
                     duration_seconds=0.0,
                 )
             )
-        if response_model is None:
-            return None
-        return _build(response_model, self.value_map)
+        value_streamer = streamer.get_value_streamer(
+            "response", response_model=response_model
+        )
+        if response_model is not None:
+            text = _build(response_model, self.value_map).model_dump_json()
+            mid = max(1, len(text) // 2)
+            await value_streamer.stream_partial(text[:mid])
+            await value_streamer.stream_partial(text[mid:])
+        await value_streamer.stream_complete()
 
 
 def make_factory(value_map=None, raises=False):
@@ -96,7 +103,7 @@ class _RaisingClient(BaseLlmClient):
     def __init__(self, model, parameters=None, stats_receiver=None):
         super().__init__(parameters, stats_receiver)
 
-    async def chat_completions(self, *, chat_history, response_model=None):
+    async def _run_chat_completions(self, chat_history, response_model, streamer):
         raise RuntimeError("llm boom")
 
 
@@ -735,3 +742,221 @@ async def test_engine_data_models_override_parsed_types():
 
     state = await engine.run({"user_message": "hello"})
     assert state.output_data == {"agent_response": "hi"}
+
+
+# ---------------------------------------------------------------------- streaming
+STREAM_NODES = [
+    {"name": "s", "type": "start", "next": "answer"},
+    {
+        "name": "answer",
+        "type": "llm",
+        "prompt": "p",
+        "inputs": {"input": {"type": "context", "value": "input"}},
+        "output": "output",
+        "next": "e",
+        "stream_output": True,
+    },
+    {"name": "e", "type": "end", "output": "output"},
+]
+
+
+async def collect_stream(engine, input_data):
+    events = []
+    async for event in engine.run_stream(input_data):
+        events.append(event)
+    return events
+
+
+async def test_run_stream_llm_event_sequence():
+    service = make_agent_service()
+    engine = WorkflowEngine.from_dict(
+        graph_dict(STREAM_NODES),
+        agent_service=service,
+        client_factory=make_factory({"agent_response": "hi there"}),
+    )
+    events = await collect_stream(engine, {"user_message": "hello"})
+
+    types = [(e.type, e.name) for e in events]
+    assert types == [
+        ("workflow_started", "wf"),
+        ("node_started", "s"),
+        ("node_completed", "s"),
+        ("node_started", "answer"),
+        ("partial", "answer"),
+        ("partial", "answer"),
+        ("complete", "answer"),
+        ("node_completed", "answer"),
+        ("node_started", "e"),
+        ("node_completed", "e"),
+        ("workflow_completed", "wf"),
+    ]
+    # Lifecycle payloads.
+    started = events[0]
+    assert started.session_id and started.run_id
+    completed = events[-1]
+    assert completed.output_data == {"agent_response": "hi there"}
+    assert completed.token_usage["model_calls"] == 1
+    assert completed.session_id == started.session_id
+    # Full-buffer mode: the complete event carries the full JSON.
+    assert events[6].value == '{"agent_response": "hi there"}'
+
+
+async def test_run_stream_without_stream_output_has_no_content_events():
+    nodes = [dict(n) for n in STREAM_NODES]
+    nodes[1] = {**nodes[1], "stream_output": False}
+    engine = WorkflowEngine.from_dict(
+        graph_dict(nodes), client_factory=make_factory({"agent_response": "r"})
+    )
+    events = await collect_stream(engine, {"user_message": "x"})
+    assert all(e.type not in ("partial", "complete") for e in events)
+    assert events[-1].type == "workflow_completed"
+    assert events[-1].output_data == {"agent_response": "r"}
+
+
+async def test_run_stream_delta_mode_emits_deltas():
+    nodes = [dict(n) for n in STREAM_NODES]
+    nodes[1] = {**nodes[1], "stream_delta": True}
+    engine = WorkflowEngine.from_dict(
+        graph_dict(nodes), client_factory=make_factory({"agent_response": "hi"})
+    )
+    events = await collect_stream(engine, {"user_message": "x"})
+    partials = [e for e in events if e.type == "partial"]
+    # Deltas reassemble to the full JSON; the complete chunk carries no value.
+    assert "".join(p.value for p in partials) == '{"agent_response":"hi"}'
+    completes = [e for e in events if e.type == "complete"]
+    assert completes[0].value is None
+    # The engine still parsed the output from its own delta buffer.
+    assert events[-1].output_data == {"agent_response": "hi"}
+
+
+class _RestartingClient(BaseLlmClient):
+    """Streams garbage, signals a restart (as a retry would), then re-streams."""
+
+    def __init__(self, model=None, parameters=None, stats_receiver=None):
+        super().__init__(parameters, stats_receiver)
+
+    async def _run_chat_completions(self, chat_history, response_model, streamer):
+        vs = streamer.get_value_streamer("response", response_model=response_model)
+        await vs.stream_partial('{"agent_response": "jun')
+        streamer.reset_active()
+        await streamer.stream_restart("attempt 1: transient")
+        vs2 = streamer.get_value_streamer("response", response_model=response_model)
+        await vs2.stream_partial('{"agent_response": "ok"}')
+        await vs2.stream_complete()
+
+
+async def test_run_stream_restart_resets_delta_buffer():
+    nodes = [dict(n) for n in STREAM_NODES]
+    nodes[1] = {**nodes[1], "stream_delta": True}
+    engine = WorkflowEngine.from_dict(
+        graph_dict(nodes), client_factory=lambda *a, **k: _RestartingClient()
+    )
+    events = await collect_stream(engine, {"user_message": "x"})
+    restarts = [e for e in events if e.type == "restart"]
+    assert [e.name for e in restarts] == ["answer"]
+    assert "attempt 1" in restarts[0].value
+    # The pre-restart garbage was discarded; only the re-sent value survives.
+    assert events[-1].output_data == {"agent_response": "ok"}
+
+
+async def test_run_stream_failure_yields_workflow_failed_then_raises():
+    engine = WorkflowEngine.from_dict(
+        graph_dict(STREAM_NODES), client_factory=make_factory(raises=True)
+    )
+    events = []
+    with pytest.raises(WorkflowException, match="llm boom"):
+        async for event in engine.run_stream({"user_message": "x"}):
+            events.append(event)
+    assert events[-1].type == "workflow_failed"
+    assert "llm boom" in events[-1].value
+
+
+async def test_run_stream_agent_node_streams_instructions_and_output():
+    nodes = [
+        {"name": "s", "type": "start", "next": "do"},
+        {
+            "name": "do",
+            "type": "agent",
+            "prompt": "do the thing",
+            "output": "output",
+            "max_steps": 3,
+            "next": "e",
+            "stream_output": True,
+            "stream_instructions": True,
+        },
+        {"name": "e", "type": "end", "output": "output"},
+    ]
+    engine = WorkflowEngine.from_dict(
+        graph_dict(nodes),
+        client_factory=make_factory({"agent_response": "agent did it"}),
+    )
+    events = await collect_stream(engine, {"user_message": "x"})
+
+    # Instructions stream under <node>_instructions and complete per step.
+    instr = [e for e in events if e.name == "do_instructions"]
+    assert instr and instr[-1].type == "complete"
+    assert instr[-1].value == "done"
+    # The output field streams under the node name; complete is authoritative.
+    out = [e for e in events if e.name == "do" and e.type in ("partial", "complete")]
+    assert any(e.type == "partial" for e in out)
+    assert out[-1].type == "complete"
+    assert events[-1].output_data == {"agent_response": "agent did it"}
+
+
+async def test_run_stream_abort_records_failure():
+    service = make_agent_service()
+    engine = WorkflowEngine.from_dict(
+        graph_dict(STREAM_NODES),
+        agent_service=service,
+        client_factory=make_factory({"agent_response": "r"}),
+    )
+    stream = engine.run_stream({"user_message": "x"})
+    started = await stream.__anext__()
+    assert started.type == "workflow_started"
+    # Simulate the SSE client disconnecting mid-run.
+    await stream.aclose()
+
+    async with service.session_maker() as db:
+        run = (await db.execute(select(Run))).scalars().one()
+    assert run.context["status"] == "failed"
+    assert "aborted" in run.context["error"]
+
+
+def test_parse_streamed_output_edge_cases():
+    assert WorkflowEngine._parse_streamed_output(None, None, raw_text=False) is None
+    assert WorkflowEngine._parse_streamed_output(None, "raw", raw_text=False) == "raw"
+
+    class Out(BaseModel):
+        agent_response: str
+
+    parsed = WorkflowEngine._parse_streamed_output(
+        Out, '{"agent_response": "x"}', raw_text=True
+    )
+    assert parsed.agent_response == "x"
+
+
+async def test_run_stream_abort_survives_recording_failure(monkeypatch):
+    """A failing abort-recording is logged, not raised, during teardown."""
+    engine = WorkflowEngine.from_dict(
+        graph_dict(STREAM_NODES),
+        agent_service=make_agent_service(),
+        client_factory=make_factory({"agent_response": "r"}),
+    )
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(engine, "_record_failure", boom)
+    stream = engine.run_stream({"user_message": "x"})
+    assert (await stream.__anext__()).type == "workflow_started"
+    await stream.aclose()  # must not raise
+
+
+async def test_run_matches_run_stream_result():
+    engine = WorkflowEngine.from_dict(
+        graph_dict(STREAM_NODES), client_factory=make_factory({"agent_response": "r"})
+    )
+    state = await engine.run({"user_message": "x"})
+    assert state.status == "completed"
+    assert state.output_data == {"agent_response": "r"}
+    assert state.trace == ["s", "answer", "e"]

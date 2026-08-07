@@ -167,7 +167,10 @@ class Streamer:
         self._active_streamer_names.append(name)
 
         def on_complete():
-            self._active_streamer_names.remove(name)
+            # ``reset_active()`` may have dropped the name already (a retried
+            # attempt re-registers its value streamers), so discard-if-present.
+            if name in self._active_streamer_names:
+                self._active_streamer_names.remove(name)
 
         return ValueStreamer(
             name,
@@ -197,6 +200,28 @@ class Streamer:
         await self._queue.put(
             StreamContent(
                 type="error", name="error", value=str(error)
+            ).model_dump_json()
+        )
+
+    def reset_active(self) -> None:
+        """Forget all active value streamers.
+
+        Called between retry attempts: the failed attempt's value streamers
+        never complete, and without a reset their names would keep the
+        completion accounting from ever reaching zero.
+        """
+        self._active_streamer_names.clear()
+
+    async def stream_restart(self, value: Optional[str] = None):
+        """Push a 'restart' chunk to the queue.
+
+        Signals that the in-flight completion is starting over (e.g. a retry
+        after a transient error): consumers should discard any partial content
+        accumulated so far; it will be re-sent.
+        """
+        await self._queue.put(
+            StreamContent(
+                type="restart", name="response", value=value
             ).model_dump_json()
         )
 

@@ -32,11 +32,16 @@ class _FakeClient(BaseLlmClient):
     def __init__(self, *a, **k):
         super().__init__()
 
-    async def chat_completions(self, *, chat_history, response_model=None):
-        return response_model(
+    async def _run_chat_completions(self, chat_history, response_model, streamer):
+        value_streamer = streamer.get_value_streamer(
+            "response", response_model=response_model
+        )
+        reply = response_model(
             agent_response="Hi! How can I help?",
             choices=["Tell me a joke", "What can you do?", "Goodbye"],
         )
+        await value_streamer.stream_partial(reply.model_dump_json())
+        await value_streamer.stream_complete()
 
 
 @pytest.fixture
@@ -96,11 +101,9 @@ async def test_chatbot_remembers_earlier_turns(workflow):
     seen = []
 
     class _Recorder(_FakeClient):
-        async def chat_completions(self, *, chat_history, response_model=None):
+        async def _run_chat_completions(self, chat_history, response_model, streamer):
             seen.append([m.content for m in chat_history.messages])
-            return await super().chat_completions(
-                chat_history=chat_history, response_model=response_model
-            )
+            await super()._run_chat_completions(chat_history, response_model, streamer)
 
     workflow.client_factory = lambda *a, **k: _Recorder()
     await workflow.run({"message": "my name is Tim"}, external_id="s")

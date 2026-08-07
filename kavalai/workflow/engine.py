@@ -14,10 +14,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
+import asyncio
 import importlib
 import os
 import time
-from typing import Any, Callable, Optional
+from typing import Any, AsyncGenerator, Callable, Optional, Type
 from uuid import UUID, uuid4
 
 import yaml
@@ -40,12 +41,15 @@ from kavalai.workflow.models import (
     SwitchNode,
     WorkflowException,
     WorkflowGraph,
+    WorkflowStreamEvent,
 )
 from kavalai.agent_service import AgentService
 from kavalai.workflow.state import WorkflowState
 from kavalai.workflow.tasklog.base import TaskLogger, TokenAccumulator
 from kavalai.functionkernel import FunctionKernel, pythontool
 from kavalai.llm_clients.base_client import BaseLlmClient, ChatHistory, ChatMessage
+from kavalai.llm_clients.common import safe_parse_json
+from kavalai.llm_clients.streamer import StreamContent
 
 ClientFactory = Callable[..., BaseLlmClient]
 
@@ -190,7 +194,37 @@ class WorkflowEngine:
         return self.client_factory(model, parameters, self._token_stats)
 
     # --------------------------------------------------------------------- nodes
-    async def _run_llm_node(self, node: LLMNode, run_context: RunContext) -> None:
+    def _scoped_event(self, node: Node, chunk: StreamContent) -> WorkflowStreamEvent:
+        """Rename a client stream chunk to node scope.
+
+        The main ``response`` stream takes the node's name; any other stream
+        (e.g. Gemini ``thought``, agent ``instructions``/``step<N>``) is
+        prefixed with it.
+        """
+        name = node.name if chunk.name == "response" else f"{node.name}_{chunk.name}"
+        return WorkflowStreamEvent(type=chunk.type, name=name, value=chunk.value)
+
+    @staticmethod
+    def _parse_streamed_output(
+        output_type: Optional[Type[BaseModel]], raw: Optional[str], *, raw_text: bool
+    ):
+        """Parse a completed stream's value into the node's output type.
+
+        ``raw_text`` marks a delta-mode buffer of raw model text (safe-parsed
+        before validation); otherwise ``raw`` is the streamer's already
+        safe-parsed complete value.
+        """
+        if raw is None:
+            return None
+        if not output_type:
+            return raw
+        if raw_text:
+            return output_type.model_validate(safe_parse_json(raw))
+        return output_type.model_validate_json(raw)
+
+    async def _run_llm_node(
+        self, node: LLMNode, run_context: RunContext
+    ) -> AsyncGenerator[WorkflowStreamEvent, None]:
         input_data = await run_context.prepare_tool_inputs(node)
         rendered_prompt = await run_context.render_prompt(node.prompt)
         text = make_prompt(rendered_prompt, input_data)
@@ -203,14 +237,37 @@ class WorkflowEngine:
 
         agent_id = str(run_context.agent_id) if run_context.agent_id else None
         client = self._make_llm_client(node.llm_model, node.llm_kwargs, agent_id)
+        output_type = self.get_data_type(node.output)
 
         start = time.perf_counter()
-        response = await client.chat_completions(
+        streamer = await client.stream_chat_completions(
             chat_history=ChatHistory(messages=messages),
-            response_model=self.get_data_type(node.output),
+            response_model=output_type,
+            stream_delta=node.stream_delta,
         )
+        # Reviewer: It would be better if demuxing and buffer accumulations happened
+        # in a dedicated class/module.
+        # In delta mode the complete chunk carries no value, so accumulate the
+        # raw deltas ourselves to parse the output from.
+        buffer = ""
+        response_value: Optional[str] = None
+        async for chunk in streamer:
+            if chunk.type == "restart":
+                buffer = ""
+                yield self._scoped_event(node, chunk)
+                continue
+            if chunk.name == "response":
+                if chunk.type == "partial" and node.stream_delta:
+                    buffer += chunk.value or ""
+                elif chunk.type == "complete":
+                    response_value = buffer if node.stream_delta else chunk.value
+            if node.stream_output:
+                yield self._scoped_event(node, chunk)
         duration = time.perf_counter() - start
 
+        response = self._parse_streamed_output(
+            output_type, response_value, raw_text=node.stream_delta
+        )
         run_context.data[node.output] = response
         self._log_node(
             run_context,
@@ -221,21 +278,37 @@ class WorkflowEngine:
             duration=duration,
         )
 
-    async def _run_agent_node(self, node: AgentNode, run_context: RunContext) -> None:
+    async def _run_agent_node(
+        self, node: AgentNode, run_context: RunContext
+    ) -> AsyncGenerator[WorkflowStreamEvent, None]:
         input_data = await run_context.prepare_tool_inputs(node)
         rendered_prompt = await run_context.render_prompt(node.prompt)
         agent_id = str(run_context.agent_id) if run_context.agent_id else None
         client = self._make_llm_client(node.llm_model, node.llm_kwargs, agent_id)
+        output_type = self.get_data_type(node.output)
 
         agent = Agent(llm_client=client, kernel=self.kernel, run_context=run_context)
         start = time.perf_counter()
-        result = await agent.prompt(
+        result_value: Optional[str] = None
+        async for chunk in agent.prompt_stream(
             prompt=rendered_prompt,
-            response_model=self.get_data_type(node.output),
+            response_model=output_type,
             max_steps=node.max_steps,
-        )
+            stream_output=node.stream_output,
+            stream_instructions=node.stream_instructions,
+            stream_partials=node.stream_partials,
+            stream_delta=node.stream_delta,
+        ):
+            if chunk.name == "response" and chunk.type == "complete":
+                result_value = chunk.value
+                if node.stream_output:
+                    yield self._scoped_event(node, chunk)
+            else:
+                # The agent already gates its progress streams by the flags.
+                yield self._scoped_event(node, chunk)
         duration = time.perf_counter() - start
 
+        result = self._parse_streamed_output(output_type, result_value, raw_text=False)
         run_context.data[node.output] = result
         self._log_node(
             run_context,
@@ -313,12 +386,16 @@ class WorkflowEngine:
             return node.cases.get(value, node.default)
         return node.next
 
-    async def _execute_node(self, node: Node, run_context: RunContext) -> None:
+    async def _execute_node(
+        self, node: Node, run_context: RunContext
+    ) -> AsyncGenerator[WorkflowStreamEvent, None]:
         """Run a side-effecting node (branch nodes are pure routing)."""
         if isinstance(node, LLMNode):
-            await self._run_llm_node(node, run_context)
+            async for event in self._run_llm_node(node, run_context):
+                yield event
         elif isinstance(node, AgentNode):
-            await self._run_agent_node(node, run_context)
+            async for event in self._run_agent_node(node, run_context):
+                yield event
         elif isinstance(node, FunctionNode):
             await self._run_function_node(node, run_context)
         # start / if / switch / end nodes have no side effects here.
@@ -331,7 +408,45 @@ class WorkflowEngine:
         session_id: Optional[str] = None,
         external_id: Optional[str] = None,
     ) -> WorkflowState:
-        """Execute the workflow for ``input_data`` and return the final state."""
+        """Execute the workflow for ``input_data`` and return the final state.
+
+        Drains :meth:`run_stream` — the single execution path.
+        """
+        state = WorkflowState(workflow_name=self.graph.name)
+        async for _ in self.run_stream(
+            input_data, session_id=session_id, external_id=external_id, state=state
+        ):
+            pass
+        return state
+
+    async def run_stream(
+        self,
+        input_data: dict,
+        *,
+        session_id: Optional[str] = None,
+        external_id: Optional[str] = None,
+        state: Optional[WorkflowState] = None,
+    ) -> AsyncGenerator[WorkflowStreamEvent, None]:
+        """Execute the workflow, yielding :class:`WorkflowStreamEvent`s.
+
+        Lifecycle events (``workflow_started``, ``node_started`` /
+        ``node_completed``, ``workflow_completed`` / ``workflow_failed``)
+        frame the run; nodes with streaming enabled contribute ``partial`` /
+        ``complete`` / ``restart`` content events in between.
+
+        Closing the generator early (e.g. the SSE client disconnected) aborts
+        the run; the abort is recorded on the run row, best-effort. On failure
+        a ``workflow_failed`` event is yielded before the
+        :class:`WorkflowException` is raised to the caller.
+
+        Args:
+            input_data: The workflow input.
+            session_id: Optional session to continue.
+            external_id: Optional caller-supplied session key.
+            state: Optional :class:`WorkflowState` instance populated in
+                place, so blocking callers can read the final state after
+                draining the stream.
+        """
         invocation_id = uuid4().hex[:8]
         # Fresh token aggregator so totals never leak between runs.
         self._token_stats = TokenAccumulator(self.task_logger)
@@ -341,12 +456,11 @@ class WorkflowEngine:
         run_context.data["input"] = parsed_input
         run_context.templates = {t.name: t.value for t in self.graph.templates}
 
-        state = WorkflowState(
-            workflow_name=self.graph.name,
-            status="running",
-            input_data=to_plain(input_data),
-            invocation_id=invocation_id,
-        )
+        if state is None:
+            state = WorkflowState(workflow_name=self.graph.name)
+        state.status = "running"
+        state.input_data = to_plain(input_data)
+        state.invocation_id = invocation_id
 
         # Bind the invocation id onto every log record emitted during the run —
         # the engine, the agent loop and the LLM clients — so an entire
@@ -384,13 +498,56 @@ class WorkflowEngine:
                 )
 
             try:
-                await self._walk(run_context, state)
-            except WorkflowException:
+                yield WorkflowStreamEvent(
+                    type="workflow_started",
+                    name=self.graph.name,
+                    session_id=state.session_id,
+                    run_id=state.run_id,
+                )
+                async for event in self._walk(run_context, state):
+                    yield event
+                state.token_usage = self._token_stats.summary()
+                yield WorkflowStreamEvent(
+                    type="workflow_completed",
+                    name=self.graph.name,
+                    session_id=state.session_id,
+                    output_data=state.output_data,
+                    token_usage=state.token_usage,
+                )
+            except (GeneratorExit, asyncio.CancelledError):
+                # The consumer went away (client disconnect / task cancel):
+                # abort the run and record it — no events may be yielded here,
+                # and the recording is best-effort during teardown.
+                state.status = "failed"
+                state.error = "aborted: client disconnected"
+                try:
+                    await self._record_failure(run_context, state)
+                except BaseException:
+                    logger.warning(
+                        f"[{invocation_id}] Could not record aborted run "
+                        f"{run_context.run_id}"
+                    )
+                raise
+            except WorkflowException as e:
+                state.status = "failed"
+                state.error = str(e)
+                yield WorkflowStreamEvent(
+                    type="workflow_failed",
+                    name=self.graph.name,
+                    session_id=state.session_id,
+                    value=state.error,
+                )
                 raise
             except Exception as e:
                 state.status = "failed"
                 state.error = str(e)
                 await self._record_failure(run_context, state)
+                yield WorkflowStreamEvent(
+                    type="workflow_failed",
+                    name=self.graph.name,
+                    session_id=state.session_id,
+                    value=state.error,
+                )
                 raise WorkflowException(e) from e
             finally:
                 await self.kernel.close()
@@ -399,8 +556,6 @@ class WorkflowEngine:
                 if self.task_logger:
                     await self.task_logger.flush()
                 self._log_token_usage(invocation_id)
-
-        return state
 
     def _log_token_usage(self, invocation_id: str) -> None:
         """Log the aggregate model token usage for the run."""
@@ -411,7 +566,9 @@ class WorkflowEngine:
             f"(prompt={s.prompt_tokens}, completion={s.completion_tokens})"
         )
 
-    async def _walk(self, run_context: RunContext, state: WorkflowState) -> None:
+    async def _walk(
+        self, run_context: RunContext, state: WorkflowState
+    ) -> AsyncGenerator[WorkflowStreamEvent, None]:
         current: Optional[str] = self.graph.start
         visits = 0
 
@@ -425,9 +582,12 @@ class WorkflowEngine:
                 )
 
             state.current_node = node.name
-            await self._execute_node(node, run_context)
+            yield WorkflowStreamEvent(type="node_started", name=node.name)
+            async for event in self._execute_node(node, run_context):
+                yield event
             state.trace.append(node.name)
             state.data = to_plain(run_context.data)
+            yield WorkflowStreamEvent(type="node_completed", name=node.name)
 
             if isinstance(node, EndNode):
                 await self._finish(node, run_context, state)
