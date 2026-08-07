@@ -62,7 +62,7 @@ def test_discriminated_node_parsing():
 
 
 def test_missing_start_node():
-    with pytest.raises(ValidationError, match="at least one 'start'"):
+    with pytest.raises(ValidationError, match="exactly one 'start' node, found 0"):
         make_graph([{"name": "e", "type": "end"}])
 
 
@@ -125,27 +125,50 @@ def test_undeclared_output_data_type():
         )
 
 
-def test_multiple_start_requires_explicit_entry():
-    nodes = [
-        {"name": "s1", "type": "start", "next": "e"},
-        {"name": "s2", "type": "start", "next": "e"},
-        {"name": "e", "type": "end"},
-    ]
-    with pytest.raises(ValidationError, match="set 'start'"):
-        make_graph(nodes)
-    # Providing an explicit start resolves the ambiguity.
-    graph = make_graph(nodes, start="s2")
-    assert graph.start == "s2"
-
-
-def test_explicit_start_unknown():
-    with pytest.raises(ValidationError, match="start references unknown node"):
+def test_multiple_start_nodes_rejected():
+    with pytest.raises(ValidationError, match="exactly one 'start' node, found 2"):
         make_graph(
             [
-                {"name": "s", "type": "start", "next": "e"},
+                {"name": "s1", "type": "start", "next": "e"},
+                {"name": "s2", "type": "start", "next": "e"},
                 {"name": "e", "type": "end"},
+            ]
+        )
+
+
+def test_multiple_end_nodes_share_output_type():
+    graph = make_graph(
+        [
+            {"name": "s", "type": "start", "next": "branch"},
+            {
+                "name": "branch",
+                "type": "if",
+                "condition": "input.user_message == 'hi'",
+                "then": "e1",
+                "else": "e2",
+            },
+            {"name": "e1", "type": "end", "output": "output"},
+            {"name": "e2", "type": "end", "output": "output"},
+        ]
+    )
+    assert graph.output_type == "output"
+
+
+def test_end_nodes_with_different_output_types_rejected():
+    with pytest.raises(
+        ValidationError, match="same output data type.*'other', 'output'"
+    ):
+        WorkflowGraph(
+            name="wf",
+            data_types={
+                **BASE_DATA_TYPES,
+                "other": {"type": "object", "properties": {}},
+            },
+            nodes=[
+                {"name": "s", "type": "start", "next": "e1"},
+                {"name": "e1", "type": "end", "output": "output"},
+                {"name": "e2", "type": "end", "output": "other"},
             ],
-            start="ghost",
         )
 
 
@@ -171,3 +194,4 @@ nodes:
     assert graph.name == "yaml_wf"
     assert graph.llm_model == "openai/x"
     assert graph.start == "s"
+    assert graph.output_type == "output"

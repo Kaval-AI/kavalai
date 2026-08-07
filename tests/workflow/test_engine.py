@@ -515,7 +515,6 @@ data_types:
       agent_response:
         type: string
 
-start: begin
 nodes:
   - name: begin
     type: start

@@ -359,7 +359,7 @@ class WorkflowEngine:
                     agent_name=self.graph.name,
                     agent_description=self.graph.description,
                     input_schema=self.graph.data_types.get("input"),
-                    output_schema=self.graph.data_types.get("output"),
+                    output_schema=self.graph.data_types.get(self.graph.output_type),
                     workflow=self.graph.model_dump(),
                     session_id=UUID(session_id) if session_id else None,
                     external_id=external_id,

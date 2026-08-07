@@ -191,7 +191,7 @@ def create_agent_router(
         auth_dependency = create_default_auth_dependency()
 
     InputDataType = engine.get_data_type("input")
-    OutputDataType = engine.get_data_type("output")
+    OutputDataType = engine.get_data_type(engine.graph.output_type)
 
     # Define the request body schema.
     class InputType(BaseModel):

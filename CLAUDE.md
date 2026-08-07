@@ -56,7 +56,7 @@ Claude Code's static command analysis and forces a manual permission prompt.
 - `kavalai/agent_service.py` — `AgentService`: all runtime persistence (agents, sessions, runs, chat history, tasks, model-call stats) over a plain `async_sessionmaker`; sessions reusable by caller-supplied `external_id`
 - `kavalai/db.py` — ORM models + `DatabaseManager`; `get_sqlite_compat_sessionmaker()` runs `AgentService` over the sync SQLite engine via `AsyncSessionShim` (Pyodide/browser, where greenlet/aiosqlite don't exist)
 - `kavalai/workflow/engine.py` — core workflow engine (`WorkflowEngine.from_yaml_path`, YAML → execution)
-- `kavalai/workflow/models.py` — Pydantic data models for workflows: shared building blocks (`ArgumentInfo`, `RestServer`, `McpServer`, `PythonFunction`, `TemplateModel`, `WorkflowException`) and the v2 graph (`WorkflowGraph`, nodes)
+- `kavalai/workflow/models.py` — Pydantic data models for workflows: shared building blocks (`ArgumentInfo`, `RestServer`, `McpServer`, `PythonFunction`, `TemplateModel`, `WorkflowException`) and the v2 graph (`WorkflowGraph`, nodes); a graph has exactly one `start` node (derived `start`/`output_type` properties, no `start` field) and all `end` nodes must share one output data type
 - `kavalai/agent.py` — modular planning agent (uses the native LLM clients)
 - `kavalai/functionkernel.py` — tool registration and execution (REST, MCP, Python); unified tool URI format `protocol://[name|module].function_name(args: type) -> return_type`; duplicate tool/server names raise `WorkflowException`; `get_tool_descriptions()` takes an explicit `allowed_tools` filter (`None`/empty → no tools)
 - `kavalai/run_context.py` — RunContext model and context resolution helpers

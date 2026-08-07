@@ -119,7 +119,6 @@ class WorkflowBuilder:
         self._data_types: dict[str, dict] = {}
         self._data_models: dict[str, type[BaseModel]] = {}
         self._nodes: list = []
-        self._start: Optional[str] = None
         self._rest_servers: list[RestServer] = []
         self._mcp_servers: list[McpServer] = []
         self._python_functions: list[PythonFunction] = []
@@ -168,8 +167,6 @@ class WorkflowBuilder:
     # -------------------------------------------------------------------- nodes
     def start(self, next: str, *, name: str = "start") -> "WorkflowBuilder":
         self._nodes.append(StartNode(name=name, next=next))
-        if self._start is None:
-            self._start = name
         return self
 
     def end(self, *, name: str = "end", output: str = "output") -> "WorkflowBuilder":
@@ -308,7 +305,6 @@ class WorkflowBuilder:
             llm_kwargs=self.llm_kwargs,
             data_types=self._data_types,
             nodes=self._nodes,
-            start=self._start,
             rest_servers=self._rest_servers,
             mcp_servers=self._mcp_servers,
             python_functions=self._python_functions,

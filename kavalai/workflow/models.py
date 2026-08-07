@@ -271,9 +271,8 @@ class WorkflowGraph(BaseModel):
         llm_model: Default LLM model (``provider/model``); nodes may override.
         llm_kwargs: Default LLM kwargs; nodes may override.
         data_types: JSON-schema data type definitions (parsed by SchemaParser).
-        nodes: The graph vertices.
-        start: Optional explicit start node name (otherwise the single
-            ``start`` node is used).
+        nodes: The graph vertices; exactly one ``start`` node, and every
+            ``end`` node returns the same ``output`` data type.
     """
 
     name: str
@@ -287,7 +286,6 @@ class WorkflowGraph(BaseModel):
     templates: list[TemplateModel] = []
     python_functions: list[PythonFunction] = []
     nodes: list[Node]
-    start: Optional[str] = None
 
     @model_validator(mode="after")
     def validate_graph(self) -> "WorkflowGraph":
@@ -299,21 +297,23 @@ class WorkflowGraph(BaseModel):
 
         start_nodes = [n for n in self.nodes if isinstance(n, StartNode)]
         end_nodes = [n for n in self.nodes if isinstance(n, EndNode)]
-        if not start_nodes:
-            raise ValueError("Workflow must define at least one 'start' node.")
+        if len(start_nodes) != 1:
+            raise ValueError(
+                f"Workflow must define exactly one 'start' node, "
+                f"found {len(start_nodes)}."
+            )
         if not end_nodes:
             raise ValueError("Workflow must define at least one 'end' node.")
 
-        # Resolve / validate the entry point.
-        if self.start is not None:
-            if self.start not in name_set:
-                raise ValueError(f"start references unknown node '{self.start}'.")
-        elif len(start_nodes) > 1:
+        # All end nodes must return the same output data type, so the
+        # workflow's output schema (REST response model, recorded run schema)
+        # is well-defined regardless of which end node terminates the run.
+        end_outputs = {n.output for n in end_nodes}
+        if len(end_outputs) > 1:
             raise ValueError(
-                "Multiple 'start' nodes found; set 'start' to choose the entry point."
+                f"All 'end' nodes must return the same output data type, "
+                f"found {sorted(end_outputs)}."
             )
-        else:
-            self.start = start_nodes[0].name
 
         # Validate every transition target references an existing node.
         for node in self.nodes:
@@ -346,6 +346,16 @@ class WorkflowGraph(BaseModel):
         if isinstance(node, EndNode):
             return []
         return [node.next]
+
+    @property
+    def start(self) -> str:
+        """Name of the workflow's entry point (its single start node)."""
+        return next(n.name for n in self.nodes if isinstance(n, StartNode))
+
+    @property
+    def output_type(self) -> str:
+        """Name of the data type every end node returns."""
+        return next(n.output for n in self.nodes if isinstance(n, EndNode))
 
     @property
     def node_map(self) -> dict[str, "Node"]:
