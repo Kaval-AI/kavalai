@@ -99,8 +99,9 @@ async def test_chat_completions_streams_content_and_reports_stats(monkeypatch):
     sent = json.loads(bridge.last_request)
     assert sent["model"] == "Llama-3.2-1B-Instruct-q4f32_1-MLC"
     assert sent["messages"][0] == {"role": "system", "content": "You are terse."}
-    assert sent["temperature"] == 1.0
-    assert sent["top_p"] == 0.2
+    # Sampling params default to None and are only sent when explicitly set.
+    assert "temperature" not in sent
+    assert "top_p" not in sent
     assert "response_format" not in sent
 
     assert len(receiver.stats) == 1
@@ -314,3 +315,14 @@ def test_build_request_omits_none_params():
     assert "temperature" not in request
     assert "top_p" not in request
     assert "response_format" not in request
+
+
+def test_build_request_includes_explicit_sampling_params():
+    params = LlmClientParameters(temperature=0.4, top_p=0.9)
+    client = BrowserLLMClient("model-x", llm_client_parameters=params)
+    chat_history = ChatHistory(messages=[ChatMessage(content="hi")])
+
+    request = client._build_request(chat_history, None)
+
+    assert request["temperature"] == 0.4
+    assert request["top_p"] == 0.9
