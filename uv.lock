@@ -1930,6 +1930,7 @@ dependencies = [
 
 [package.optional-dependencies]
 all = [
+    { name = "anthropic" },
     { name = "asyncpg" },
     { name = "authlib" },
     { name = "crawl4ai" },
@@ -1991,6 +1992,7 @@ server = [
 ]
 test = [
     { name = "aiosqlite" },
+    { name = "anthropic" },
     { name = "asyncpg" },
     { name = "authlib" },
     { name = "fastapi", extra = ["standard"] },
@@ -2020,8 +2022,10 @@ requires-dist = [
     { name = "aiosqlite" },
     { name = "aiosqlite", marker = "extra == 'test'" },
     { name = "alembic" },
+    { name = "anthropic", marker = "extra == 'all'" },
     { name = "anthropic", marker = "extra == 'anthropic'" },
     { name = "anthropic", marker = "extra == 'llm'" },
+    { name = "anthropic", marker = "extra == 'test'" },
     { name = "asyncpg", marker = "extra == 'all'" },
     { name = "asyncpg", marker = "extra == 'postgres'" },
     { name = "asyncpg", marker = "extra == 'test'" },
