@@ -8,6 +8,18 @@ Kaval.AI is a YAML-based AI agent framework with two main components:
 
 Uses `loguru` for all logging and prefers f-strings for formatting.
 
+## Working Copy & Git Workflow
+
+- **Never use git worktrees.** Do not run `git worktree add`, do not use `EnterWorktree`,
+  and do not launch agents or workflows with `isolation: "worktree"`. Worktree branches are
+  invisible in the normal PyCharm window, which makes diffs impossible to review.
+- Make all edits directly in the checked-out branch of `/home/timo/projects/kaval.ai`.
+- Leave changes **uncommitted** so they can be reviewed in PyCharm's Local Changes view;
+  never commit, branch, or push without asking first.
+- If a tool insists on worktree isolation, finish by exporting the diff
+  (`git diff > patch`), exiting the worktree, applying the patch to the main checkout, and
+  removing the worktree — the working copy must end up holding the changes.
+
 ## Running code and tests.
 
 Use the `uv` and `.venv` virtual environments to run code and tests — the
