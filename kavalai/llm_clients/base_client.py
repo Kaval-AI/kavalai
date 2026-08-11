@@ -173,12 +173,13 @@ class BaseLlmClient:
         streamer = await self.stream_chat_completions(
             chat_history=chat_history, response_model=response_model
         )
+        # The streamer only stops iterating once a 'complete' chunk has arrived,
+        # so the loop always returns; falling through yields None implicitly.
         async for chunk in streamer:
             if chunk.type == "complete":
                 if response_model:
                     return response_model.model_validate_json(chunk.value)
                 return chunk.value
-        return None
 
     async def stream_prompt(
         self, system_message: str, response_model: Optional[Type[BaseModel]] = None

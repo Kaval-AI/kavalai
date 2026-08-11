@@ -211,3 +211,86 @@ def test_empty_enum_raises_error():
     parser = SchemaParser(datatypes)
     with pytest.raises(ValueError, match="'enum' must be a non-empty list"):
         parser.parse_all()
+
+
+def test_unknown_property_attribute_is_rejected():
+    datatypes = {
+        "User": {
+            "type": "object",
+            "properties": {"name": {"type": "string", "pattern": "^a"}},
+        }
+    }
+    parser = SchemaParser(datatypes)
+    with pytest.raises(
+        ValueError, match="Unknown attribute 'pattern' in property 'name'"
+    ):
+        parser.parse_all()
+
+
+def test_unknown_type_attribute_is_rejected():
+    datatypes = {"User": {"type": "object", "properties": {}, "title": "User"}}
+    parser = SchemaParser(datatypes)
+    with pytest.raises(ValueError, match="Unknown attribute 'title' in type 'User'"):
+        parser.parse_all()
+
+
+def test_inline_nested_object_becomes_a_model():
+    datatypes = {
+        "Order": {
+            "type": "object",
+            "properties": {
+                "customer": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "vip": {"type": "boolean", "required": False},
+                    },
+                }
+            },
+        }
+    }
+    parser = SchemaParser(datatypes)
+    models = parser.parse_all()
+
+    order = models["Order"](customer={"name": "Ada"})
+    assert order.customer.name == "Ada"
+    assert order.customer.vip is None
+    # Inline objects forbid unknown keys.
+    with pytest.raises(Exception):
+        models["Order"](customer={"name": "Ada", "unexpected": 1})
+
+
+def test_string_length_constraints_are_applied():
+    datatypes = {
+        "Note": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "min_length": 2, "max_length": 4},
+            },
+        }
+    }
+    parser = SchemaParser(datatypes)
+    models = parser.parse_all()
+
+    assert models["Note"](text="abc").text == "abc"
+    with pytest.raises(Exception):
+        models["Note"](text="a")
+    with pytest.raises(Exception):
+        models["Note"](text="abcde")
+
+
+def test_top_level_ref_creates_a_named_alias():
+    datatypes = {
+        "Person": {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+        },
+        "Customer": {"$ref": "Person"},
+    }
+    parser = SchemaParser(datatypes)
+    models = parser.parse_all()
+
+    customer = models["Customer"](name="Ada")
+    assert customer.name == "Ada"
+    assert models["Customer"].__name__ == "Customer"
+    assert issubclass(models["Customer"], models["Person"])

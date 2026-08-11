@@ -1,4 +1,7 @@
-from kavalai.llm_clients.kwargs_mapper import LLMKWargsMapper
+from kavalai.llm_clients.kwargs_mapper import (
+    LLMKWargsMapper,
+    is_openai_reasoning_model,
+)
 
 
 def test_openai_reasoning_and_stops_and_max_tokens_mapping():
@@ -129,6 +132,101 @@ def test_passthrough_existing_specific_keys():
     ge_kwargs = {"thinking_budget": 500}
     ge_mapped = LLMKWargsMapper.map("gemini", "gemini-2.0-flash-thinking", ge_kwargs)
     assert ge_mapped.get("thinking_budget") == 500
+
+
+def test_reasoning_model_detection_ignores_a_provider_prefix():
+    assert is_openai_reasoning_model("openai/gpt-5.4-mini") is True
+    assert is_openai_reasoning_model("openai/gpt-4o") is False
+    assert is_openai_reasoning_model("") is False
+
+
+def test_pop_any_returns_the_first_present_key():
+    d = {"b": 2, "c": 3}
+    assert LLMKWargsMapper._pop_any(d, ["a", "b", "c"]) == 2
+    assert d == {"c": 3}
+    # Nothing matched: the dict is untouched.
+    assert LLMKWargsMapper._pop_any(d, ["x", "y"]) is None
+    assert d == {"c": 3}
+
+
+def test_unknown_provider_passes_kwargs_through_unchanged():
+    kwargs = {"whatever": 1, "max_tokens": 5}
+    mapped = LLMKWargsMapper.map("mystery", "some-model", kwargs)
+    # max_tokens is still normalised, everything else is left alone.
+    assert mapped == {"whatever": 1, "max_output_tokens": 5}
+
+
+def test_openai_reasoning_dict_uses_effort_or_level():
+    assert (
+        LLMKWargsMapper.map("openai", "gpt-4o", {"reasoning": {"effort": "HIGH"}}).get(
+            "reasoning_effort"
+        )
+        == "high"
+    )
+    assert (
+        LLMKWargsMapper.map("openai", "gpt-4o", {"reasoning": {"level": "Low"}}).get(
+            "reasoning_effort"
+        )
+        == "low"
+    )
+    # A dict carrying neither key contributes nothing.
+    assert "reasoning_effort" not in LLMKWargsMapper.map(
+        "openai", "gpt-4o", {"reasoning": {"budget": 100}}
+    )
+
+
+def test_gemini_stop_string_becomes_a_list():
+    mapped = LLMKWargsMapper.map("gemini", "gemini-2.0-flash", {"stop": "END"})
+    assert mapped["stop_sequences"] == ["END"]
+
+
+def test_gemini_stop_list_is_passed_through():
+    mapped = LLMKWargsMapper.map("gemini", "gemini-2.0-flash", {"stop": ["A", "B"]})
+    assert mapped["stop_sequences"] == ["A", "B"]
+
+
+def test_gemini_reasoning_dict_variants():
+    budget = LLMKWargsMapper.map(
+        "gemini", "gemini-2.0-flash", {"reasoning": {"budget": "512"}}
+    )
+    assert budget["thinking_budget"] == 512
+
+    level = LLMKWargsMapper.map(
+        "gemini", "gemini-2.0-flash", {"reasoning": {"effort": "HIGH"}}
+    )
+    assert level["thinking_level"] == "high"
+
+    # An unusable budget is dropped rather than raising.
+    bad = LLMKWargsMapper.map(
+        "gemini", "gemini-2.0-flash", {"reasoning": {"budget": "not-a-number"}}
+    )
+    assert "thinking_budget" not in bad
+
+
+def test_ollama_mapping_renames_and_filters_keys():
+    mapped = LLMKWargsMapper.map(
+        "ollama",
+        "llama3",
+        {
+            "stop_sequences": ["END"],
+            "max_tokens": 128,
+            "temperature": 0.5,
+            "reasoning_effort": "high",  # OpenAI-only, dropped
+            "x_custom": "kept",
+        },
+    )
+
+    assert mapped["stop"] == ["END"]
+    assert mapped["num_predict"] == 128
+    assert mapped["temperature"] == 0.5
+    assert mapped["x_custom"] == "kept"
+    assert "reasoning_effort" not in mapped
+
+
+def test_ollama_mapping_keeps_originals_when_nothing_is_recognised():
+    # The filter must not empty the kwargs entirely.
+    mapped = LLMKWargsMapper.map("ollama", "llama3", {"unknown_key": 1})
+    assert mapped == {"unknown_key": 1}
 
 
 def test_priority_mapping():

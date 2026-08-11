@@ -1,9 +1,38 @@
+import json
+
 import pytest
 from unittest.mock import patch
 
+import anthropic
 import openai
+from google.genai import errors as genai_errors
 
-from kavalai.llm_clients.with_retry import with_retry
+from kavalai.llm_clients.with_retry import (
+    _gemini_client_error,
+    _import_attrs,
+    _retriable_exceptions,
+    with_retry,
+)
+
+
+def test_import_attrs_returns_attributes_of_an_installed_module():
+    assert _import_attrs("json", "JSONDecodeError") == [json.JSONDecodeError]
+
+
+def test_import_attrs_returns_empty_list_for_a_missing_module():
+    # The provider SDKs are optional extras: an absent one contributes nothing.
+    assert _import_attrs("kavalai_no_such_provider_sdk", "RateLimitError") == []
+
+
+def test_retriable_exceptions_collect_every_installed_sdk():
+    exceptions = _retriable_exceptions()
+    assert openai.RateLimitError in exceptions
+    assert genai_errors.ServerError in exceptions
+    assert anthropic.RateLimitError in exceptions
+
+
+def test_gemini_client_error_resolves_to_the_sdk_type():
+    assert _gemini_client_error() is genai_errors.ClientError
 
 
 class FakeGeminiError(Exception):

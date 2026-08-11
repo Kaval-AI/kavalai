@@ -132,7 +132,8 @@ class OpenAIClient(BaseLlmClient):
                     await value_streamer.stream_partial(event.delta)
                 elif isinstance(event, ResponseErrorEvent):
                     # We raise here to let the background task fail
-                    raise RuntimeError(f"OpenAI Stream Error: {event.error}")
+                    # ResponseErrorEvent carries `message`/`code`, not `error`.
+                    raise RuntimeError(f"OpenAI Stream Error: {event.message}")
                 elif isinstance(event, ResponseCompletedEvent):
                     usage = event.response.usage
                     prompt_tokens = usage.input_tokens

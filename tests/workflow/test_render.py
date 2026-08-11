@@ -152,3 +152,19 @@ def test_truncate():
     assert _truncate("short") == "short"
     out = _truncate("x" * 40, limit=10)
     assert len(out) == 10 and out.endswith("…")
+
+
+def test_transitions_to_unknown_nodes_are_skipped():
+    """The backoffice can store a half-edited workflow whose transition points
+    at a node that no longer exists; rendering must still work."""
+    workflow = {
+        "nodes": [
+            {"name": "s", "type": "start", "next": "ghost"},
+            {"name": "e", "type": "end", "output": "output"},
+        ]
+    }
+
+    svg = render_workflow_svg(workflow)
+
+    assert "ghost" not in svg
+    assert ">s<" in svg and ">e<" in svg

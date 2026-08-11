@@ -18,6 +18,7 @@ from kavalai.functionkernel import (
     pythontool,
     ToolDefinition,
     FunctionKernelException,
+    _is_tool_allowed,
 )
 from kavalai.workflow.models import RestServer, McpServer
 
@@ -1097,3 +1098,81 @@ async def test_tool_descriptions_nested():
     assert "$ref" in schema["properties"]["nested"]
     assert "$defs" in schema
     assert "NestedInput" in schema["$defs"]
+
+
+# ---------------------------------------------------------------------------
+# Tool URI resolution
+# ---------------------------------------------------------------------------
+
+
+def test_get_tool_definition_resolves_a_python_tool():
+    kernel = FunctionKernel()
+    kernel.register_python_tool("math.add", sync_add)
+
+    definition = kernel.get_tool_definition("python://math.add")
+
+    assert isinstance(definition, ToolDefinition)
+    assert kernel.get_input_model("python://math.add") is definition.input_model
+    assert kernel.get_output_model("python://math.add") is definition.output_model
+
+
+def test_get_tool_definition_rejects_an_unregistered_python_tool():
+    kernel = FunctionKernel()
+    with pytest.raises(FunctionKernelException, match="not registered"):
+        kernel.get_tool_definition("python://math.add")
+
+
+def test_get_tool_definition_requires_a_server_qualified_path():
+    kernel = FunctionKernel()
+    with pytest.raises(FunctionKernelException, match="Invalid tool path format"):
+        kernel.get_tool_definition("rest://just_a_function")
+
+
+def test_get_tool_definition_rejects_an_unknown_server():
+    kernel = FunctionKernel()
+    with pytest.raises(FunctionKernelException, match="REST tool 'get_item' on server"):
+        kernel.get_tool_definition("rest://ghost.get_item")
+
+    with pytest.raises(FunctionKernelException, match="MCP tool 'run' on server"):
+        kernel.get_tool_definition("mcp://ghost.run")
+
+
+def test_get_tool_definition_rejects_an_unsupported_protocol():
+    kernel = FunctionKernel()
+    with pytest.raises(FunctionKernelException, match="Unsupported protocol"):
+        kernel.get_tool_definition("ftp://server.get")
+
+
+def test_register_python_tool_rejects_a_non_python_uri():
+    kernel = FunctionKernel()
+    with pytest.raises(FunctionKernelException):
+        kernel.register_python_tool("rest://math.add", sync_add)
+
+
+# ---------------------------------------------------------------------------
+# allowed_tools filtering
+# ---------------------------------------------------------------------------
+
+
+def test_is_tool_allowed_rules():
+    # No filter: everything is allowed.
+    assert _is_tool_allowed("python://math.add", None) is True
+    # Exact match.
+    assert _is_tool_allowed("python://math.add", ["python://math.add"]) is True
+    # Whole-server wildcard.
+    assert _is_tool_allowed("rest://api.get_item", ["rest://api.*"]) is True
+    # Not listed.
+    assert _is_tool_allowed("rest://api.get_item", ["rest://other.*"]) is False
+    assert _is_tool_allowed("plain_name", ["something_else"]) is False
+
+
+async def test_get_tool_descriptions_applies_the_allowed_tools_filter():
+    kernel = FunctionKernel()
+    kernel.register_python_tool("math.add", sync_add)
+    kernel.register_python_tool("math.multiply", async_multiply)
+
+    described = json.loads(
+        await kernel.get_tool_descriptions(allowed_tools=["python://math.add"])
+    )
+
+    assert [tool["name"] for tool in described] == ["python://math.add"]

@@ -460,3 +460,39 @@ def test_demuxer_chunk_routing():
     demux.on_chunk(StreamContent(type="partial", name="response", value='{"b": 1}'))
     assert demux.on_chunk(StreamContent(type="complete", name="response")) == []
     assert demux.step_json == '{"b": 1}'
+
+
+@pytest.mark.asyncio
+async def test_agent_creates_its_own_run_context_when_none_is_given(mock_kernel):
+    agent = Agent(llm_client=ScriptedClient(), kernel=mock_kernel)
+    assert isinstance(agent.run_context, RunContext)
+    assert agent.run_context.data == {}
+
+
+@pytest.mark.asyncio
+async def test_resolve_args_ignores_unparsable_json(mock_kernel, caplog):
+    agent = make_agent(ScriptedClient(), mock_kernel, RunContext(data={}))
+
+    tool_call = ToolCall(
+        name="python://test",
+        literal_args="{not json}",
+        planner_context_args="",
+        input_args="",
+    )
+
+    assert agent._resolve_args(tool_call, {}) == {}
+    assert "Failed to parse literal_args as JSON" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_debug_prints_the_rendered_prompt(mock_kernel, run_context, capsys):
+    StepOutput = get_step_output_type(str)
+    client = ScriptedClient([StepOutput(instructions="answer", output="done")])
+    agent = Agent(
+        llm_client=client, kernel=mock_kernel, run_context=run_context, debug=True
+    )
+
+    assert await agent.prompt("say something", max_steps=1) == "done"
+
+    printed = capsys.readouterr().out
+    assert "say something" in printed

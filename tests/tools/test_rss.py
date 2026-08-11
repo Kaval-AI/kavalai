@@ -114,3 +114,35 @@ def test_get_rss_feed_error():
         )
         assert response.status_code == 500
         assert "Error parsing feed: Network error" in response.json()["detail"]
+
+
+def test_parse_args_defaults_and_overrides(monkeypatch):
+    monkeypatch.delenv("RSS_AUTH_USER", raising=False)
+    monkeypatch.delenv("RSS_AUTH_PASSWORD", raising=False)
+
+    defaults = rss_module.parse_args([])
+    assert (defaults.port, defaults.user, defaults.password) == (
+        10000,
+        "admin",
+        "password",
+    )
+
+    overridden = rss_module.parse_args(
+        ["--port", "1234", "--user", "u", "--password", "p"]
+    )
+    assert (overridden.port, overridden.user, overridden.password) == (1234, "u", "p")
+
+
+def test_main_applies_credentials_and_serves(monkeypatch):
+    served = {}
+
+    def fake_run(application, host, port):
+        served.update(app=application, host=host, port=port)
+
+    monkeypatch.setattr(rss_module.uvicorn, "run", fake_run)
+
+    rss_module.main(["--port", "1234", "--user", "alice", "--password", "secret"])
+
+    assert served == {"app": rss_module.app, "host": "0.0.0.0", "port": 1234}
+    assert rss_module.AUTH_USER == "alice"
+    assert rss_module.AUTH_PASSWORD == "secret"

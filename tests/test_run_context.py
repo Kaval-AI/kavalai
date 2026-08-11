@@ -105,3 +105,72 @@ async def test_prepare_tool_inputs_with_pydantic_model():
 
     inputs = await rc.prepare_tool_inputs(task)
     assert inputs["mod"] == {"field": "test"}
+
+
+@pytest.mark.asyncio
+async def test_render_prompt_substitutes_every_source():
+    service = AsyncMock()
+    service.get_history_value.return_value = "remembered"
+    rc = RunContext(
+        session_id=uuid4(),
+        agent_service=service,
+        data={"input": {"user_message": "hi"}},
+        templates={"greeting": "Hello"},
+    )
+
+    rendered = await rc.render_prompt(
+        "{{ templates.greeting }} — you said {{ context.input.user_message }} "
+        "and before that {{ history.answer }}"
+    )
+
+    assert rendered == "Hello — you said hi and before that remembered"
+
+
+@pytest.mark.asyncio
+async def test_render_prompt_serialises_structured_values_as_json():
+    rc = RunContext(data={"input": {"items": [1, 2], "obj": {"a": 1}}})
+
+    rendered = await rc.render_prompt(
+        "{{ context.input.items }} {{ context.input.obj }}"
+    )
+
+    assert rendered == '[1, 2] {"a": 1}'
+
+
+@pytest.mark.asyncio
+async def test_render_prompt_falls_back_to_str_when_serialisation_fails(caplog):
+    class Unserialisable:
+        def __init__(self):
+            self.values = {1, 2}  # a set is not JSON-serialisable
+
+        def __str__(self):
+            return "unserialisable"
+
+    rc = RunContext(data={"input": {"blob": {"nested": Unserialisable()}}})
+
+    rendered = await rc.render_prompt("{{ context.input.blob }}")
+
+    # Falls back to str() of the value rather than failing the render.
+    assert "nested" in rendered
+    assert "Error serializing template value" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_render_prompt_rejects_an_unresolvable_reference():
+    rc = RunContext(data={})
+    with pytest.raises(ValueError, match="Could not resolve context.missing"):
+        await rc.render_prompt("{{ context.missing }}")
+
+
+@pytest.mark.asyncio
+async def test_resolve_history_value_without_a_session(caplog):
+    rc = RunContext(agent_service=AsyncMock())
+    assert await rc.resolve_history_value("key") is None
+    assert "agent_service or session_id not set" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_resolve_template_value_returns_none_for_unknown_names():
+    rc = RunContext(templates={"greeting": "Hello"})
+    assert await rc.resolve_template_value("greeting") == "Hello"
+    assert await rc.resolve_template_value("missing") is None

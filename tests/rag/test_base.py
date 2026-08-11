@@ -179,3 +179,15 @@ async def test_default_learn_normalizer():
     # collection_name is accepted (and ignored by the default implementation)
     normalizer_coll = await service.learn_normalizer(collection_name="anything")
     assert isinstance(normalizer_coll, Normalizer)
+
+
+async def test_count_entries_is_optional_for_backends():
+    service = InMemoryRagService()
+    with pytest.raises(NotImplementedError, match="count_entries"):
+        await service.count_entries("docs")
+
+
+async def test_iter_entries_is_optional_for_backends():
+    service = InMemoryRagService()
+    with pytest.raises(NotImplementedError, match="iter_entries"):
+        service.iter_entries("docs")

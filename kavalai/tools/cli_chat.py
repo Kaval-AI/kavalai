@@ -26,10 +26,20 @@ from kavalai.client import AgentClient
 console = Console()
 
 
-async def chat_loop(client: AgentClient):
+def ask_user() -> str:
+    """Read one chat line from the terminal."""
+    return Prompt.ask("[bold cyan]You[/bold cyan]")
+
+
+async def chat_loop(client: AgentClient, ask=ask_user):
+    """Relay terminal input to the agent until the user quits.
+
+    ``ask`` supplies each line; it is a parameter so the loop can be driven
+    without a terminal.
+    """
     while True:
         try:
-            user_input = Prompt.ask("[bold cyan]You[/bold cyan]")
+            user_input = ask()
             if user_input.lower() in ("exit", "quit"):
                 break
 
@@ -56,7 +66,8 @@ async def chat_loop(client: AgentClient):
             console.print(f"[bold red]Error: {e}[/bold red]")
 
 
-async def main():
+def parse_args(argv=None):
+    """Parse the chat tool's command line."""
     parser = ArgumentParser(description="CLI Chat tool for Kaval.AI agents.")
     parser.add_argument(
         "--url",
@@ -67,10 +78,15 @@ async def main():
     parser.add_argument("--user", type=str, help="Basic auth username")
     parser.add_argument("--password", type=str, help="Basic auth password")
 
-    args = parser.parse_args()
+    return parser.parse_args(argv)
+
+
+async def main(argv=None, client: AgentClient = None, ask=ask_user):
+    args = parse_args(argv)
 
     base_url = args.url.rstrip("/")
-    client = AgentClient(base_url, args.user, args.password)
+    if client is None:
+        client = AgentClient(base_url, args.user, args.password)
 
     console.print(f"[bold green]Connecting to agent at {base_url}...[/bold green]")
     try:
@@ -87,10 +103,10 @@ async def main():
     console.print(f"Input schema: {client.input_schema.model_fields.keys()}")
     console.print(f"Output schema: {client.output_schema.model_fields.keys()}")
 
-    await chat_loop(client)
+    await chat_loop(client, ask=ask)
 
     console.print("[bold blue]Goodbye![/bold blue]")
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover - script entry point
     asyncio.run(main())

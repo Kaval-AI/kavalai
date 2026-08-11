@@ -38,6 +38,8 @@ class AgentClient:
         username: Optional HTTP Basic Auth username.
         password: Optional HTTP Basic Auth password.
         timeout: Per-request timeout in seconds.
+        transport: Optional httpx transport, e.g. to route requests through a
+            proxy or, in tests, to serve them without a network.
     """
 
     def __init__(
@@ -46,13 +48,21 @@ class AgentClient:
         username: Optional[str] = None,
         password: Optional[str] = None,
         timeout: float = 60.0,
+        transport: Optional[httpx.AsyncBaseTransport] = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.auth = (username, password) if username and password else None
         self.timeout = timeout
+        self.transport = transport
         self.session_id: Optional[str] = None
         self.input_schema: Optional[Type[BaseModel]] = None
         self.output_schema: Optional[Type[BaseModel]] = None
+
+    def _http_client(self) -> httpx.AsyncClient:
+        """Build the HTTP client used for one request."""
+        return httpx.AsyncClient(
+            auth=self.auth, timeout=self.timeout, transport=self.transport
+        )
 
     async def discover_schemas(self):
         """Fetch the server's OpenAPI spec and derive the agent's schemas.
@@ -62,7 +72,7 @@ class AgentClient:
         automatically by :meth:`run_agent` and :meth:`stream_agent` on first
         use, but may be invoked directly to inspect the schemas up front.
         """
-        async with httpx.AsyncClient(auth=self.auth, timeout=self.timeout) as client:
+        async with self._http_client() as client:
             openapi_spec_url = urllib.parse.urljoin(self.base_url + "/", "openapi.json")
             resp = await client.get(openapi_spec_url)
             resp.raise_for_status()
@@ -110,7 +120,7 @@ class AgentClient:
 
         url = f"{self.base_url}/run_agent"
 
-        async with httpx.AsyncClient(auth=self.auth, timeout=self.timeout) as client:
+        async with self._http_client() as client:
             resp = await client.post(url, json=payload)
             resp.raise_for_status()
             response_json = resp.json()
@@ -145,7 +155,7 @@ class AgentClient:
 
         url = f"{self.base_url}/stream_agent"
 
-        async with httpx.AsyncClient(auth=self.auth, timeout=self.timeout) as client:
+        async with self._http_client() as client:
             async with client.stream("POST", url, json=payload) as response:
                 response.raise_for_status()
                 async for line in response.aiter_lines():

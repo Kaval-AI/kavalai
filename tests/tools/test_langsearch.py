@@ -124,3 +124,21 @@ def test_langsearch_web_search_integration():
         assert result.webPages.value[0].name
     for page in result.webPages.value:
         print(page.name, page.url, page.summary)
+
+
+def test_langsearch_web_search_unwraps_data_envelope():
+    """Some responses wrap the payload in a top-level "data" object."""
+    payload = {
+        "queryContext": {"originalQuery": "wrapped"},
+        "webPages": {"value": []},
+    }
+
+    with patch("httpx.Client.post") as mock_post:
+        mock_post.return_value = MagicMock(spec=httpx.Response)
+        mock_post.return_value.json.return_value = {"code": 200, "data": payload}
+        mock_post.return_value.raise_for_status = MagicMock()
+
+        result = langsearch_web_search(query="wrapped", api_key="k")
+
+    assert isinstance(result, SearchResponse)
+    assert result.queryContext.originalQuery == "wrapped"

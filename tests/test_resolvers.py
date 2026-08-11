@@ -144,3 +144,34 @@ def test_find_key_recursive_basemodel_fallback():
 def test_find_key_recursive_tuple():
     obj = ({"a": 1},)
     assert find_key_recursive(obj, "a") == 1
+
+
+class UndumpableModel(BaseModel):
+    """A model whose model_dump fails — the resolver must not propagate that."""
+
+    name: str = "x"
+
+    def model_dump(self, **kwargs):
+        raise ValueError("cannot dump")
+
+
+class FlakyAttribute:
+    """hasattr() succeeds, the following getattr() fails."""
+
+    def __init__(self):
+        self.reads = 0
+
+    @property
+    def value(self):
+        self.reads += 1
+        if self.reads > 1:
+            raise ValueError("boom")
+        return 1
+
+
+def test_resolve_path_returns_none_when_model_dump_fails():
+    assert resolve_path(UndumpableModel(), "missing") is None
+
+
+def test_resolve_path_returns_none_when_attribute_access_fails():
+    assert resolve_path(FlakyAttribute(), "value") is None

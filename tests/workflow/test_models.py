@@ -7,6 +7,8 @@ from kavalai.workflow.models import (
     EndNode,
     IfNode,
     LLMNode,
+    McpServer,
+    RestServer,
     StartNode,
     SwitchNode,
     WorkflowGraph,
@@ -245,3 +247,43 @@ def test_workflow_stream_event_optional_fields_and_types():
 
     with pytest.raises(ValidationError):
         WorkflowStreamEvent(type="not_a_type", name="x")
+
+
+def test_rest_server_rejects_both_url_and_url_env():
+    with pytest.raises(ValidationError, match="Only one of 'url' or 'url_env'"):
+        RestServer(name="api", url="http://x", url_env="API_URL")
+
+
+def test_rest_server_requires_a_url():
+    with pytest.raises(ValidationError, match="Either 'url' or 'url_env'"):
+        RestServer(name="api")
+
+
+def test_mcp_server_rejects_stdio_and_http_together():
+    with pytest.raises(ValidationError, match="Cannot specify both stdio"):
+        McpServer(name="m", command="echo", url="http://x")
+
+
+def test_mcp_server_requires_a_transport():
+    with pytest.raises(ValidationError, match="Either stdio"):
+        McpServer(name="m")
+
+
+def test_mcp_server_rejects_two_stdio_command_sources():
+    with pytest.raises(ValidationError, match="Only one of 'command' or 'command_env'"):
+        McpServer(name="m", command="echo", command_env="MCP_COMMAND")
+
+
+def test_mcp_server_rejects_two_http_url_sources():
+    with pytest.raises(ValidationError, match="Only one of 'url' or 'url_env'"):
+        McpServer(name="m", url="http://x", url_env="MCP_URL")
+
+
+def test_rest_server_accepts_a_single_url_source():
+    assert RestServer(name="api", url="http://x").url == "http://x"
+    assert RestServer(name="api", url_env="API_URL").url_env == "API_URL"
+
+
+def test_mcp_server_accepts_a_single_transport():
+    assert McpServer(name="m", command="echo").command == "echo"
+    assert McpServer(name="m", url="http://x").url == "http://x"

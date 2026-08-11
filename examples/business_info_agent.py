@@ -1,4 +1,4 @@
-"""Example: a v2 Agent that researches a business using Serper web search + scraping."""
+"""Example: a v2 Agent that researches a business using LangSearch + Crawl4AI."""
 
 import asyncio
 import os
@@ -11,8 +11,8 @@ from rich.json import JSON
 from kavalai import FunctionKernel, make_client
 from kavalai.run_context import RunContext
 from kavalai.agent import Agent
-from kavalai.tools.websearch.serper import serper_web_search
-from kavalai.tools.webtools.serper_scraper import serper_scrape_url
+from kavalai.tools.websearch.langsearch import langsearch_web_search
+from kavalai.tools.webtools.crawl4ai import crawl_url
 
 
 class BusinessInfo(BaseModel):
@@ -37,14 +37,17 @@ console = Console()
 
 
 async def main():
-    if not os.environ.get("SERPER_API_KEY"):
-        print("Please set SERPER_API_KEY environment variable.")
+    if not os.environ.get("LANGSEARCH_API_KEY"):
+        print("Please set LANGSEARCH_API_KEY environment variable.")
         return
 
     # 1. Register the tools the agent may call (addressed as python://<name>).
+    #    Searching finds candidate pages; crawling reads the promising ones.
     kernel = FunctionKernel()
-    kernel.register_python_tool("websearch.serper_web_search", serper_web_search)
-    kernel.register_python_tool("webtools.serper_scrape_url", serper_scrape_url)
+    kernel.register_python_tool(
+        "websearch.langsearch_web_search", langsearch_web_search
+    )
+    kernel.register_python_tool("webtools.crawl_url", crawl_url)
 
     # 2. Seed the run context with the query the agent will research.
     run_context = RunContext()
@@ -59,7 +62,7 @@ async def main():
 
     task = (
         "Find information about the business named in input.business_query using the "
-        "web search and scrape tools, then fill in the business information form."
+        "web search and crawl tools, then fill in the business information form."
     )
     console.print(f"Running agent for task: [italic]{task}[/italic]")
     console.print("-" * 50)

@@ -458,7 +458,7 @@ class Agent:
         return tool_call, args, result
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover - manual demo
     from kavalai.llm_clients.openai_client import OpenAIClient
     from kavalai.functionkernel import FunctionKernel, pythontool
     import datetime

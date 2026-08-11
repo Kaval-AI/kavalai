@@ -15,6 +15,7 @@ limitations under the License.
 """
 
 import asyncio
+import importlib
 import random
 from typing import Any, Awaitable, Callable, Optional, TypeVar
 
@@ -32,6 +33,19 @@ class _NeverRaised(Exception):
     """
 
 
+def _import_attrs(module_name: str, *attrs: str) -> list:
+    """Return the named attributes of ``module_name``, or ``[]`` if it is absent.
+
+    The provider SDKs are optional extras, so a package that is not installed
+    simply contributes nothing instead of raising.
+    """
+    try:
+        module = importlib.import_module(module_name)
+    except ImportError:
+        return []
+    return [getattr(module, attr) for attr in attrs]
+
+
 def _retriable_exceptions() -> tuple:
     """Collect retriable exception types from whichever LLM SDKs are installed.
 
@@ -39,47 +53,31 @@ def _retriable_exceptions() -> tuple:
     package is absent its exception types simply do not contribute to the
     retry set.
     """
-    exceptions: list = []
-    try:
-        import openai
-
-        exceptions += [
-            openai.RateLimitError,
-            openai.InternalServerError,
-            openai.APIConnectionError,
-            openai.APITimeoutError,
-            openai.LengthFinishReasonError,
-        ]
-    except ImportError:
-        pass
-    try:
-        from google.genai import errors
-
-        exceptions += [errors.ServerError, errors.ClientError]
-    except ImportError:
-        pass
-    try:
-        import anthropic
-
-        exceptions += [
-            anthropic.RateLimitError,
-            anthropic.InternalServerError,
-            anthropic.APIConnectionError,
-            anthropic.APITimeoutError,
-        ]
-    except ImportError:
-        pass
+    exceptions = [
+        *_import_attrs(
+            "openai",
+            "RateLimitError",
+            "InternalServerError",
+            "APIConnectionError",
+            "APITimeoutError",
+            "LengthFinishReasonError",
+        ),
+        *_import_attrs("google.genai.errors", "ServerError", "ClientError"),
+        *_import_attrs(
+            "anthropic",
+            "RateLimitError",
+            "InternalServerError",
+            "APIConnectionError",
+            "APITimeoutError",
+        ),
+    ]
     return tuple(exceptions) or (_NeverRaised,)
 
 
 def _gemini_client_error() -> type:
     """Return the Gemini ``ClientError`` type, or a sentinel if google-genai is absent."""
-    try:
-        from google.genai import errors
-
-        return errors.ClientError
-    except ImportError:
-        return _NeverRaised
+    found = _import_attrs("google.genai.errors", "ClientError")
+    return found[0] if found else _NeverRaised
 
 
 async def with_retry(

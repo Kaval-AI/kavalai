@@ -112,7 +112,8 @@ def get_rss_feed(
         raise Exception(f"Error parsing feed: {str(e)}")
 
 
-if __name__ == "__main__":
+def parse_args(argv=None) -> argparse.Namespace:
+    """Parse the RSS service command line."""
     parser = argparse.ArgumentParser(description="RSS-Parser Service")
     parser.add_argument(
         "--port", type=int, default=10000, help="Port to run the service on"
@@ -129,9 +130,19 @@ if __name__ == "__main__":
         default=os.environ.get("RSS_AUTH_PASSWORD", "password"),
         help="Basic auth password",
     )
-    args = parser.parse_args()
+    return parser.parse_args(argv)
 
+
+def main(argv=None):
+    """Run the RSS service with credentials from the command line."""
+    global AUTH_USER, AUTH_PASSWORD
+
+    args = parse_args(argv)
     AUTH_USER = args.user
     AUTH_PASSWORD = args.password
 
     uvicorn.run(app, host="0.0.0.0", port=args.port)
+
+
+if __name__ == "__main__":  # pragma: no cover - script entry point
+    main()

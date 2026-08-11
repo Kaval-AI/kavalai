@@ -78,6 +78,17 @@ async def test_openai_embeddings(monkeypatch):
     assert stats.total_tokens == 7
 
 
+def test_maybe_normalize_passes_through_when_disabled():
+    vectors = [[3.0, 4.0]]
+    assert emb._maybe_normalize(vectors, normalize=False, normalizer=None) is vectors
+
+
+def test_maybe_normalize_falls_back_to_the_default_normalizer():
+    # No normalizer supplied: the process-wide default is used.
+    result = emb._maybe_normalize([[3.0, 4.0]], normalize=True, normalizer=None)
+    assert len(result[0]) == 2
+
+
 async def test_openai_embeddings_normalized(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "k")
     client = OpenAIEmbeddingClient("text-embedding-3-small")

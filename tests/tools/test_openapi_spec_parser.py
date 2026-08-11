@@ -216,3 +216,41 @@ def test_resolution(example_spec):
     parser = OpenApiSpecParser(example_spec)
     assert parser.get_path_request_schema("/run_agent", "POST")
     assert parser.get_path_response_schema("/run_agent", "POST")
+
+
+def test_external_references_are_reported_not_resolved():
+    parser = OpenApiSpecParser({"openapi": "3.1.0"})
+    resolved = parser._get_referenced_data("https://example.com/schema.json#/Foo")
+    assert "not supported" in resolved["error"]
+
+
+def test_pointer_can_index_into_a_list():
+    spec = {"servers": [{"url": "http://a"}, {"url": "http://b"}]}
+    parser = OpenApiSpecParser(spec)
+    assert parser._get_referenced_data("#/servers/1") == {"url": "http://b"}
+
+
+def test_unresolvable_pointer_raises_key_error():
+    parser = OpenApiSpecParser({"components": {}})
+    with pytest.raises(KeyError, match="Could not resolve pointer part"):
+        parser._get_referenced_data("#/components/schemas/Missing")
+
+
+def test_circular_references_stop_recursing():
+    spec = {
+        "components": {
+            "schemas": {
+                "Node": {
+                    "type": "object",
+                    "properties": {"parent": {"$ref": "#/components/schemas/Node"}},
+                }
+            }
+        }
+    }
+    parser = OpenApiSpecParser(spec)
+    node = parser.resolved_spec["components"]["schemas"]["Node"]
+    parent = node["properties"]["parent"]
+    # One level is expanded; the self-reference below it is left as a bare
+    # $ref instead of recursing forever.
+    assert parent["type"] == "object"
+    assert parent["properties"]["parent"] == {"$ref": "#/components/schemas/Node"}

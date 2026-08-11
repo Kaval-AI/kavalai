@@ -4,10 +4,20 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
+from fastapi import HTTPException
+from fastapi.security import HTTPBasicCredentials
+from sqlalchemy.ext.asyncio import async_sessionmaker
+
+import kavalai.server as server_module
 from kavalai.server import (
     create_agent_app,
+    create_app_from_env_conf,
+    run_agent_server,
     format_sse_event,
+    mask_db_uri,
+    session_scope,
     stream_sse_events,
+    validate_auth,
 )
 from kavalai.workflow import WorkflowEngine
 from kavalai.workflow.models import WorkflowException, WorkflowStreamEvent
@@ -209,3 +219,199 @@ async def test_stream_sse_events_early_close_aborts_source():
     assert first.startswith("event: node_started")
     await gen.aclose()
     await asyncio.wait_for(closed.wait(), timeout=1)
+
+
+# ---------------------------------------------------------------------------
+# Auth
+# ---------------------------------------------------------------------------
+
+
+def test_validate_auth_allows_everything_when_unconfigured(monkeypatch):
+    monkeypatch.delenv("KAVALAI_AGENT_BASIC_AUTH_USER", raising=False)
+    monkeypatch.delenv("KAVALAI_AGENT_BASIC_AUTH_PASSWORD", raising=False)
+    assert validate_auth(None) is True
+
+
+def test_validate_auth_accepts_matching_credentials(monkeypatch):
+    monkeypatch.setenv("KAVALAI_AGENT_BASIC_AUTH_USER", "u")
+    monkeypatch.setenv("KAVALAI_AGENT_BASIC_AUTH_PASSWORD", "p")
+    credentials = HTTPBasicCredentials(username="u", password="p")
+    assert validate_auth(credentials) is True
+
+
+def test_validate_auth_rejects_missing_credentials(monkeypatch):
+    monkeypatch.setenv("KAVALAI_AGENT_BASIC_AUTH_USER", "u")
+    monkeypatch.setenv("KAVALAI_AGENT_BASIC_AUTH_PASSWORD", "p")
+    with pytest.raises(HTTPException) as exc:
+        validate_auth(None)
+    assert exc.value.status_code == 401
+    assert exc.value.detail == "Authentication required"
+
+
+def test_validate_auth_rejects_wrong_credentials(monkeypatch):
+    monkeypatch.setenv("KAVALAI_AGENT_BASIC_AUTH_USER", "u")
+    monkeypatch.setenv("KAVALAI_AGENT_BASIC_AUTH_PASSWORD", "p")
+    with pytest.raises(HTTPException) as exc:
+        validate_auth(HTTPBasicCredentials(username="u", password="nope"))
+    assert exc.value.detail == "Incorrect username/password"
+
+
+# ---------------------------------------------------------------------------
+# session_scope
+# ---------------------------------------------------------------------------
+
+
+class FakeSession:
+    def __init__(self):
+        self.executed = []
+        self.closed = False
+
+    async def execute(self, statement):
+        self.executed.append(statement)
+
+    async def close(self):
+        self.closed = True
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc_info):
+        await self.close()
+        return False
+
+
+@pytest.mark.asyncio
+async def test_session_scope_opens_a_session_from_a_factory():
+    session = FakeSession()
+
+    class FakeFactory(async_sessionmaker):
+        def __call__(self, **kwargs):
+            return session
+
+    factory = FakeFactory.__new__(FakeFactory)
+
+    async with session_scope(factory) as scoped:
+        assert scoped is session
+    assert session.closed is True
+
+
+@pytest.mark.asyncio
+async def test_session_scope_yields_an_existing_session():
+    session = FakeSession()
+    async with session_scope(session) as scoped:
+        assert scoped is session
+    # A borrowed session is not closed by the scope.
+    assert session.closed is False
+
+
+# ---------------------------------------------------------------------------
+# health / mask_db_uri
+# ---------------------------------------------------------------------------
+
+
+def test_health_reports_a_connected_database():
+    engine = WorkflowEngine.from_yaml(YAML, client_factory=_factory)
+    session = FakeSession()
+    app = create_agent_app(
+        engine=engine, session_provider=session, auth_dependency=lambda: None
+    )
+
+    resp = TestClient(app).get("/health")
+
+    assert resp.json() == {"status": "ok", "database": "connected"}
+
+
+def test_health_reports_a_broken_database():
+    class BrokenSession(FakeSession):
+        async def execute(self, statement):
+            raise RuntimeError("db down")
+
+    engine = WorkflowEngine.from_yaml(YAML, client_factory=_factory)
+    app = create_agent_app(
+        engine=engine, session_provider=BrokenSession(), auth_dependency=lambda: None
+    )
+
+    resp = TestClient(app, raise_server_exceptions=False).get("/health")
+
+    assert resp.status_code == 503
+
+
+def test_mask_db_uri_hides_the_password():
+    masked = mask_db_uri("postgresql+asyncpg://user:secret@localhost:5432/db")
+    assert masked == "postgresql+asyncpg://user:***@localhost:5432/db"
+
+
+def test_mask_db_uri_passes_through_uris_without_credentials():
+    assert mask_db_uri("sqlite+aiosqlite:///local.db") == "sqlite+aiosqlite:///local.db"
+
+
+def test_mask_db_uri_masks_everything_it_cannot_parse():
+    assert mask_db_uri("weird@uri") == "***"
+
+
+def test_mask_db_uri_keeps_a_credential_free_authority():
+    # An authority with a user but no password has nothing to mask.
+    assert (
+        mask_db_uri("postgresql+asyncpg://user@localhost:5432/db")
+        == "postgresql+asyncpg://user@localhost:5432/db"
+    )
+
+
+@pytest.fixture
+def env_configured_agent(tmp_path, monkeypatch):
+    """Environment describing a runnable agent server (no database contact)."""
+    workflow_path = tmp_path / "workflow.yaml"
+    workflow_path.write_text(YAML, encoding="utf-8")
+
+    monkeypatch.setenv("KAVALAI_AGENT_WORKFLOW_PATH", str(workflow_path))
+    monkeypatch.setenv(
+        "KAVALAI_DB_URI", "postgresql+asyncpg://user:secret@localhost:5432/db"
+    )
+    monkeypatch.setenv("KAVALAI_DB_SCHEMA", "agents")
+    monkeypatch.setenv("KAVALAI_AGENT_BASIC_AUTH_USER", "u")
+    monkeypatch.setenv("KAVALAI_AGENT_BASIC_AUTH_PASSWORD", "p")
+    monkeypatch.setenv("KAVALAI_OPENAI_SERVICE_TIER", "priority")
+    return workflow_path
+
+
+def test_create_app_from_env_conf_builds_the_agent(env_configured_agent):
+    app = create_app_from_env_conf()
+
+    assert app.state.engine.graph.name == "srv"
+
+
+def test_create_app_from_env_conf_arguments_override_the_environment(
+    env_configured_agent, monkeypatch
+):
+    monkeypatch.delenv("KAVALAI_AGENT_BASIC_AUTH_USER", raising=False)
+    monkeypatch.delenv("KAVALAI_AGENT_BASIC_AUTH_PASSWORD", raising=False)
+    monkeypatch.delenv("KAVALAI_OPENAI_SERVICE_TIER", raising=False)
+
+    app = create_app_from_env_conf(
+        workflow_path=str(env_configured_agent),
+        db_uri="postgresql+asyncpg://user:secret@localhost:5432/other",
+        db_schema="public",
+        pool_size=1,
+        max_overflow=2,
+        sql_echo=True,
+        openai_service_tier="",
+    )
+
+    assert app.state.engine.graph.name == "srv"
+
+
+def test_run_agent_server_serves_the_configured_app(env_configured_agent, monkeypatch):
+    served = {}
+
+    def fake_run(app, host, port):
+        served.update(app=app, host=host, port=port)
+
+    monkeypatch.setattr(server_module.uvicorn, "run", fake_run)
+    monkeypatch.setenv("KAVALAI_AGENT_HOST", "127.0.0.1")
+    monkeypatch.setenv("KAVALAI_AGENT_PORT", "1234")
+
+    run_agent_server()
+
+    assert served["host"] == "127.0.0.1"
+    assert served["port"] == 1234
+    assert served["app"].state.engine.graph.name == "srv"

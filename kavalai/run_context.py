@@ -65,14 +65,13 @@ class RunContext(BaseModel):
             prefix = match.group(1)
             path = match.group(2).strip()
 
+            # The pattern only matches these three prefixes.
             if prefix == "templates":
                 val = await self.resolve_template_value(path)
             elif prefix == "context":
                 val = self.resolve_context_value(path)
-            elif prefix == "history":
-                val = await self.resolve_history_value(path)
             else:
-                val = None
+                val = await self.resolve_history_value(path)
 
             if val is None:
                 raise ValueError(f"Could not resolve {prefix}.{path}")

@@ -100,3 +100,25 @@ def test_clean_text_unicode_emojis():
     # Mixed with problematic chars
     mixed = "🚀\u0000🌍\x07"
     assert clean_text(mixed) == "🚀🌍"
+
+
+def test_to_plain_stringifies_datetimes_and_uuids():
+    from datetime import datetime
+    from uuid import UUID
+
+    moment = datetime(2026, 8, 11, 9, 30)
+    identifier = UUID("11111111-2222-3333-4444-555555555555")
+
+    assert to_plain(moment) == "2026-08-11 09:30:00"
+    assert to_plain(identifier) == "11111111-2222-3333-4444-555555555555"
+    assert to_plain({"at": moment, "id": identifier}) == {
+        "at": "2026-08-11 09:30:00",
+        "id": "11111111-2222-3333-4444-555555555555",
+    }
+
+
+def test_to_plain_passes_scalars_through():
+    assert to_plain(5) == 5
+    assert to_plain(1.5) == 1.5
+    assert to_plain(None) is None
+    assert to_plain(True) is True

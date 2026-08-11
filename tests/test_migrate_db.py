@@ -5,7 +5,15 @@ import pytest
 from sqlalchemy import create_engine, inspect, text
 from testcontainers.postgres import PostgresContainer
 
-from kavalai.migrate_db import ensure_sync_scheme, migrate, main
+from sqlalchemy.exc import OperationalError
+
+import kavalai.migrate_db as migrate_db_module
+from kavalai.migrate_db import (
+    _connect_with_retry,
+    ensure_sync_scheme,
+    migrate,
+    main,
+)
 
 
 @pytest.fixture(scope="module")
@@ -217,3 +225,45 @@ def test_backoffice_migrations_match_models(db_uri):
     migrate("backoffice", uri=db_uri, schema=schema)
     diffs = _parity_diffs(db_uri, schema, Base.metadata)
     assert diffs == [], f"models and migrations diverged: {diffs}"
+
+
+class _FlakyEngine:
+    """An engine whose first ``failures`` connections fail as if the DB is down."""
+
+    def __init__(self, failures):
+        self.failures = failures
+        self.attempts = 0
+
+    def connect(self):
+        self.attempts += 1
+        if self.attempts <= self.failures:
+            raise OperationalError("SELECT 1", {}, Exception("connection refused"))
+        return _FakeConnection()
+
+
+class _FakeConnection:
+    def execute(self, statement):
+        return None
+
+
+def test_connect_with_retry_backs_off_until_the_database_is_up(monkeypatch):
+    slept = []
+    monkeypatch.setattr(migrate_db_module.time, "sleep", slept.append)
+
+    engine = _FlakyEngine(failures=2)
+    connection = _connect_with_retry(engine, max_wait=30.0)
+
+    assert isinstance(connection, _FakeConnection)
+    assert engine.attempts == 3
+    # Backoff doubles between attempts.
+    assert slept == [1.0, 2.0]
+
+
+def test_connect_with_retry_gives_up_after_max_wait(monkeypatch):
+    monkeypatch.setattr(migrate_db_module.time, "sleep", lambda _: None)
+
+    engine = _FlakyEngine(failures=99)
+    with pytest.raises(OperationalError):
+        _connect_with_retry(engine, max_wait=0.0)
+
+    assert engine.attempts == 1

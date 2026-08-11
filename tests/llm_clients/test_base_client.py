@@ -1,99 +1,112 @@
 import pytest
 from unittest.mock import patch
+
+from pydantic import BaseModel
+
 from kavalai.llm_clients.base_client import (
     BaseLlmClient,
     ChatHistory,
     ChatMessage,
     LlmClientParameters,
     ModelStatsLogger,
+    ModelStatsReceiver,
     ModelCallStat,
 )
 import openai
 
 
-class MockClient(BaseLlmClient):
+class ScriptedClient(BaseLlmClient):
+    """A client whose completion is driven by a small script.
+
+    The script is called as ``script(attempt, streamer)`` for each attempt, so
+    a test writes what the provider does instead of patching a private method.
+    """
+
+    def __init__(self, script=None, **kwargs):
+        super().__init__(**kwargs)
+        self.script = script
+        self.attempts = 0
+
     async def _run_chat_completions(self, chat_history, response_model, streamer):
-        # This will be mocked in tests
-        pass
+        self.attempts += 1
+        if self.script is not None:
+            await self.script(self.attempts, streamer)
+
+
+async def stream_text(streamer, *chunks, name="response"):
+    """Stream ``chunks`` on ``name`` and complete it."""
+    value_streamer = streamer.get_value_streamer(name)
+    for chunk in chunks:
+        await value_streamer.stream_partial(chunk)
+    await value_streamer.stream_complete()
+
+
+def no_backoff():
+    """Skip the retry sleep so retry tests don't wait on real backoff."""
+    return patch("kavalai.llm_clients.with_retry.asyncio.sleep", return_value=None)
+
+
+USER_HISTORY = ChatHistory(messages=[ChatMessage(role="user", content="test")])
 
 
 @pytest.mark.asyncio
 async def test_retry_logic():
-    # Set a short timeout for the streamer to fail fast if it doesn't work
-    params = LlmClientParameters(timeout_seconds=2.0)
-    client = MockClient(llm_client_parameters=params)
-    chat_history = ChatHistory(messages=[ChatMessage(role="user", content="test")])
-
-    # Mock _run_chat_completions to fail once with a retriable error and then succeed
-    call_count = 0
-
-    async def side_effect(chat_history, response_model, streamer):
-        nonlocal call_count
-        call_count += 1
-        print(f"Call count: {call_count}")
-        if call_count == 1:
+    async def flaky(attempt, streamer):
+        if attempt == 1:
             raise openai.APIConnectionError(request=None)
+        await stream_text(streamer, "Success")
 
-        # On second call, succeed
-        value_streamer = streamer.get_value_streamer("response")
-        await value_streamer.stream_partial("Success")
-        await value_streamer.stream_complete()
+    client = ScriptedClient(
+        flaky, llm_client_parameters=LlmClientParameters(timeout_seconds=2.0)
+    )
 
-    with patch.object(MockClient, "_run_chat_completions", side_effect=side_effect):
-        # We need to lower the retry delay for testing
-        with patch("kavalai.llm_clients.with_retry.asyncio.sleep", return_value=None):
-            streamer = await client.stream_chat_completions(chat_history=chat_history)
+    with no_backoff():
+        streamer = await client.stream_chat_completions(chat_history=USER_HISTORY)
+        contents = [content async for content in streamer]
 
-            contents = []
-            async for content in streamer:
-                contents.append(content)
-
-            assert call_count == 2
-            assert contents[-1].value == "Success"
-            assert contents[-1].type == "complete"
+    assert client.attempts == 2
+    assert contents[-1].value == "Success"
+    assert contents[-1].type == "complete"
 
 
 @pytest.mark.asyncio
 async def test_non_retriable_error():
-    params = LlmClientParameters(timeout_seconds=1.0)
-    client = MockClient(llm_client_parameters=params)
-    chat_history = ChatHistory(messages=[ChatMessage(role="user", content="test")])
-
-    async def side_effect(chat_history, response_model, streamer):
+    async def boom(attempt, streamer):
         raise ValueError("Non-retriable error")
 
-    with patch.object(MockClient, "_run_chat_completions", side_effect=side_effect):
-        # Should raise RuntimeError from the streamer
-        with pytest.raises(RuntimeError, match="Non-retriable error"):
-            streamer = await client.stream_chat_completions(chat_history=chat_history)
-            async for _ in streamer:
-                pass
+    client = ScriptedClient(
+        boom, llm_client_parameters=LlmClientParameters(timeout_seconds=1.0)
+    )
+
+    # The error reaches the consumer as a RuntimeError from the streamer.
+    with pytest.raises(RuntimeError, match="Non-retriable error"):
+        streamer = await client.stream_chat_completions(chat_history=USER_HISTORY)
+        async for _ in streamer:
+            pass
+
+    assert client.attempts == 1
 
 
 @pytest.mark.asyncio
 async def test_retry_emits_restart_chunk():
     """A retried attempt announces itself with a restart chunk so streaming
     consumers can discard the failed attempt's partials."""
-    params = LlmClientParameters(timeout_seconds=2.0)
-    client = MockClient(llm_client_parameters=params)
-    chat_history = ChatHistory(messages=[ChatMessage(role="user", content="test")])
 
-    call_count = 0
-
-    async def side_effect(chat_history, response_model, streamer):
-        nonlocal call_count
-        call_count += 1
+    async def flaky(attempt, streamer):
         value_streamer = streamer.get_value_streamer("response")
-        if call_count == 1:
+        if attempt == 1:
             await value_streamer.stream_partial("garbage")
             raise openai.APIConnectionError(request=None)
         await value_streamer.stream_partial("Success")
         await value_streamer.stream_complete()
 
-    with patch.object(MockClient, "_run_chat_completions", side_effect=side_effect):
-        with patch("kavalai.llm_clients.with_retry.asyncio.sleep", return_value=None):
-            streamer = await client.stream_chat_completions(chat_history=chat_history)
-            contents = [content async for content in streamer]
+    client = ScriptedClient(
+        flaky, llm_client_parameters=LlmClientParameters(timeout_seconds=2.0)
+    )
+
+    with no_backoff():
+        streamer = await client.stream_chat_completions(chat_history=USER_HISTORY)
+        contents = [content async for content in streamer]
 
     types = [c.type for c in contents]
     assert types == ["partial", "restart", "partial", "complete"]
@@ -104,7 +117,9 @@ async def test_retry_emits_restart_chunk():
 
 @pytest.mark.asyncio
 async def test_stream_timeout_defaults_to_twice_llm_timeout():
-    client = MockClient(llm_client_parameters=LlmClientParameters(timeout_seconds=7.0))
+    client = ScriptedClient(
+        llm_client_parameters=LlmClientParameters(timeout_seconds=7.0)
+    )
     streamer = await client.stream_chat_completions(
         chat_history=ChatHistory(messages=[])
     )
@@ -113,7 +128,7 @@ async def test_stream_timeout_defaults_to_twice_llm_timeout():
 
 @pytest.mark.asyncio
 async def test_stream_timeout_explicit_override():
-    client = MockClient(
+    client = ScriptedClient(
         llm_client_parameters=LlmClientParameters(
             timeout_seconds=7.0, stream_timeout_seconds=42.0
         )
@@ -126,21 +141,92 @@ async def test_stream_timeout_explicit_override():
 
 @pytest.mark.asyncio
 async def test_stream_delta_passed_to_streamer():
-    async def side_effect(chat_history, response_model, streamer):
-        value_streamer = streamer.get_value_streamer("response")
-        await value_streamer.stream_partial("a")
-        await value_streamer.stream_partial("b")
-        await value_streamer.stream_complete()
+    async def two_chunks(attempt, streamer):
+        await stream_text(streamer, "a", "b")
 
-    client = MockClient()
-    with patch.object(MockClient, "_run_chat_completions", side_effect=side_effect):
-        streamer = await client.stream_chat_completions(
-            chat_history=ChatHistory(messages=[]), stream_delta=True
-        )
-        contents = [content async for content in streamer]
+    client = ScriptedClient(two_chunks)
+    streamer = await client.stream_chat_completions(
+        chat_history=ChatHistory(messages=[]), stream_delta=True
+    )
+    contents = [content async for content in streamer]
 
     # Delta mode: raw deltas, and the complete chunk carries no value.
     assert [c.value for c in contents] == ["a", "b", None]
+
+
+@pytest.mark.asyncio
+async def test_chat_completions_returns_the_completed_text():
+    async def answer(attempt, streamer):
+        await stream_text(streamer, "Hello", ", world!")
+
+    client = ScriptedClient(answer)
+    # Partials accumulate, so the completed value is the whole answer.
+    result = await client.chat_completions(chat_history=USER_HISTORY)
+    assert result == "Hello, world!"
+
+
+@pytest.mark.asyncio
+async def test_chat_completions_validates_against_the_response_model():
+    class City(BaseModel):
+        name: str
+        country: str
+
+    async def answer(attempt, streamer):
+        await stream_text(streamer, '{"name": "Tallinn", "country": "Estonia"}')
+
+    client = ScriptedClient(answer)
+    result = await client.chat_completions(
+        chat_history=USER_HISTORY, response_model=City
+    )
+    assert result == City(name="Tallinn", country="Estonia")
+
+
+@pytest.mark.asyncio
+async def test_prompt_wraps_the_message_as_a_system_turn():
+    seen = {}
+
+    async def capture(attempt, streamer):
+        await stream_text(streamer, "answered")
+
+    class CapturingClient(ScriptedClient):
+        async def _run_chat_completions(self, chat_history, response_model, streamer):
+            seen["messages"] = chat_history.messages
+            await super()._run_chat_completions(chat_history, response_model, streamer)
+
+    client = CapturingClient(capture)
+    assert await client.prompt("What is Tallinn?") == "answered"
+    assert [(m.role, m.content) for m in seen["messages"]] == [
+        ("system", "What is Tallinn?")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_stream_prompt_returns_a_streamer_for_a_single_message():
+    async def answer(attempt, streamer):
+        await stream_text(streamer, "one", " two")
+
+    client = ScriptedClient(answer)
+    streamer = await client.stream_prompt("Count to two.")
+    contents = [content async for content in streamer]
+
+    assert [c.value for c in contents] == ["one", "one two", "one two"]
+    assert contents[-1].type == "complete"
+
+
+@pytest.mark.asyncio
+async def test_base_run_chat_completions_must_be_implemented():
+    client = BaseLlmClient()
+    with pytest.raises(NotImplementedError):
+        await client._run_chat_completions(
+            chat_history=ChatHistory(messages=[]), response_model=None, streamer=None
+        )
+
+
+def test_model_stats_receiver_must_be_implemented():
+    with pytest.raises(NotImplementedError):
+        ModelStatsReceiver().receive_model_stats(
+            ModelCallStat(call_type="llm", model="gpt-4")
+        )
 
 
 def test_model_stats_logger():

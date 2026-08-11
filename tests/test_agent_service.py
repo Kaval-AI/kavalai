@@ -353,3 +353,58 @@ class TestAgentService:
         assert await service.get_chat_history(session.id) == []
         stats = await service.get_model_call_stats(call_type="llm", limit=100)
         assert not any(s.agent_id == agent.id for s in stats)
+
+    async def test_get_or_create_agent_updates_changed_fields(
+        self, agents_session_maker
+    ):
+        service = AgentService(agents_session_maker)
+        created = await service.get_or_create_agent(
+            name="Updatable", description="first"
+        )
+
+        updated = await service.get_or_create_agent(
+            name="Updatable",
+            description="second",
+            workflow={"name": "wf"},
+        )
+
+        assert updated.id == created.id
+        assert updated.description == "second"
+        assert updated.workflow == {"name": "wf"}
+
+        # Passing the same values again is a no-op.
+        unchanged = await service.get_or_create_agent(
+            name="Updatable", description="second"
+        )
+        assert unchanged.description == "second"
+
+    async def test_update_run_rejects_an_unknown_run(self, agents_session_maker):
+        service = AgentService(agents_session_maker)
+        with pytest.raises(ValueError, match="Run not found"):
+            await service.update_run(run_id=uuid4(), output_data={"a": 1})
+
+    async def test_update_run_stores_output_data(self, agents_session_maker):
+        service = AgentService(agents_session_maker)
+        agent = await service.get_or_create_agent(name="OutputBot")
+        session = await service.get_or_create_session(agent_id=agent.id)
+        run = await service.create_run(session_id=session.id)
+
+        stored = await service.update_run(
+            run_id=run.id, output_data={"agent_response": "hi"}
+        )
+
+        assert stored.output_data == {"agent_response": "hi"}
+
+    async def test_get_history_value_skips_runs_without_context(
+        self, agents_session_maker
+    ):
+        service = AgentService(agents_session_maker)
+        agent = await service.get_or_create_agent(name="SparseHistory")
+        session = await service.get_or_create_session(agent_id=agent.id)
+
+        run = await service.create_run(session_id=session.id)
+        await service.update_run(run_id=run.id, context={"answer": "kept"})
+        # A newer run that never recorded a context must not mask the older one.
+        await service.create_run(session_id=session.id)
+
+        assert await service.get_history_value(session.id, "answer") == "kept"

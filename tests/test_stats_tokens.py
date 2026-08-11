@@ -82,3 +82,23 @@ async def test_stats_with_tokens_and_models(agents_db: AsyncSession):
         if d["date"] == today_str
     )
     assert embedding_today["prompt_tokens"] == 500
+
+
+@pytest.mark.asyncio
+async def test_daily_run_series_is_grouped_per_agent(agents_db: AsyncSession):
+    from kavalai.db import Run, Session as DbSession
+
+    agent = await insert(agents_db, Agent, {"name": "RunBot"})
+    session = await insert(
+        agents_db, DbSession, {"agent_id": agent.id, "external_id": "u1"}
+    )
+    for _ in range(2):
+        await insert(agents_db, Run, {"session_id": session.id, "input_data": {}})
+
+    daily = await get_daily_stats(agents_db, days=7, agent_id=agent.id)
+
+    series = daily["runs"]["RunBot"]
+    assert len(series) == 7
+    # Every day is represented; the runs land on the most recent one.
+    assert {entry["count"] for entry in series} == {0, 2}
+    assert all("duration_seconds" in entry for entry in series)

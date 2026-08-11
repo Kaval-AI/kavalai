@@ -41,7 +41,7 @@ import os
 import sys
 from typing import List, Optional, Generator, Dict, Any
 
-from kavalai.rag import PostgresRagService
+from kavalai.rag import BaseRagService, PostgresRagService
 
 
 def csv_row_generator(
@@ -93,6 +93,16 @@ def _split_content(
         yield {"text": content, "meta": row_meta, "source_id": source_id}
 
 
+def rag_service_from_env(model: Optional[str] = None) -> PostgresRagService:
+    """Build the Postgres RAG service this script indexes into."""
+    model = model if model else os.environ["KAVALAI_DEFAULT_EMBEDDING_MODEL"]
+    return PostgresRagService.from_uri(
+        uri=os.environ["KAVALAI_DB_URI"],
+        model=model,
+        schema=os.environ.get("KAVALAI_DB_SCHEMA"),
+    )
+
+
 async def index_csv(
     *,
     csv_path: str,
@@ -105,13 +115,15 @@ async def index_csv(
     limit: Optional[int],
     replace: bool = False,
     batch_size: int = 10,
+    rag_service: Optional[BaseRagService] = None,
 ):
-    model = model if model else os.environ["KAVALAI_DEFAULT_EMBEDDING_MODEL"]
-    rag_service = PostgresRagService.from_uri(
-        uri=os.environ["KAVALAI_DB_URI"],
-        model=model,
-        schema=os.environ.get("KAVALAI_DB_SCHEMA"),
-    )
+    """Index a CSV into a RAG collection.
+
+    ``rag_service`` defaults to the Postgres service described by the
+    environment; pass one explicitly to index into a different backend.
+    """
+    if rag_service is None:
+        rag_service = rag_service_from_env(model)
 
     rows_processed = 0
     total_chunks = 0
@@ -167,7 +179,8 @@ async def index_csv(
     )
 
 
-def main():
+def parse_args(argv=None) -> argparse.Namespace:
+    """Parse the indexer command line."""
     parser = argparse.ArgumentParser(description="Index a CSV file into RAG.")
     parser.add_argument("csv_path", help="Path to the CSV file")
     parser.add_argument("--collection-name", required=True, help="RAG collection name")
@@ -207,7 +220,12 @@ def main():
         "--batch-size", type=int, default=10, help="Batch size for indexing"
     )
 
-    args = parser.parse_args()
+    return parser.parse_args(argv)
+
+
+def main(argv=None, rag_service: Optional[BaseRagService] = None):
+    """Index the CSV named on the command line."""
+    args = parse_args(argv)
 
     if not os.path.exists(args.csv_path):
         logger.error(f"Error: CSV file '{args.csv_path}' not found.")
@@ -225,9 +243,10 @@ def main():
             limit=args.limit,
             replace=args.replace,
             batch_size=args.batch_size,
+            rag_service=rag_service,
         )
     )
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover - script entry point
     main()

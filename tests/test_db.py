@@ -209,3 +209,10 @@ async def test_sqlite_compat_sessionmaker_runs_agent_service():
 
     updated = await service.update_run(run.id, output_data={"a": 1})
     assert updated.output_data == {"a": 1}
+
+
+@pytest.mark.asyncio
+async def test_delete_missing_row_reports_false(agents_db: AsyncSession):
+    from uuid import uuid4
+
+    assert await delete(agents_db, Agent, uuid4()) is False

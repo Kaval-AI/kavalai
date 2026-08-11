@@ -520,5 +520,5 @@ def run_agent_server():
     )
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover - script entry point
     run_agent_server()
