@@ -108,6 +108,67 @@ To load and run from YAML:
 Other constructors include ``WorkflowEngine.from_yaml_path`` and
 ``WorkflowEngine.from_dict``.
 
+Streaming a run
+---------------
+
+Every run is a stream. :meth:`~kavalai.WorkflowEngine.run_stream` yields
+:class:`~kavalai.workflow.models.WorkflowStreamEvent` objects as the graph
+executes, and :meth:`~kavalai.WorkflowEngine.run` is simply that stream drained
+to completion — there is one execution path, so a streamed run and a blocking
+run behave identically:
+
+.. code-block:: python
+
+   async for event in engine.run_stream({"user_message": "I want a refund"}):
+       print(event.type, event.name, event.value)
+
+Lifecycle events frame the run; nodes with streaming enabled contribute content
+events in between:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Event type
+     - When it arrives
+   * - ``workflow_started``
+     - Once, at the start; carries ``session_id`` and ``run_id``.
+   * - ``node_started`` / ``node_completed``
+     - Around each visited node; ``name`` is the node name.
+   * - ``partial`` / ``complete``
+     - Streamed content from a node that opted in (see below).
+   * - ``restart``
+     - A retried LLM call is starting its stream over — discard what you have
+       accumulated under that ``name``, it will be re-sent.
+   * - ``workflow_completed``
+     - Once, on success; carries ``output_data`` and ``token_usage``.
+   * - ``workflow_failed``
+     - Once, on failure; the error message is in ``value``. Yielded *before* the
+       :class:`~kavalai.WorkflowException` is raised to the caller.
+
+Streaming is opt-in per node, because most nodes are not worth streaming. An
+``llm`` node takes ``stream_output`` to stream its completion, and an ``agent``
+node adds ``stream_instructions`` (each step's "thinking out loud" line) and
+``stream_partials`` (a debug firehose of raw step output). The node's own output
+streams under the node name; auxiliary streams are prefixed with it —
+``<node>_thought``, ``<node>_instructions``, ``<node>_step<N>``.
+
+``stream_delta`` chooses what a ``partial`` carries. Left off, each partial holds
+the full accumulated, safe-parsed value so far: render-ready with no client-side
+assembly, but the whole buffer goes over the wire on every chunk. Set it and each
+partial carries only the new text, which the client reassembles — prefer that for
+long outputs. Both YAML and the :class:`~kavalai.WorkflowBuilder` accept these
+flags:
+
+.. code-block:: python
+
+   .llm("reply", prompt=prompt, output="output", next="end",
+        stream_output=True, stream_delta=True)
+
+To serve a stream over HTTP, use the agent server's ``POST /stream_agent``
+endpoint, which renders these events as Server-Sent Events — see
+:doc:`/api/server`.
+
 The WorkflowState
 -----------------
 
@@ -124,6 +185,7 @@ and the audit trail:
   ``total_tokens``.
 
 The state is serialisable via ``state.to_json()`` and
-``WorkflowState.from_json()``, and it is checkpointed to storage after every
-node — so a run can be reloaded and inspected later. See :doc:`observability`
-for how this powers the backoffice UI.
+``WorkflowState.from_json()``, and the run is recorded through the
+:class:`~kavalai.agent_service.AgentService` — so it can be reloaded and
+inspected later, including runs that ended early because a streaming client
+disconnected. See :doc:`observability` for how this powers the backoffice UI.

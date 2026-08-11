@@ -54,8 +54,8 @@ Embeddings work the same way. Embedding models are distinct from chat models;
 
    ``browser/`` models need a WebGPU-capable browser (recent Chrome/Edge, or
    Firefox with ``dom.webgpu.enabled``). The model downloads on first use and is
-   cached by the browser. Outside the browser, use an ``openai/``, ``gemini/`` or
-   ``ollama/`` model instead.
+   cached by the browser. Outside the browser, use an ``openai/``, ``gemini/``,
+   ``anthropic/`` or ``ollama/`` model instead.
 
 Base client and models
 ----------------------
@@ -68,6 +68,8 @@ Provider clients
 .. automodule:: kavalai.llm_clients.openai_client
 
 .. automodule:: kavalai.llm_clients.gemini_client
+
+.. automodule:: kavalai.llm_clients.anthropic_client
 
 .. automodule:: kavalai.llm_clients.ollama_client
 

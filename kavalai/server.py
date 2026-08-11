@@ -222,31 +222,35 @@ def create_agent_router(
     This function creates a reusable router that can be mounted on existing FastAPI applications,
     allowing for flexible composition and custom routing configurations.
 
+    The router serves ``POST /run_agent`` (blocking) and ``POST /stream_agent``
+    (SSE), both typed by the workflow's own input and output data types, plus
+    ``GET /workflow``, ``GET /liveness`` and ``GET /health``.
+
     Args:
-        workflow: The Workflow instance to serve.
+        engine: The :class:`~kavalai.WorkflowEngine` instance to serve.
         session_provider: An optional SQLAlchemy async_sessionmaker to provide
             database sessions for agent execution.
         auth_dependency: An optional FastAPI dependency for authentication.
             If None, the default HTTP Basic Auth will be used.
             Pass a custom dependency function to use your own auth, or pass
-            lambda: None to disable authentication.
+            ``lambda: None`` to disable authentication.
 
     Returns:
         An APIRouter instance with configured endpoints.
 
     Example:
-        ```python
-        # Use with custom auth
-        def my_auth():
-            # Custom auth logic
-            pass
+        .. code-block:: python
 
-        router = create_agent_router(workflow, session_provider, auth_dependency=my_auth)
-        app.include_router(router, prefix="/agents/my-workflow")
+            # Use with custom auth
+            def my_auth():
+                # Custom auth logic
+                pass
 
-        # Or disable auth entirely
-        router = create_agent_router(workflow, session_provider, auth_dependency=lambda: None)
-        ```
+            router = create_agent_router(engine, session_provider, auth_dependency=my_auth)
+            app.include_router(router, prefix="/agents/my-workflow")
+
+            # Or disable auth entirely
+            router = create_agent_router(engine, session_provider, auth_dependency=lambda: None)
     """
     router = APIRouter()
 
@@ -352,7 +356,7 @@ def create_agent_app(
     This function now uses create_agent_router() internally for better composability.
 
     Args:
-        workflow: The Workflow instance to serve.
+        engine: The :class:`~kavalai.WorkflowEngine` instance to serve.
         session_provider: An optional SQLAlchemy async_sessionmaker to provide
             database sessions for agent execution.
         auth_dependency: An optional FastAPI dependency for authentication.
@@ -418,6 +422,7 @@ def create_app_from_env_conf(
     Optional parameters can override the environment variables.
 
     The following environment variables are used:
+
     - KAVALAI_AGENT_WORKFLOW_PATH: Path to the workflow YAML file.
     - KAVALAI_DB_URI: Database connection string.
     - KAVALAI_DB_SCHEMA: Database schema name.

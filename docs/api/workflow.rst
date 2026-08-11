@@ -2,9 +2,10 @@ Workflow API
 ============
 
 The workflow engine lives in :mod:`kavalai.workflow`. It turns a YAML graph (or a
-:class:`~kavalai.WorkflowBuilder` chain) into an executable state machine, and
-checkpoints a serialisable state through pluggable storage and task-logger
-backends.
+:class:`~kavalai.WorkflowBuilder` chain) into an executable state machine, runs
+it as a stream of :class:`~kavalai.workflow.models.WorkflowStreamEvent` events,
+and records a serialisable state through an
+:class:`~kavalai.agent_service.AgentService` and a pluggable task-logger backend.
 
 Engine and builder
 -------------------
@@ -39,3 +40,5 @@ Task logging backends
 .. automodule:: kavalai.workflow.tasklog.base
 
 .. automodule:: kavalai.workflow.tasklog.sqlite
+
+.. automodule:: kavalai.workflow.tasklog.postgres

@@ -72,8 +72,8 @@ Let's go over the code step-by-step.
 
 This creates the builder for a workflow named ``Chatbot``. The ``llm_model``
 argument is the default model every LLM node uses unless it overrides it.
-Kaval.AI supports several providers — OpenAI, Gemini, Ollama and an in-browser
-WebGPU provider; see :doc:`/tutorials/llm_clients`.
+Kaval.AI supports several providers — OpenAI, Gemini, Anthropic, Ollama and an
+in-browser WebGPU provider; see :doc:`/tutorials/llm_clients`.
 
 Here we use the ``browser`` provider so a small model runs **right in this page**
 with no API key, backed by the in-browser ``BrowserLLMClient`` (see
@@ -152,8 +152,8 @@ Get started
 -----------
 
 Kaval.AI is more than a workflow engine. It ships native LLM clients for OpenAI,
-Gemini and Ollama behind one streaming interface (plus the in-browser WebGPU
-client you just used); a :class:`~kavalai.FunctionKernel` that exposes Python,
+Gemini, Anthropic and Ollama behind one streaming interface (plus the in-browser
+WebGPU client you just used); a :class:`~kavalai.FunctionKernel` that exposes Python,
 REST and MCP tools to your agents through a single validated interface; a
 :class:`~kavalai.RagService` for indexing and querying embeddings, so agents can
 answer from your own documents (retrieval-augmented generation); and a

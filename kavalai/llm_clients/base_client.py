@@ -37,10 +37,10 @@ class LlmClientParameters(BaseModel):
     reasoning_effort: Optional[str] = None
     service_tier: Optional[str] = None
     timeout_seconds: Optional[float] = 30.0
-    # Reviewer: We don't actually initialize the timeout here, so the comment here is not useful.
-    # Inter-chunk inactivity timeout for streaming consumers. Defaults to
-    # 2 x timeout_seconds so the stream survives one timed-out attempt plus
-    # its retry backoff (timeout_seconds alone would kill retries).
+    # Inter-chunk inactivity timeout for streaming consumers. When unset,
+    # ``chat_stream`` falls back to 2 x timeout_seconds so the stream survives
+    # one timed-out attempt plus its retry backoff (timeout_seconds alone
+    # would kill retries).
     stream_timeout_seconds: Optional[float] = None
 
 

@@ -185,6 +185,7 @@ class WorkflowBuilder:
         llm_model: Optional[str] = None,
         llm_kwargs: Optional[dict[str, Any]] = None,
         stream_output: bool = False,
+        stream_delta: bool = False,
     ) -> "WorkflowBuilder":
         self._nodes.append(
             LLMNode(
@@ -197,6 +198,7 @@ class WorkflowBuilder:
                 llm_model=llm_model,
                 llm_kwargs=llm_kwargs or {},
                 stream_output=stream_output,
+                stream_delta=stream_delta,
             )
         )
         return self
@@ -213,6 +215,10 @@ class WorkflowBuilder:
         max_steps: int = 10,
         llm_model: Optional[str] = None,
         llm_kwargs: Optional[dict[str, Any]] = None,
+        stream_output: bool = False,
+        stream_delta: bool = False,
+        stream_instructions: bool = False,
+        stream_partials: bool = False,
     ) -> "WorkflowBuilder":
         self._nodes.append(
             AgentNode(
@@ -225,6 +231,10 @@ class WorkflowBuilder:
                 max_steps=max_steps,
                 llm_model=llm_model,
                 llm_kwargs=llm_kwargs or {},
+                stream_output=stream_output,
+                stream_delta=stream_delta,
+                stream_instructions=stream_instructions,
+                stream_partials=stream_partials,
             )
         )
         return self

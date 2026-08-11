@@ -13,4 +13,5 @@ out of the box. The pages below document each subsystem in detail.
    agents
    llm_clients
    functionkernel
+   server
    backoffice

@@ -33,7 +33,9 @@ The bare ``kavalai`` package is provider-agnostic; extras pull in only what you
 need:
 
 * ``kavalai[openai]`` — the OpenAI client (used below).
-* ``kavalai[gemini]`` / ``kavalai[ollama]`` — the Google Gemini / Ollama clients.
+* ``kavalai[gemini]`` / ``kavalai[anthropic]`` / ``kavalai[ollama]`` — the Google
+  Gemini / Anthropic (Claude) / Ollama clients.
+* ``kavalai[llm]`` — all four provider clients at once.
 * ``kavalai[tools]`` — the Crawl4AI web-scraping tool.
 * ``kavalai[notebooks]`` — Jupyter support for running the tutorial notebooks.
 

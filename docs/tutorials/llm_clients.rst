@@ -14,7 +14,7 @@ standalone — you can use them on their own, or let a workflow build them for y
 
 The fastest way to construct one is :func:`~kavalai.make_client`, which picks the
 right client from a ``"provider/model"`` string (``openai/…``, ``gemini/…``,
-``ollama/…`` or ``browser/…``).
+``anthropic/…``, ``ollama/…`` or ``browser/…``).
 
 Try it in your browser: text vs. structured output
 --------------------------------------------------
@@ -88,23 +88,24 @@ render a partially-filled object safely.
 This is just the gist — backpressure, timeouts and structured streaming are
 covered in the dedicated :doc:`streamer` tutorial.
 
-Provider clients: OpenAI, Gemini and Ollama
--------------------------------------------
+Provider clients: OpenAI, Gemini, Anthropic and Ollama
+------------------------------------------------------
 
-Outside the browser, Kaval.AI ships native clients for OpenAI, Google Gemini and
-Ollama. You can build them directly and pass the API key two ways — straight to
-the constructor, or via an environment variable:
+Outside the browser, Kaval.AI ships native clients for OpenAI, Google Gemini,
+Anthropic (Claude) and Ollama. You can build them directly and pass the API key
+two ways — straight to the constructor, or via an environment variable:
 
 .. code-block:: python
 
-   from kavalai import OpenAIClient, GeminiClient, OllamaClient
+   from kavalai import OpenAIClient, GeminiClient, AnthropicClient, OllamaClient
 
    # 1) Pass the key to the client...
    openai = OpenAIClient("gpt-5.4-mini", api_key="sk-...")
 
    # 2) ...or omit it and the client reads it from the environment.
-   gemini = GeminiClient("gemini-3.1-flash-lite")   # reads GEMINI_API_KEY
-   ollama = OllamaClient("llama3")                   # local; reads OLLAMA_HOST
+   gemini = GeminiClient("gemini-3.1-flash-lite")     # reads GEMINI_API_KEY
+   claude = AnthropicClient("claude-sonnet-5")        # reads ANTHROPIC_API_KEY
+   ollama = OllamaClient("llama3")                    # local; reads OLLAMA_HOST
 
 The environment variables and extra options per provider:
 
@@ -121,6 +122,12 @@ The environment variables and extra options per provider:
    * - :class:`~kavalai.GeminiClient`
      - ``GEMINI_API_KEY``
      - Google Gemini models.
+   * - :class:`~kavalai.AnthropicClient`
+     - ``ANTHROPIC_API_KEY``
+     - Claude models over the Messages API; ``base_url`` supported. Structured
+       output uses closed JSON schemas, and every request needs an output
+       ceiling — the client sends a generous ``max_tokens`` default. Leave
+       ``temperature`` / ``top_p`` unset: recent Claude models reject them.
    * - :class:`~kavalai.OllamaClient`
      - ``OLLAMA_HOST`` (default ``http://localhost:11434``)
      - Runs locally; no API key.
@@ -200,6 +207,30 @@ timeouts, dropped connections and 5xx errors — the client retries automaticall
 with exponential backoff (up to 5 attempts, with jitter). It does **not** retry
 on errors you should fix yourself: authentication failures, ``404`` responses
 and other bad requests are raised immediately.
+
+Sampling parameters (``temperature``, ``top_p``, …) default to ``None`` and are
+only sent when you set them, so each provider's own defaults apply otherwise.
+That matters for Claude: recent models reject sampling parameters outright, so
+leaving them unset is what keeps the same ``LlmClientParameters`` usable across
+providers.
+
+When you **stream**, a second timeout guards the gap *between* chunks:
+``stream_timeout_seconds``. It defaults to twice ``timeout_seconds`` so a stream
+survives one timed-out attempt plus its retry backoff — a single
+``timeout_seconds`` would kill the retry it is supposed to allow. Each retry
+also pushes a ``restart`` chunk (``chunk.type == "restart"``), which tells
+consumers to discard what they have accumulated for that stream: the new attempt
+re-sends its content from the beginning.
+
+.. code-block:: python
+
+   client = OpenAIClient(
+       "gpt-5.4-mini",
+       llm_client_parameters=LlmClientParameters(
+           timeout_seconds=60,          # per attempt
+           stream_timeout_seconds=180,  # inter-chunk inactivity (default: 2x)
+       ),
+   )
 
 Where to next
 -------------

@@ -96,6 +96,60 @@ def test_build_all_node_types():
     assert graph.node_map["decide"].else_ == "act"
 
 
+def test_streaming_flags_forwarded_to_nodes():
+    graph = (
+        _base(WorkflowBuilder("streams"))
+        .start("reply")
+        .llm(
+            "reply",
+            prompt="hi",
+            output="output",
+            next="act",
+            stream_output=True,
+            stream_delta=True,
+        )
+        .agent(
+            "act",
+            prompt="do",
+            output="output",
+            next="end",
+            stream_output=True,
+            stream_delta=True,
+            stream_instructions=True,
+            stream_partials=True,
+        )
+        .end()
+        .build()
+    )
+    reply = graph.node_map["reply"]
+    assert (reply.stream_output, reply.stream_delta) == (True, True)
+    act = graph.node_map["act"]
+    assert act.stream_output and act.stream_delta
+    assert act.stream_instructions and act.stream_partials
+
+
+def test_streaming_flags_default_to_off():
+    graph = (
+        _base(WorkflowBuilder("nostreams"))
+        .start("reply")
+        .llm("reply", prompt="hi", output="output", next="act")
+        .agent("act", prompt="do", output="output", next="end")
+        .end()
+        .build()
+    )
+    reply = graph.node_map["reply"]
+    assert not reply.stream_output and not reply.stream_delta
+    act = graph.node_map["act"]
+    assert not any(
+        [
+            act.stream_output,
+            act.stream_delta,
+            act.stream_instructions,
+            act.stream_partials,
+        ]
+    )
+
+
 def test_data_type_schema_and_ref():
     graph = (
         WorkflowBuilder("dt")

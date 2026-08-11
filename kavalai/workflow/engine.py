@@ -427,7 +427,7 @@ class WorkflowEngine:
         external_id: Optional[str] = None,
         state: Optional[WorkflowState] = None,
     ) -> AsyncGenerator[WorkflowStreamEvent, None]:
-        """Execute the workflow, yielding :class:`WorkflowStreamEvent`s.
+        """Execute the workflow, yielding :class:`WorkflowStreamEvent` events.
 
         Lifecycle events (``workflow_started``, ``node_started`` /
         ``node_completed``, ``workflow_completed`` / ``workflow_failed``)
