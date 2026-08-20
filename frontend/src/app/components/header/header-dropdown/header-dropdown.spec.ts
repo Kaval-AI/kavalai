@@ -121,7 +121,10 @@ describe('HeaderDropdown', () => {
     // Other section (4th column)
     const otherMenu = menus[3].querySelectorAll('li');
     expect(otherMenu[0].querySelector('.menu-title').textContent).toBe('Other');
-    expect(otherMenu[1].querySelector('a').getAttribute('routerLink')).toBe('/theme');
+    const docsLink = otherMenu[1].querySelector('a');
+    expect(docsLink.getAttribute('href')).toBe('https://docs.kaval.ai/');
+    expect(docsLink.getAttribute('target')).toBe('_blank');
+    expect(docsLink.textContent).toBe('Documentation');
   });
 
   it('should NOT show Users link when NOT admin', () => {
