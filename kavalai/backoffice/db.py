@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from enum import Enum as PyEnum
 from uuid import UUID, uuid4
 
+from loguru import logger
 from sqlalchemy import Enum, MetaData
 from sqlalchemy import TEXT, Boolean, ForeignKey, DateTime, Integer
 from sqlalchemy import select, Index
@@ -73,7 +74,9 @@ class User(Base):
     name: Mapped[str] = mapped_column(TEXT, nullable=False)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     picture: Mapped[str | None] = mapped_column(TEXT)
-    active_project_id: Mapped[UUID | None] = mapped_column(ForeignKey("projects.id"))
+    active_project_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("projects.id", ondelete="SET NULL")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -187,6 +190,46 @@ async def is_owner(db: AsyncSession, user_id: UUID, project_id: UUID) -> bool:
     )
     result = await db.execute(stmt)
     return result.scalars().first() is not None
+
+
+async def resolve_active_project_id(db: AsyncSession, user_id: UUID) -> UUID | None:
+    """Return a usable active project for the user, repairing a stale one.
+
+    ``users.active_project_id`` can go stale: the project may have been deleted
+    or the user may have lost their membership. Every project-scoped endpoint
+    would then answer 403, and nothing would ever clear the bad value. This
+    resolves the reference — keeping it when the user is still a member, and
+    otherwise falling back to one of their projects (or ``None``) and
+    persisting that choice.
+    """
+    user = await db.get(User, user_id)
+    if user is None:
+        return None
+
+    if user.active_project_id is not None and await is_member(
+        db, user_id, user.active_project_id
+    ):
+        return user.active_project_id
+
+    stmt = (
+        select(ProjectMembership.project_id)
+        .join(Project, Project.id == ProjectMembership.project_id)
+        .where(ProjectMembership.user_id == user_id)
+        .order_by(Project.name)
+        .limit(1)
+    )
+    result = await db.execute(stmt)
+    fallback = result.scalars().first()
+
+    if user.active_project_id != fallback:
+        logger.info(
+            f"Repairing stale active project for user {user_id}: "
+            f"{user.active_project_id} -> {fallback}"
+        )
+        user.active_project_id = fallback
+        await db.commit()
+
+    return fallback
 
 
 async def get_user_projects(db: AsyncSession, user_id: UUID) -> list[dict]:

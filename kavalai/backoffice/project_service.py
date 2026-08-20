@@ -56,7 +56,22 @@ class ProjectService:
 
     async def delete_project(self, project_id: UUID) -> bool:
         async with self.session_maker() as session:
+            # Detach the project from anyone who has it selected first, so the
+            # delete cannot fail on the users.active_project_id foreign key and
+            # nobody is left pointing at a project that no longer exists.
+            await self._clear_active_project(session, project_id)
             return await delete(session, db.Project, project_id)
+
+    @staticmethod
+    async def _clear_active_project(
+        session: AsyncSession, project_id: UUID, user_id: Optional[UUID] = None
+    ) -> None:
+        """Clear ``active_project_id`` for users pointing at ``project_id``."""
+        stmt = sa_update(db.User).where(db.User.active_project_id == project_id)
+        if user_id is not None:
+            stmt = stmt.where(db.User.id == user_id)
+        await session.execute(stmt.values(active_project_id=None))
+        await session.commit()
 
     async def get_members(self, project_id: UUID) -> List[Dict[str, Any]]:
         stmt = (
@@ -168,6 +183,10 @@ class ProjectService:
             )
             await session.execute(stmt)
             await session.commit()
+
+            # Without this the removed user keeps the project selected and
+            # every project-scoped request answers 403.
+            await self._clear_active_project(session, project_id, user_id)
 
     async def test_connection(self, project: db.Project) -> Dict[str, str]:
         from kavalai.db import db_manager

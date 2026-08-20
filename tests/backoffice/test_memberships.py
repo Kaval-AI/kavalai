@@ -207,3 +207,82 @@ async def test_projects_demote_last_owner_fails(client, backoffice_db):
         )
         assert response.status_code == 400
         assert "Cannot demote the last owner" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_remove_member_clears_their_active_project(client, backoffice_db):
+    """A removed member must not keep the project selected, or every
+    project-scoped request they make answers 403 with no way back."""
+    admin_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    project_id = uuid.uuid4()
+    other_owner_id = uuid.uuid4()
+
+    project = db.Project(id=project_id, name="Shared Project")
+    user = db.User(
+        id=user_id,
+        email="removed@example.com",
+        name="Removed",
+        active_project_id=project_id,
+    )
+    other_owner = db.User(
+        id=other_owner_id,
+        email="owner@example.com",
+        name="Owner",
+        active_project_id=project_id,
+    )
+    memberships = [
+        db.ProjectMembership(
+            user_id=uid, project_id=project_id, role=db.ProjectRole.owner
+        )
+        for uid in (user_id, other_owner_id)
+    ]
+
+    backoffice_db.add_all([project, user, other_owner, *memberships])
+    await backoffice_db.commit()
+
+    with patch("kavalai.backoffice.server.assert_logged_in"), patch(
+        "starlette.requests.Request.session",
+        {"user_info": {"id": str(admin_id), "is_admin": True}},
+    ):
+        response = await client.delete(
+            f"/projects/{project_id}/members/remove/{user_id}"
+        )
+        assert response.status_code == 200
+
+    await backoffice_db.refresh(user)
+    assert user.active_project_id is None
+    # Members who kept their access keep their selection.
+    await backoffice_db.refresh(other_owner)
+    assert other_owner.active_project_id == project_id
+
+
+@pytest.mark.asyncio
+async def test_delete_project_clears_active_project(client, backoffice_db):
+    """Deleting a project must not fail on users.active_project_id."""
+    owner_id = uuid.uuid4()
+    project_id = uuid.uuid4()
+
+    project = db.Project(id=project_id, name="Doomed Project")
+    owner = db.User(
+        id=owner_id,
+        email="doomed@example.com",
+        name="Owner",
+        active_project_id=project_id,
+    )
+    membership = db.ProjectMembership(
+        user_id=owner_id, project_id=project_id, role=db.ProjectRole.owner
+    )
+    backoffice_db.add_all([project, owner, membership])
+    await backoffice_db.commit()
+
+    with patch("kavalai.backoffice.server.assert_logged_in"), patch(
+        "starlette.requests.Request.session",
+        {"user_info": {"id": str(owner_id), "is_admin": True}},
+    ):
+        response = await client.delete(f"/projects/delete/{project_id}")
+        assert response.status_code == 200
+        assert response.json() == {"status": "deleted"}
+
+    await backoffice_db.refresh(owner)
+    assert owner.active_project_id is None

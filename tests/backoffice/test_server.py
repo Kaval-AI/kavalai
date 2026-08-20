@@ -456,3 +456,71 @@ async def test_render_workflow_svg_bad_input(client):
             "/workflows/render-svg", json={"workflow": "not-a-workflow"}
         )
     assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_user_details_repairs_stale_active_project(client, backoffice_db):
+    """A session pointing at an unreachable project is repaired on page load
+    instead of turning every project-scoped request into a 403."""
+    user_id = uuid.uuid4()
+    revoked = db.Project(id=uuid.uuid4(), name="B Revoked")
+    reachable = db.Project(id=uuid.uuid4(), name="A Reachable")
+    user = db.User(
+        id=user_id,
+        email="stale@example.com",
+        name="Stale",
+        active_project_id=revoked.id,
+    )
+    membership = db.ProjectMembership(
+        user_id=user_id, project_id=reachable.id, role=db.ProjectRole.owner
+    )
+    backoffice_db.add_all([revoked, reachable, user, membership])
+    await backoffice_db.commit()
+
+    session = {
+        "user_info": {
+            "id": str(user_id),
+            "email": "stale@example.com",
+            "is_admin": False,
+            "active_project_id": str(revoked.id),
+        }
+    }
+    with patch("starlette.requests.Request.session", session):
+        response = await client.get("/user/get_details")
+
+    assert response.status_code == 200
+    assert response.json()["active_project_id"] == str(reachable.id)
+    await backoffice_db.refresh(user)
+    assert user.active_project_id == reachable.id
+
+
+@pytest.mark.asyncio
+async def test_user_details_keeps_valid_active_project(client, backoffice_db):
+    """A reachable selection is returned unchanged."""
+    user_id = uuid.uuid4()
+    project = db.Project(id=uuid.uuid4(), name="Mine")
+    user = db.User(
+        id=user_id,
+        email="valid@example.com",
+        name="Valid",
+        active_project_id=project.id,
+    )
+    membership = db.ProjectMembership(
+        user_id=user_id, project_id=project.id, role=db.ProjectRole.owner
+    )
+    backoffice_db.add_all([project, user, membership])
+    await backoffice_db.commit()
+
+    session = {
+        "user_info": {
+            "id": str(user_id),
+            "email": "valid@example.com",
+            "is_admin": False,
+            "active_project_id": str(project.id),
+        }
+    }
+    with patch("starlette.requests.Request.session", session):
+        response = await client.get("/user/get_details")
+
+    assert response.status_code == 200
+    assert response.json()["active_project_id"] == str(project.id)

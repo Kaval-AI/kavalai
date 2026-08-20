@@ -139,6 +139,7 @@ cd frontend && npm test -- --watch=false --code-coverage
 - Role-based access per project (`owner`, `viewer`); membership is verified on API calls.
 - The last owner of a project cannot be removed or demoted.
 - The backoffice manages multiple **projects**; each project points to its own agent database (`db_host`/`db_port`/`db_name`/`db_schema` on the `projects` row). Users have an `active_project_id` used as the default project; the global header project selector synchronizes it across pages.
+- `active_project_id` must always point at a project the user can still reach, or every project-scoped endpoint answers 403. `db.resolve_active_project_id()` repairs a stale value (falling back to another of the user's projects, or `None`) and runs on login and on `/user/get_details`; deleting a project or removing a member clears it, backed by `ON DELETE SET NULL` on the foreign key.
 
 ## Dangerous Commands
 

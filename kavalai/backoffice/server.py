@@ -142,6 +142,11 @@ async def authenticate_and_sync_user(user_info: dict):
 
         await session.commit()
         await session.refresh(user)
+
+        # Drop an active project the user can no longer access, so the login
+        # never seeds the session with an id that only yields 403s.
+        await db.resolve_active_project_id(session, user.id)
+        await session.refresh(user)
         return user
 
 
@@ -208,7 +213,22 @@ async def logout(request: Request):
 async def user_details(request: Request):
     if not is_logged_in(request):
         raise HTTPException(status_code=401, detail="Unauthorized.")
-    return request.session.get("user_info")
+    user_info = request.session.get("user_info")
+
+    # The cookie may still carry an active project the user can no longer
+    # reach (deleted project, revoked membership), which would make every
+    # project-scoped page fail with 403. Re-resolve it on each page load so a
+    # session that went stale repairs itself without a re-login.
+    async with get_backoffice_session() as session:
+        active_project_id = await db.resolve_active_project_id(
+            session, UUID(user_info["id"])
+        )
+
+    resolved = str(active_project_id) if active_project_id else None
+    if user_info.get("active_project_id") != resolved:
+        user_info["active_project_id"] = resolved
+        request.session["user_info"] = user_info
+    return user_info
 
 
 @app.get("/auth/google/callback")

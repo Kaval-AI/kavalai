@@ -12,6 +12,7 @@ from kavalai.backoffice.db import (
     is_member,
     is_owner,
     get_user_projects,
+    resolve_active_project_id,
 )
 from kavalai.crud import insert, update, delete, get_one, get_all
 
@@ -159,3 +160,81 @@ async def test_project_cache_relationship(backoffice_db: AsyncSession):
     await delete(backoffice_db, Project, project.id)
     deleted_cache = await get_one(backoffice_db, ProjectCache, cache_entry1.id)
     assert deleted_cache is None
+
+
+async def _member_of(session: AsyncSession, user: User, project: Project) -> None:
+    await insert(
+        session,
+        ProjectMembership,
+        {
+            "user_id": user.id,
+            "project_id": project.id,
+            "role": ProjectRole.owner,
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_resolve_active_project_keeps_valid_selection(
+    backoffice_db: AsyncSession,
+):
+    """A project the user is still a member of is left untouched."""
+    user = await insert(backoffice_db, User, {"email": "keep@test.com", "name": "Keep"})
+    project = await insert(backoffice_db, Project, {"name": "Kept"})
+    await _member_of(backoffice_db, user, project)
+    await update(backoffice_db, User, user.id, {"active_project_id": project.id})
+
+    assert await resolve_active_project_id(backoffice_db, user.id) == project.id
+
+
+@pytest.mark.asyncio
+async def test_resolve_active_project_falls_back_when_membership_lost(
+    backoffice_db: AsyncSession,
+):
+    """Losing access to the selected project falls back to another one."""
+    user = await insert(backoffice_db, User, {"email": "lost@test.com", "name": "Lost"})
+    revoked = await insert(backoffice_db, Project, {"name": "B revoked"})
+    kept = await insert(backoffice_db, Project, {"name": "A kept"})
+    await _member_of(backoffice_db, user, kept)
+    await update(backoffice_db, User, user.id, {"active_project_id": revoked.id})
+
+    resolved = await resolve_active_project_id(backoffice_db, user.id)
+
+    assert resolved == kept.id
+    # The repair is persisted, so the next request does not have to redo it.
+    refreshed = await get_one(backoffice_db, User, user.id)
+    assert refreshed.active_project_id == kept.id
+
+
+@pytest.mark.asyncio
+async def test_resolve_active_project_without_memberships(backoffice_db: AsyncSession):
+    """A user with no projects at all resolves to no active project."""
+    user = await insert(backoffice_db, User, {"email": "none@test.com", "name": "None"})
+    orphan = await insert(backoffice_db, Project, {"name": "Not mine"})
+    await update(backoffice_db, User, user.id, {"active_project_id": orphan.id})
+
+    assert await resolve_active_project_id(backoffice_db, user.id) is None
+
+    refreshed = await get_one(backoffice_db, User, user.id)
+    assert refreshed.active_project_id is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_active_project_unknown_user(backoffice_db: AsyncSession):
+    """An id with no user row resolves to no active project rather than raising."""
+    assert await resolve_active_project_id(backoffice_db, uuid4()) is None
+
+
+@pytest.mark.asyncio
+async def test_deleting_project_clears_active_selection(backoffice_db: AsyncSession):
+    """The active_project_id foreign key must not block deleting a project."""
+    user = await insert(backoffice_db, User, {"email": "del@test.com", "name": "Del"})
+    project = await insert(backoffice_db, Project, {"name": "Doomed"})
+    await _member_of(backoffice_db, user, project)
+    await update(backoffice_db, User, user.id, {"active_project_id": project.id})
+
+    assert await delete(backoffice_db, Project, project.id) is True
+
+    refreshed = await get_one(backoffice_db, User, user.id)
+    await backoffice_db.refresh(refreshed)
+    assert refreshed.active_project_id is None
