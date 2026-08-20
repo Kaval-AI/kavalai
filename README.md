@@ -175,48 +175,6 @@ and the `rag_metadata` you indexed it with, so retrieval can be filtered
 (`collection_name=`, `source_ids=`) or inspected on its own — the model call is
 optional.
 
-### Orchestrate the steps in YAML
-
-When one call is not enough, describe the graph — LLM calls, tools, agents and
-branches — in YAML and let the engine run it, checkpointing state and recording
-token statistics along the way:
-
-```python
-from kavalai import WorkflowEngine
-
-WORKFLOW = """
-name: Greeter
-description: Greets the user by name.
-data_types:
-  input:
-    type: object
-    properties:
-      user_message: {type: string}
-  output:
-    type: object
-    properties:
-      agent_response: {type: string}
-nodes:
-  - {name: start, type: start, next: reply}
-  - name: reply
-    type: llm
-    llm_model: openai/gpt-5.4-mini
-    prompt: |
-      You are a warm, concise greeter. Read the user's message and write a
-      one-sentence friendly greeting that uses their name.
-    inputs:
-      input: {type: context, value: input}
-    output: output
-    next: end
-  - {name: end, type: end, output: output}
-"""
-
-engine = WorkflowEngine.from_yaml(WORKFLOW)
-state = await engine.run({"user_message": "Hi, I'm Timo!"})
-
-print(state.output_data["agent_response"])  # -> "Hi Timo! Nice to meet you!"
-print(state.trace)                          # -> ['start', 'reply', 'end']
-```
 
 ## Documentation
 
