@@ -2,33 +2,24 @@
 
 [![CI](https://github.com/Kaval-AI/kaval.ai/actions/workflows/ci.yml/badge.svg)](https://github.com/Kaval-AI/kaval.ai/actions/workflows/ci.yml)
 
-Kaval.AI is an opinionated, elegant, production-grade Python library for building LLM-powered workflows,
-chatbots and agents, and connecting them to databases and tooling — with a focus on observability and debuggability.
+Kaval.AI is an opinionated and elegant Python library for building production-grade agentic workflows, chatbots and tools.
 
 
 Features:
-- Supports common commercial LLM providers such OpenAI, Google Gemini etc.
-- Supports open source LLMs via Ollama backend.
-- Agents can be run client-side in browser via WebLLM and Pyodide.
-- Structured responses using Pydantic semantics.
+- Support commercial (OpenAI, Google, Anthropic) and open source LLM providers.
+- Runs in browser via WebLLM and Pyodide.
+- Excellent support for retrieval-augmented generation (RAG) on various storage engines.
+- Structured inputs, outputs, tool calls and responses using Pydantic semantics.
 - Streaming responses.
-- Retrieval augmented generation (RAG) index on various storage engines.
 - Fully featured workflow engine using conditional processing and tool calling.
-- Workflows can be defined in YAML for better readability.
 - Python tools, REST server endpoints (supports basic auth) and MCP support.
+
+See the [full documentation](https://docs.kaval.ai) for more detailed reference.
 
 ## Install
 
 ```
-pip install kavalai
-```
-
-The core install is deliberately small. Pull in what you need with extras —
-`kavalai[openai]`, `[gemini]`, `[anthropic]`, `[ollama]`, `[rag]`, `[postgres]`,
-`[mcp]`, `[server]` — or take everything with `kavalai[all]`:
-
-```
-pip install "kavalai[openai,rag]"
+pip install kavalai[common]
 ```
 
 ## Getting started
@@ -41,18 +32,32 @@ right client from a `provider/model` id and reads the matching API key
 environment:
 
 ```python
+import os
+
+os.environ["OPENAI_API_KEY"] = '...'
+os.environ["GEMINI_API_KEY"] = '...'
+os.environ["ANTHROPIC_API_KEY"] = '...'
+```
+
+```python
 from kavalai import make_client
 
 client = make_client("openai/gpt-5.4-mini")
-
-answer = await client.prompt("Say hello in Estonian.")
+answer = await client.prompt("What is the capital of Estonia?")
+print (answer)
 ```
 
-Pass a Pydantic `response_model` and you get a validated object back instead of
+Response:
+```
+The capital of Estonia is Tallinn.
+```
+
+Pass a [Pydantic](https://pydantic.dev/docs/validation/latest/get-started/) `response_model` and you get a validated object back instead of
 a string to parse — with any provider:
 
 ```python
 from pydantic import BaseModel
+
 
 class City(BaseModel):
     name: str
@@ -60,7 +65,12 @@ class City(BaseModel):
     fun_fact: str
 
 city = await client.prompt("Describe Tallinn.", response_model=City)
-print(city.country, city.fun_fact)
+print(city)
+```
+
+Response:
+```
+name='Tallinn' country='Estonia' fun_fact='Medieval Old Town of Tallinn is one of the best-preserved in Northern Europe.'
 ```
 
 ### A chatbot grounded in your own documents
