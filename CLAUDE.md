@@ -47,6 +47,22 @@ uv run --env-file .env pytest
 Avoid `set -a && source .env && set +a` — changing shell option state defeats
 Claude Code's static command analysis and forces a manual permission prompt.
 
+## Packaging & Extras
+
+`pyproject.toml` keeps the base install small and pyodide-compatible (no
+greenlet, no native extensions beyond the prebuilt pyodide packages). There are
+only four extras:
+
+- `common` — everything else: provider SDKs, RAG/embeddings, Postgres drivers,
+  MCP, the REST/SSE servers, the bundled web tools. The normal install.
+- `common_web` — what the core additionally needs under Pyodide/WebLLM
+  (`pyodide-http`).
+- `test` — test tooling; pulls in `kavalai[common]`, so CI is `uv sync --extra test`.
+- `docs` — Sphinx, the theme and the notebook kernel.
+
+Install hints in error messages point at `kavalai[common]`; keep them in sync
+when the layout changes. Run `uv lock` after editing dependencies.
+
 ## Key Directories
 
 | Path | Purpose |

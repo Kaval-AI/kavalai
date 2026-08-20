@@ -17,9 +17,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy backend dependencies and install
+# Copy backend dependencies and install. The backoffice needs the full
+# non-browser runtime (FastAPI, Authlib, the database drivers) from `common`.
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir ".[common]"
 
 # Copy the rest of the application
 COPY . .

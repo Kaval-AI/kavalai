@@ -1929,7 +1929,7 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-all = [
+common = [
     { name = "anthropic" },
     { name = "asyncpg" },
     { name = "authlib" },
@@ -1946,57 +1946,24 @@ all = [
     { name = "scikit-learn" },
     { name = "sqliteai-vector" },
 ]
-anthropic = [
-    { name = "anthropic" },
+common-web = [
+    { name = "pyodide-http" },
 ]
 docs = [
+    { name = "ipykernel" },
+    { name = "ipywidgets" },
     { name = "myst-nb" },
     { name = "sphinx" },
     { name = "sphinx-immaterial" },
 ]
-gemini = [
-    { name = "google-genai" },
-]
-llm = [
-    { name = "anthropic" },
-    { name = "google-genai" },
-    { name = "ollama" },
-    { name = "openai" },
-]
-mcp = [
-    { name = "mcp" },
-]
-notebooks = [
-    { name = "ipykernel" },
-    { name = "ipywidgets" },
-]
-ollama = [
-    { name = "ollama" },
-]
-openai = [
-    { name = "openai" },
-]
-postgres = [
-    { name = "asyncpg" },
-    { name = "psycopg2-binary" },
-]
-rag = [
-    { name = "fastembed" },
-    { name = "scikit-learn" },
-    { name = "sqliteai-vector" },
-]
-server = [
-    { name = "authlib" },
-    { name = "fastapi", extra = ["standard"] },
-    { name = "itsdangerous" },
-]
 test = [
-    { name = "aiosqlite" },
     { name = "anthropic" },
     { name = "asyncpg" },
     { name = "authlib" },
+    { name = "crawl4ai" },
     { name = "fastapi", extra = ["standard"] },
     { name = "fastembed" },
+    { name = "feedparser" },
     { name = "google-genai" },
     { name = "itsdangerous" },
     { name = "mcp" },
@@ -2012,87 +1979,52 @@ test = [
     { name = "sqliteai-vector" },
     { name = "testcontainers" },
 ]
-tools = [
-    { name = "crawl4ai" },
-    { name = "feedparser" },
-]
 
 [package.metadata]
 requires-dist = [
     { name = "aiosqlite" },
-    { name = "aiosqlite", marker = "extra == 'test'" },
     { name = "alembic" },
-    { name = "anthropic", marker = "extra == 'all'" },
-    { name = "anthropic", marker = "extra == 'anthropic'" },
-    { name = "anthropic", marker = "extra == 'llm'" },
-    { name = "anthropic", marker = "extra == 'test'" },
-    { name = "asyncpg", marker = "extra == 'all'" },
-    { name = "asyncpg", marker = "extra == 'postgres'" },
-    { name = "asyncpg", marker = "extra == 'test'" },
-    { name = "authlib", marker = "extra == 'all'" },
-    { name = "authlib", marker = "extra == 'server'" },
-    { name = "authlib", marker = "extra == 'test'" },
-    { name = "crawl4ai", marker = "extra == 'all'" },
-    { name = "crawl4ai", marker = "extra == 'tools'" },
+    { name = "anthropic", marker = "extra == 'common'" },
+    { name = "asyncpg", marker = "extra == 'common'" },
+    { name = "authlib", marker = "extra == 'common'" },
+    { name = "crawl4ai", marker = "extra == 'common'" },
     { name = "environs" },
-    { name = "fastapi", extras = ["standard"], marker = "extra == 'all'" },
-    { name = "fastapi", extras = ["standard"], marker = "extra == 'server'" },
-    { name = "fastapi", extras = ["standard"], marker = "extra == 'test'" },
-    { name = "fastembed", marker = "extra == 'all'" },
-    { name = "fastembed", marker = "extra == 'rag'" },
-    { name = "fastembed", marker = "extra == 'test'" },
-    { name = "feedparser", marker = "extra == 'all'" },
-    { name = "feedparser", marker = "extra == 'tools'" },
-    { name = "google-genai", marker = "extra == 'all'" },
-    { name = "google-genai", marker = "extra == 'gemini'" },
-    { name = "google-genai", marker = "extra == 'llm'" },
-    { name = "google-genai", marker = "extra == 'test'" },
+    { name = "fastapi", extras = ["standard"], marker = "extra == 'common'" },
+    { name = "fastembed", marker = "extra == 'common'" },
+    { name = "feedparser", marker = "extra == 'common'" },
+    { name = "google-genai", marker = "extra == 'common'" },
     { name = "httpx" },
-    { name = "ipykernel", marker = "extra == 'notebooks'", specifier = ">=7.3.0" },
-    { name = "ipywidgets", marker = "extra == 'notebooks'" },
-    { name = "itsdangerous", marker = "extra == 'all'" },
-    { name = "itsdangerous", marker = "extra == 'server'" },
-    { name = "itsdangerous", marker = "extra == 'test'" },
+    { name = "ipykernel", marker = "extra == 'docs'", specifier = ">=7.3.0" },
+    { name = "ipywidgets", marker = "extra == 'docs'" },
+    { name = "itsdangerous", marker = "extra == 'common'" },
     { name = "jinja2" },
     { name = "json-schema-to-pydantic" },
+    { name = "kavalai", extras = ["common"], marker = "extra == 'test'" },
     { name = "loguru" },
-    { name = "mcp", marker = "extra == 'all'" },
-    { name = "mcp", marker = "extra == 'mcp'" },
-    { name = "mcp", marker = "extra == 'test'" },
+    { name = "mcp", marker = "extra == 'common'" },
     { name = "myst-nb", marker = "extra == 'docs'" },
     { name = "numpy" },
-    { name = "ollama", marker = "extra == 'all'" },
-    { name = "ollama", marker = "extra == 'llm'" },
-    { name = "ollama", marker = "extra == 'ollama'" },
-    { name = "ollama", marker = "extra == 'test'" },
-    { name = "openai", marker = "extra == 'all'" },
-    { name = "openai", marker = "extra == 'llm'" },
-    { name = "openai", marker = "extra == 'openai'" },
-    { name = "openai", marker = "extra == 'test'" },
+    { name = "ollama", marker = "extra == 'common'" },
+    { name = "openai", marker = "extra == 'common'" },
     { name = "partial-json-parser" },
     { name = "pre-commit", marker = "extra == 'test'" },
-    { name = "psycopg2-binary", marker = "extra == 'all'" },
-    { name = "psycopg2-binary", marker = "extra == 'postgres'" },
-    { name = "psycopg2-binary", marker = "extra == 'test'" },
+    { name = "psycopg2-binary", marker = "extra == 'common'" },
     { name = "pydantic" },
+    { name = "pyodide-http", marker = "extra == 'common-web'" },
     { name = "pytest", marker = "extra == 'test'" },
     { name = "pytest-asyncio", marker = "extra == 'test'" },
     { name = "pytest-cov", marker = "extra == 'test'" },
     { name = "python-dotenv", marker = "extra == 'test'" },
     { name = "pyyaml" },
     { name = "rich" },
-    { name = "scikit-learn", marker = "extra == 'all'" },
-    { name = "scikit-learn", marker = "extra == 'rag'" },
-    { name = "scikit-learn", marker = "extra == 'test'" },
+    { name = "scikit-learn", marker = "extra == 'common'" },
     { name = "sphinx", marker = "extra == 'docs'", specifier = "<9" },
     { name = "sphinx-immaterial", marker = "extra == 'docs'" },
     { name = "sqlalchemy" },
-    { name = "sqliteai-vector", marker = "extra == 'all'" },
-    { name = "sqliteai-vector", marker = "extra == 'rag'" },
-    { name = "sqliteai-vector", marker = "extra == 'test'" },
+    { name = "sqliteai-vector", marker = "extra == 'common'" },
     { name = "testcontainers", extras = ["postgres"], marker = "extra == 'test'" },
 ]
-provides-extras = ["openai", "gemini", "ollama", "anthropic", "llm", "rag", "postgres", "mcp", "server", "tools", "notebooks", "all", "test", "docs"]
+provides-extras = ["common", "common-web", "test", "docs"]
 
 [[package]]
 name = "lark"
@@ -3360,6 +3292,15 @@ wheels = [
 [package.optional-dependencies]
 crypto = [
     { name = "cryptography" },
+]
+
+[[package]]
+name = "pyodide-http"
+version = "0.2.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/0b/69/122182a6ee6b3b55256de91b91b0a03965997be3e4936929b7bfdec0c99e/pyodide_http-0.2.2.tar.gz", hash = "sha256:d98132c664a621c950d4d795fa013b763b0ebc223f6107d06483b736802b61c0", size = 9658, upload-time = "2025-02-05T14:21:29.492Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/43/aa/471c9cb07acd2de48acf70aef07139f08f2f7ea6f85883f19a7296243ffb/pyodide_http-0.2.2-py3-none-any.whl", hash = "sha256:cf006ea593c1643b5badeb4d42ed24a6eebd830276171fa1f82de0777b3fb608", size = 9796, upload-time = "2025-02-05T14:21:28.15Z" },
 ]
 
 [[package]]

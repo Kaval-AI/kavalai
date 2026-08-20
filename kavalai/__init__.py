@@ -95,11 +95,11 @@ from kavalai.llm_clients.browser_client import BrowserLLMClient
 # part of the pyodide-compatible core (``openai`` / ``google-genai`` /
 # ``anthropic`` / ``ollama``). They are resolved lazily via ``__getattr__``
 # below so that ``import kavalai`` works in lightweight / pyodide environments
-# where only the core dependencies are installed. Install the matching extra
-# (e.g. ``kavalai[openai]``) to use them.
+# where only the core dependencies are installed. Install ``kavalai[common]``
+# (or just the one SDK) to use them.
 _LAZY_CLIENTS = {
     "OpenAIClient": ("kavalai.llm_clients.openai_client", "openai"),
-    "GeminiClient": ("kavalai.llm_clients.gemini_client", "gemini"),
+    "GeminiClient": ("kavalai.llm_clients.gemini_client", "google-genai"),
     "AnthropicClient": ("kavalai.llm_clients.anthropic_client", "anthropic"),
     "OllamaClient": ("kavalai.llm_clients.ollama_client", "ollama"),
 }
@@ -109,15 +109,15 @@ def __getattr__(name: str):
     """Lazily import optional provider clients (PEP 562)."""
     target = _LAZY_CLIENTS.get(name)
     if target is not None:
-        module_path, extra = target
+        module_path, package = target
         import importlib
 
         try:
             module = importlib.import_module(module_path)
         except ImportError as exc:
             raise ImportError(
-                f"'{name}' requires the optional '{extra}' dependency. "
-                f"Install it with: pip install kavalai[{extra}]"
+                f"'{name}' requires the optional '{package}' package. "
+                f"Install it with: pip install kavalai[common]"
             ) from exc
         return getattr(module, name)
     raise AttributeError(f"module 'kavalai' has no attribute {name!r}")

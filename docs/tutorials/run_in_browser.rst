@@ -124,7 +124,7 @@ Embedding a large corpus on every page load is wasteful — so **pre-build the
 index offline and ship it** alongside your page. The one rule: build and query
 with the **same embedding model** so the vectors are comparable. The browser
 uses ``snowflake-arctic-embed-s``; offline, ``fastembed`` runs the same model
-(``pip install "kavalai[rag]"``).
+(``pip install "kavalai[common]"``).
 
 Run this once, locally, over the song lyrics in ``local_data/``:
 

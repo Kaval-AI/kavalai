@@ -10,7 +10,7 @@ Install Kaval.AI
 ----------------
 
 Kaval.AI targets **Python 3.12+**. Install it into a virtual environment. The
-example below uses OpenAI, so install the ``openai`` extra.
+example below calls OpenAI, so install the ``common`` extra.
 
 With ``uv`` (recommended)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -18,7 +18,7 @@ With ``uv`` (recommended)
 .. code-block:: bash
 
    uv venv
-   uv pip install "kavalai[openai]"
+   uv pip install "kavalai[common]"
 
 With ``pip``
 ^^^^^^^^^^^^
@@ -27,17 +27,17 @@ With ``pip``
 
    python -m venv .venv
    source .venv/bin/activate
-   pip install "kavalai[openai]"
+   pip install "kavalai[common]"
 
-The bare ``kavalai`` package is provider-agnostic; extras pull in only what you
-need:
+The bare ``kavalai`` package is deliberately small and provider-agnostic: it is
+restricted to libraries that also work under Pyodide, so the core can be
+imported and run in the browser. Two extras cover the rest:
 
-* ``kavalai[openai]`` — the OpenAI client (used below).
-* ``kavalai[gemini]`` / ``kavalai[anthropic]`` / ``kavalai[ollama]`` — the Google
-  Gemini / Anthropic (Claude) / Ollama clients.
-* ``kavalai[llm]`` — all four provider clients at once.
-* ``kavalai[tools]`` — the Crawl4AI web-scraping tool.
-* ``kavalai[notebooks]`` — Jupyter support for running the tutorial notebooks.
+* ``kavalai[common]`` — everything else: the OpenAI, Gemini, Anthropic and
+  Ollama clients, embeddings and RAG, the PostgreSQL drivers, MCP, the REST/SSE
+  servers, and the bundled web tools.
+* ``kavalai[common_web]`` — the browser counterpart, for running the core under
+  Pyodide / WebLLM (see :doc:`run_in_browser`).
 
 Installing from source
 ^^^^^^^^^^^^^^^^^^^^^^^^
@@ -46,7 +46,7 @@ Installing from source
 
    git clone https://github.com/Kaval-AI/kaval.ai.git
    cd kaval.ai
-   uv pip install -e ".[openai]"
+   uv pip install -e ".[common]"
 
 Configure a provider
 ---------------------

@@ -21,7 +21,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: uv sync --extra test --extra tools
+        run: uv sync --extra test
 
       - name: Run backend unit tests
         env:

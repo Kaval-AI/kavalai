@@ -143,7 +143,7 @@ class SqliteRagService(BaseRagService):
         except ModuleNotFoundError as e:
             raise ImportError(
                 "SqliteRagService requires the sqlite-vector extension. "
-                "Install it with: pip install sqliteai-vector (or the kavalai[rag] extra)."
+                "Install it with: pip install sqliteai-vector (or the kavalai[common] extra)."
             ) from e
 
         self._conn.enable_load_extension(True)

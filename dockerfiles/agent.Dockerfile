@@ -9,7 +9,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir .
+# The agent server needs the full non-browser runtime (FastAPI, the provider
+# SDKs, the database drivers), which is what the `common` extra pulls in.
+RUN pip install --no-cache-dir ".[common]"
 
 COPY . .
 

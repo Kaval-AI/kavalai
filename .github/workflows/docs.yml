@@ -32,9 +32,9 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        # --extra all gives autodoc the real modules it imports (openai,
+        # --extra common gives autodoc the real modules it imports (openai,
         # google-genai, fastapi, ...); --extra docs adds Sphinx + theme.
-        run: uv sync --extra docs --extra all
+        run: uv sync --extra docs --extra common
 
       - name: Build kavalai wheel
         # The playground extension (docs/_ext/kaval_playground.py) stages the

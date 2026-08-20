@@ -41,77 +41,58 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# LLM provider SDKs (not pyodide-compatible).
-openai = ["openai"]
-gemini = ["google-genai"]
-ollama = ["ollama"]
-anthropic = ["anthropic"]
-llm = ["openai", "google-genai", "ollama", "anthropic"]
-# Embeddings / RAG (native extensions).
-rag = ["fastembed", "scikit-learn", "sqliteai-vector"]
-# PostgreSQL drivers (native extensions).
-postgres = ["asyncpg", "psycopg2-binary"]
-# Model Context Protocol client support.
-mcp = ["mcp"]
-# REST / SSE servers and auth (backoffice + agent server).
-server = [
-    "fastapi[standard]",
-    "authlib",
-    "itsdangerous",
-]
-tools = [
-    "crawl4ai",
-    "feedparser",
-]
-notebooks = [
-    "ipykernel>=7.3.0",
-    "ipywidgets",
-]
-# Convenience extra pulling in the full, non-pyodide runtime.
-all = [
-    "openai",
-    "google-genai",
-    "ollama",
+# Everything the core install leaves out: the LLM provider SDKs, embeddings and
+# RAG, the PostgreSQL drivers, MCP, the REST/SSE servers and the bundled web
+# tools. One extra rather than a dozen — `pip install kavalai[common]` is the
+# normal, non-browser install.
+#
+# None of these are pyodide-compatible: they need native extensions, a
+# subprocess or a real socket.
+common = [
     "anthropic",
+    "asyncpg",
+    "authlib",
+    "crawl4ai",
+    "fastapi[standard]",
     "fastembed",
+    "feedparser",
+    "google-genai",
+    "itsdangerous",
+    "mcp",
+    "ollama",
+    "openai",
+    "psycopg2-binary",
     "scikit-learn",
     "sqliteai-vector",
-    "asyncpg",
-    "psycopg2-binary",
-    "mcp",
-    "fastapi[standard]",
-    "authlib",
-    "itsdangerous",
-    "crawl4ai",
-    "feedparser",
 ]
+
+# The browser counterpart of `common`: what the core install additionally needs
+# to run under Pyodide / WebLLM, where inference, storage and embeddings are all
+# provided by the page. `pyodide-http` routes httpx through the browser's fetch;
+# everything else the browser needs is either core or lives on the JS side.
+common_web = [
+    "pyodide-http",
+]
+
+# Test tooling. The suite exercises the real provider SDKs, servers and native
+# deps, so it pulls in `common` rather than repeating that list.
 test = [
-    "aiosqlite",
+    "kavalai[common]",
     "pre-commit",
     "pytest",
     "pytest-asyncio",
     "pytest-cov",
     "python-dotenv",
     "testcontainers[postgres]",
-    # Provider SDKs and native deps exercised by the test suite.
-    "openai",
-    "google-genai",
-    "ollama",
-    "anthropic",
-    "fastembed",
-    "scikit-learn",
-    "sqliteai-vector",
-    "asyncpg",
-    "psycopg2-binary",
-    "mcp",
-    "fastapi[standard]",
-    "authlib",
-    "itsdangerous",
 ]
+
+# Sphinx, the theme, and the Jupyter kernel used to execute the notebooks.
 docs = [
     "sphinx<9",
     "sphinx-immaterial",
     "myst-nb",
+    "ipykernel>=7.3.0",
+    "ipywidgets",
 ]
 
 [tool.setuptools.packages.find]
