@@ -73,66 +73,107 @@ Response:
 name='Tallinn' country='Estonia' fun_fact='Medieval Old Town of Tallinn is one of the best-preserved in Northern Europe.'
 ```
 
-### A chatbot grounded in your own documents
+### Using retrieval-augmented generation (RAG)
 
-A retrieval-augmented chatbot is a `RagService` for retrieval plus a chat loop.
-Here the index is a single SQLite file (`SqliteRagService`); swap in
-`PostgresRagService` for a pgvector-backed one — the interface is the same:
+RAG is a technique for injecting relevant information in the context of an LLM
+so it could answer questions or perform tasks dependent on information external
+from its training dataset.  A common way this is done involves embedding the information in a vector space and later
+querying it using similarity search.
+
+Kaval.AI provides a `RagService` that can index (embed) this information and also query it.
+
+For instance, let's define some "facts" about a fictional Green Village
+```python
+FACTS = """\
+President of Green Village is Thomas Cook (born 12.04.1994).
+Green Village has 104 residents.
+Green Village was founded on 03.09.1887 by shepherd Elias Thornbury.
+The tallest building in Green Village is the Old Grain Tower at 23 meters.
+Green Village's official flower is the marsh marigold.
+The village bakery, run by Greta Lindqvist (born 27.11.1968), sells exactly 340 loaves every week.
+Green Village has one school with 14 pupils and 2 teachers.
+The annual Turnip Festival takes place every year on the third Saturday of October.
+Green Village's fire brigade consists of 7 volunteers and one dalmatian named Pepper.
+The village pond, Lake Miller, is 1.2 meters deep at its deepest point.
+Green Village's oldest resident is Agnes Whitlow (born 02.06.1929).
+The village has 3 streets: Main Road, Willow Lane, and Cobbler's Path.
+Green Village's football team, FC Green Rovers, has won the regional cup twice (1997 and 2013).
+The local church bell weighs 412 kilograms and was cast in 1901.
+Green Village produces 8 tons of honey per year from its 26 beehives.
+The village library owns 1,847 books and is open on Tuesdays and Fridays.
+Green Village's mayor before Thomas Cook was Henrietta Voss (served 2009-2021).
+The speed limit everywhere in Green Village is 30 km/h.
+Green Village's only pub, The Rusty Anchor, has been operating since 1923.
+Every resident of Green Village receives a free pumpkin on their birthday, a tradition started in 1954.
+""".splitlines()
+```
+
+Then, we'll use a in-memory Sqlite database backend to index these facts.
+In production, you can use PostgreSQL pgvector extension or other
+supported vector search databases.
 
 ```python
-import asyncio
-
-from kavalai import ChatHistory, ChatMessage, make_client
 from kavalai.rag import SqliteRagService
 
-SYSTEM_PROMPT = """You are a helpful support assistant.
-Answer the user using only the context below. If the answer is not in the
-context, say that you don't know.
-
-Context:
-{context}
-"""
-
-
-async def main() -> None:
-    # A RAG index you filled earlier with your own documents.
-    rag = SqliteRagService("handbook.db", model="fastembed/BAAI/bge-small-en-v1.5")
-    client = make_client("openai/gpt-5.4-mini")
-
-    history = ChatHistory(messages=[])
-    while question := input("you > ").strip():
-        # 1. Retrieve the passages that best match the question.
-        hits = await rag.query(question, top_k=3, keep_best=True)
-        context = "\n".join(f"- {hit.content}" for hit in hits)
-
-        # 2. Answer, grounded in that context plus the conversation so far.
-        history.messages.append(ChatMessage(role="user", content=question))
-        answer = await client.chat_completions(
-            chat_history=ChatHistory(
-                messages=[
-                    ChatMessage(
-                        role="system", content=SYSTEM_PROMPT.format(context=context)
-                    ),
-                    *history.messages,
-                ]
-            )
-        )
-        history.messages.append(ChatMessage(role="assistant", content=answer))
-        print(f"bot > {answer}\n")
-
-
-asyncio.run(main())
-```
-
-Filling that index is just as short — embed once, query many times:
-
-```python
+rag = SqliteRagService(":memory", model="fastembed/BAAI/bge-small-en-v1.5")
 await rag.index_batch(
-    texts=["Refunds are issued within 14 days of purchase.", ...],
-    metadata_list=[{"page": 12}, ...],
-    source_ids=["refund-policy", ...],
+    texts=FACTS,
+    metadata_list=[{"village": "Green Village"}] * len(FACTS),
+    source_ids=[f"fact-{i}" for i in range(len(FACTS))],
 )
 ```
+
+RagService can be used independently to query the closest matches for a query string.
+
+```python
+question = "How old was the Green Village's oldest resident on 2025 Turnip Festival?"
+
+hits = await rag.query(question, top_k=5)
+for hit in hits:
+    print(f"{hit.similarity:.2f}  {hit.content}")
+
+```
+
+```
+0.79  Green Village's oldest resident is Agnes Whitlow (born 02.06.1929).
+0.70  Green Village has 104 residents.
+0.68  President of Green Village is Thomas Cook (born 12.04.1994).
+0.67  Green Village was founded on 03.09.1887 by shepherd Elias Thornbury.
+0.62  The annual Turnip Festival takes place every year on the third Saturday of October.
+```
+
+In prompt engineering, you would then inject these results in the prompt to give LLM
+
+
+```Python
+# 2. Or hand those passages to a model and let it answer.
+PROMPT = """Answer the question using only the facts below.
+
+Facts:
+{context}
+
+Question: {question}
+"""
+
+context = "\n".join(f"- {hit.content}" for hit in hits)
+client = make_client("openai/gpt-5.4-mini")
+print(await client.prompt(PROMPT.format(context=context, question=question)))
+
+
+```
+
+Response:
+```
+Agnes Whitlow was born on 02.06.1929.
+The Turnip Festival in 2025 took place on the third Saturday of October, which was **18 October 2025**.
+
+So her age on that date was **96 years old**.
+```
+
+Every hit is a `RagServiceResult` carrying `content`, `similarity`, `source_id`
+and the `rag_metadata` you indexed it with, so retrieval can be filtered
+(`collection_name=`, `source_ids=`) or inspected on its own — the model call is
+optional.
 
 ### Orchestrate the steps in YAML
 
