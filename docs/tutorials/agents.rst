@@ -223,8 +223,13 @@ tools over stdio and routes calls to them (needs the ``mcp`` extra):
 Kaval.AI also ships ready-made tools — for example a Crawl4AI web scraper that
 renders a page in a headless browser and returns clean Markdown, plus a
 Crawl4AI-backed ``web_search`` tool that needs no search API key
-(``pip install "kavalai[tools]"``). See ``examples/business_info_agent.py`` for
-an agent that combines both.
+(``pip install "kavalai[tools]"``). ``examples/business_info_agent.py`` combines
+both in a workflow — a search node finds candidate pages, an agent node
+restricted to the crawl tool reads the promising ones, and an LLM node writes
+the summary. Run with ``KAVALAI_DB_URI`` pointing at a migrated agent database,
+the engine records every company it researches — a session and run per company,
+a task per node, the chat history and the model-call stats — which is a quick
+way to fill the backoffice with real data.
 
 Where to next
 -------------

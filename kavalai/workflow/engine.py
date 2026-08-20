@@ -16,6 +16,7 @@ limitations under the License.
 
 import asyncio
 import importlib
+import json
 import os
 import time
 from typing import Any, AsyncGenerator, Callable, Optional, Type
@@ -287,7 +288,14 @@ class WorkflowEngine:
         client = self._make_llm_client(node.llm_model, node.llm_kwargs, agent_id)
         output_type = self.get_data_type(node.output)
 
-        agent = Agent(llm_client=client, kernel=self.kernel, run_context=run_context)
+        agent = Agent(
+            llm_client=client,
+            kernel=self.kernel,
+            run_context=run_context,
+            # An empty list on the node means "no restriction"; the agent
+            # distinguishes that from an explicit empty allow-list.
+            allowed_tools=node.allowed_tools or None,
+        )
         start = time.perf_counter()
         result_value: Optional[str] = None
         async for chunk in agent.prompt_stream(
@@ -615,7 +623,14 @@ class WorkflowEngine:
                 output_data=output_data,
                 context=to_plain(run_context.data),
             )
-            agent_response = getattr(output_value, "agent_response", "")
+            # Chat-shaped workflows answer in `agent_response`; for any other
+            # output type record the data itself, so the chat history is never
+            # blank (mirrors the `user_message` fallback on the input side).
+            agent_response = getattr(output_value, "agent_response", None)
+            if agent_response is None:
+                agent_response = (
+                    json.dumps(output_data) if output_data is not None else ""
+                )
             await self.agent_service.add_chat_message(
                 agent_id=run_context.agent_id,
                 session_id=run_context.session_id,

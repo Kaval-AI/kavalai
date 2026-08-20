@@ -1,3 +1,4 @@
+import json
 import typing
 from uuid import UUID
 
@@ -332,6 +333,88 @@ async def test_agent_node():
     state = await engine.run({"user_message": "x"})
     assert state.status == "completed"
     assert state.output_data == {"agent_response": "agent did it"}
+
+
+def _agent_node_graph(allowed_tools=None):
+    node = {
+        "name": "do",
+        "type": "agent",
+        "prompt": "do the thing",
+        "output": "output",
+        "next": "e",
+    }
+    if allowed_tools is not None:
+        node["allowed_tools"] = allowed_tools
+    return graph_dict(
+        [
+            {"name": "s", "type": "start", "next": "do"},
+            node,
+            {"name": "e", "type": "end", "output": "output"},
+        ]
+    )
+
+
+async def _run_and_capture_allowed_tools(graph):
+    """Run the graph, returning the allow-list the agent asked the kernel for."""
+    engine = WorkflowEngine.from_dict(
+        graph, client_factory=make_factory({"agent_response": "done"})
+    )
+    seen = {}
+    original = engine.kernel.get_tool_descriptions
+
+    async def spy(allowed_tools=None):
+        seen["allowed_tools"] = allowed_tools
+        return await original(allowed_tools)
+
+    engine.kernel.get_tool_descriptions = spy
+    state = await engine.run({"user_message": "x"})
+    assert state.status == "completed"
+    return seen["allowed_tools"]
+
+
+async def test_non_chat_output_is_still_recorded_in_the_chat_history():
+    """Without an ``agent_response`` field the output data is recorded instead."""
+    service = make_agent_service()
+    nodes = [
+        {"name": "s", "type": "start", "next": "do"},
+        {
+            "name": "do",
+            "type": "llm",
+            "prompt": "extract",
+            "output": "output",
+            "next": "e",
+        },
+        {"name": "e", "type": "end", "output": "output"},
+    ]
+    graph = graph_dict(nodes)
+    graph["data_types"]["output"] = {
+        "type": "object",
+        "properties": {"city": {"type": "string"}},
+    }
+    engine = WorkflowEngine.from_dict(
+        graph, agent_service=service, client_factory=make_factory({"city": "Tallinn"})
+    )
+
+    state = await engine.run({"user_message": "where?"})
+
+    assert state.output_data == {"city": "Tallinn"}
+    messages = await service.get_chat_history(UUID(state.session_id))
+    assert [m.role for m in messages] == ["user", "assistant"]
+    assert json.loads(messages[1].content) == {"city": "Tallinn"}
+
+
+async def test_agent_node_forwards_allowed_tools():
+    """A node's ``allowed_tools`` restricts the tools its agent may use."""
+    allowed = await _run_and_capture_allowed_tools(
+        _agent_node_graph(["python://web.crawl"])
+    )
+    assert allowed == ["python://web.crawl"]
+
+
+async def test_agent_node_without_allowed_tools_allows_all():
+    """An unset (empty) ``allowed_tools`` leaves every kernel tool available."""
+    assert await _run_and_capture_allowed_tools(_agent_node_graph()) is None
+    assert await _run_and_capture_allowed_tools(_agent_node_graph([])) is None
 
 
 async def test_invocation_id_is_unique_per_run_and_tokens_aggregate():

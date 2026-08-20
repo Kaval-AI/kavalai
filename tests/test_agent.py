@@ -496,3 +496,82 @@ async def test_debug_prints_the_rendered_prompt(mock_kernel, run_context, capsys
 
     printed = capsys.readouterr().out
     assert "say something" in printed
+
+
+@pytest.mark.asyncio
+async def test_all_tools_are_described_without_an_allow_list(mock_kernel, run_context):
+    """``allowed_tools=None`` keeps every registered tool available."""
+    StepOutput = get_step_output_type(str)
+    client = ScriptedClient([StepOutput(instructions="answer", output="done")])
+    agent = make_agent(client, mock_kernel, run_context)
+
+    await agent.prompt("do it", max_steps=1)
+
+    mock_kernel.get_tool_descriptions.assert_awaited_with(None)
+
+
+@pytest.mark.asyncio
+async def test_allowed_tools_filters_the_described_tools(mock_kernel, run_context):
+    """Only the allowed tools are offered to the model."""
+    StepOutput = get_step_output_type(str)
+    client = ScriptedClient([StepOutput(instructions="answer", output="done")])
+    agent = Agent(
+        llm_client=client,
+        kernel=mock_kernel,
+        run_context=run_context,
+        allowed_tools=["python://web.crawl"],
+    )
+
+    await agent.prompt("do it", max_steps=1)
+
+    mock_kernel.get_tool_descriptions.assert_awaited_with(["python://web.crawl"])
+
+
+@pytest.mark.asyncio
+async def test_disallowed_tool_call_is_refused(mock_kernel, run_context):
+    """A tool outside the allow-list is not executed; the model is told why."""
+    StepOutput = get_step_output_type(MockResponse)
+    step1 = StepOutput(
+        instructions="try the forbidden tool",
+        tool_calls=[ToolCall(name="python://web.search", call_id="c1")],
+    )
+    step2 = StepOutput(instructions="answer", output=MockResponse(answer="ok"))
+    client = ScriptedClient([step1, step2])
+    agent = Agent(
+        llm_client=client,
+        kernel=mock_kernel,
+        run_context=run_context,
+        allowed_tools=["python://web.crawl"],
+    )
+
+    result = await agent.prompt("do it", response_model=MockResponse, max_steps=5)
+
+    assert result.answer == "ok"
+    mock_kernel.call_tool.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_allowed_tool_call_still_runs(mock_kernel, run_context):
+    """The allow-list does not get in the way of a permitted tool."""
+    StepOutput = get_step_output_type(MockResponse)
+    step1 = StepOutput(
+        instructions="crawl the page",
+        tool_calls=[
+            ToolCall(
+                name="python://web.crawl", literal_args='{"url": "x"}', call_id="c1"
+            )
+        ],
+    )
+    step2 = StepOutput(instructions="answer", output=MockResponse(answer="ok"))
+    agent = Agent(
+        llm_client=ScriptedClient([step1, step2]),
+        kernel=mock_kernel,
+        run_context=run_context,
+        allowed_tools=["python://web.crawl"],
+    )
+
+    await agent.prompt("do it", response_model=MockResponse, max_steps=5)
+
+    mock_kernel.call_tool.assert_awaited_once_with(
+        tool_uri="python://web.crawl", arguments={"url": "x"}
+    )

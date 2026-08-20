@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, ConfigDict
 
 from kavalai.run_context import RunContext
 from kavalai.utils import to_plain
-from kavalai.functionkernel import FunctionKernel
+from kavalai.functionkernel import FunctionKernel, _is_tool_allowed
 from kavalai.llm_clients.base_client import BaseLlmClient, ChatHistory, ChatMessage
 from kavalai.llm_clients.common import safe_parse_json
 from kavalai.llm_clients.streamer import StreamContent
@@ -199,10 +199,20 @@ class Agent:
         kernel: Optional[FunctionKernel] = None,
         run_context: Optional[RunContext] = None,
         prompt_template: Optional[Template] = None,
+        allowed_tools: Optional[list[str]] = None,
         debug: bool = False,
     ):
+        """Build an agent.
+
+        ``allowed_tools`` restricts the agent to a subset of the kernel's
+        tools, given as tool URIs (``python://web.crawl``, or ``rest://api.*``
+        for a whole server). The tools outside it are neither described to the
+        model nor callable. ``None`` (the default) allows every registered
+        tool; an empty list allows none.
+        """
         self.debug = debug
         self.kernel = kernel
+        self.allowed_tools = allowed_tools
         if not run_context:
             run_context = RunContext()
         self.run_context = run_context
@@ -272,7 +282,9 @@ class Agent:
                 prompt=prompt,
                 data=self.run_context.data,
                 tool_descriptions=(
-                    await self.kernel.get_tool_descriptions() if self.kernel else ""
+                    await self.kernel.get_tool_descriptions(self.allowed_tools)
+                    if self.kernel
+                    else ""
                 ),
                 steps=steps,
                 current_step=step_idx,
@@ -447,6 +459,11 @@ class Agent:
         and returned as the result so the model can self-correct.
         """
         args = self._resolve_args(tool_call, planner_context)
+        if not _is_tool_allowed(tool_call.name, self.allowed_tools):
+            # The tool was never described to the model; tell it so it can
+            # pick one it is actually allowed to call.
+            logger.warning(f"Tool {tool_call.name} is not allowed for this agent")
+            return tool_call, args, f"Error: tool {tool_call.name} is not available."
         logger.info(f"Calling tool {tool_call.name} with {args}")
         try:
             result = await self.kernel.call_tool(
