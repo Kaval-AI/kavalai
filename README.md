@@ -7,12 +7,21 @@ Kaval.AI is an opinionated and elegant Python library for building production-gr
 
 Features:
 - Support commercial (OpenAI, Google, Anthropic) and open source LLM providers.
+  → [LLM clients](https://docs.kaval.ai/tutorials/llm_clients.html)
 - Runs in browser via WebLLM and Pyodide.
+  → [Running in the browser](https://docs.kaval.ai/tutorials/run_in_browser.html)
 - Excellent support for retrieval-augmented generation (RAG) on various storage engines.
+  → [RAG](https://docs.kaval.ai/tutorials/rag.html)
 - Structured inputs, outputs, tool calls and responses using Pydantic semantics.
+  → [Typed inputs and outputs](https://docs.kaval.ai/tutorials/agents.html#typed-inputs-and-outputs)
 - Streaming responses.
+  → [Streaming](https://docs.kaval.ai/tutorials/streamer.html)
 - Fully featured workflow engine using conditional processing and tool calling.
+  → [Workflows tutorial](https://docs.kaval.ai/tutorials/workflow.html),
+  [workflow concepts](https://docs.kaval.ai/guides/workflows.html)
 - Python tools, REST server endpoints (supports basic auth) and MCP support.
+  → [Tools](https://docs.kaval.ai/guides/tools.html),
+  [agent server API](https://docs.kaval.ai/api/server.html)
 
 See the [full documentation](https://docs.kaval.ai) for more detailed reference.
 
@@ -22,6 +31,9 @@ See the [full documentation](https://docs.kaval.ai) for more detailed reference.
 pip install kavalai[common]
 ```
 
+See [Installation](https://docs.kaval.ai/tutorials/installation.html) for the
+optional extras (`gemini`, `rag`, `server`, …) and provider configuration.
+
 ## Getting started
 
 ### Call a model
@@ -29,7 +41,9 @@ pip install kavalai[common]
 Every provider sits behind one small async interface. `make_client` builds the
 right client from a `provider/model` id and reads the matching API key
 (`OPENAI_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, …) from the
-environment:
+environment — see
+[Provider clients](https://docs.kaval.ai/tutorials/llm_clients.html#provider-clients-openai-gemini-anthropic-and-ollama)
+for the full list, Ollama included:
 
 ```python
 import os
@@ -73,6 +87,14 @@ Response:
 name='Tallinn' country='Estonia' fun_fact='Medieval Old Town of Tallinn is one of the best-preserved in Northern Europe.'
 ```
 
+More on calling models: the
+[LLM clients tutorial](https://docs.kaval.ai/tutorials/llm_clients.html) covers
+[streaming responses](https://docs.kaval.ai/tutorials/llm_clients.html#streaming-responses),
+[timeouts and retries](https://docs.kaval.ai/tutorials/llm_clients.html#timeouts-and-retries)
+and [token usage statistics](https://docs.kaval.ai/tutorials/llm_clients.html#model-statistics-and-observability),
+with a browser playground you can run without an API key. Tool calling and
+multi-step loops live in [Agents & tools](https://docs.kaval.ai/tutorials/agents.html).
+
 ### Using retrieval-augmented generation (RAG)
 
 RAG is a technique for injecting relevant information in the context of an LLM
@@ -81,6 +103,8 @@ from its training dataset.  A common way this is done involves embedding the inf
 querying it using similarity search.
 
 Kaval.AI provides a `RagService` that can index (embed) this information and also query it.
+The [RAG tutorial](https://docs.kaval.ai/tutorials/rag.html) is a runnable
+notebook that walks through the same loop in depth.
 
 For instance, let's define some "facts" about a fictional Green Village
 ```python
@@ -110,12 +134,15 @@ Every resident of Green Village receives a free pumpkin on their birthday, a tra
 
 Then, we'll use a in-memory Sqlite database backend to index these facts.
 In production, you can use PostgreSQL pgvector extension or other
-supported vector search databases.
+supported vector search databases. The embedding model is named
+`provider/model` too — `fastembed` runs locally with no API key, `openai`,
+`gemini` and `ollama` are also supported; see
+[Choosing an embedding model](https://docs.kaval.ai/tutorials/rag.html#choosing-an-embedding-model).
 
 ```python
 from kavalai.rag import SqliteRagService
 
-rag = SqliteRagService(":memory", model="fastembed/BAAI/bge-small-en-v1.5")
+rag = SqliteRagService(":memory:", model="fastembed/BAAI/bge-small-en-v1.5")
 await rag.index_batch(
     texts=FACTS,
     metadata_list=[{"village": "Green Village"}] * len(FACTS),
@@ -174,6 +201,14 @@ Every hit is a `RagServiceResult` carrying `content`, `similarity`, `source_id`
 and the `rag_metadata` you indexed it with, so retrieval can be filtered
 (`collection_name=`, `source_ids=`) or inspected on its own — the model call is
 optional.
+
+From here the [RAG tutorial](https://docs.kaval.ai/tutorials/rag.html) covers
+[collapsing chunks of one document with `keep_best`](https://docs.kaval.ai/tutorials/rag.html#chunked-documents-and-keep-best),
+[batched queries](https://docs.kaval.ai/tutorials/rag.html#batched-queries) and
+[similarity matrices](https://docs.kaval.ai/tutorials/rag.html#similarity-matrix)
+against a PostgreSQL/`pgvector` index. A RAG index can also be pre-built and
+shipped to the browser — see
+[Running in the browser](https://docs.kaval.ai/tutorials/run_in_browser.html).
 
 
 ## Documentation
