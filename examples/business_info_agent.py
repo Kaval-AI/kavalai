@@ -1,7 +1,6 @@
-"""Example: a v2 Agent that researches a business using LangSearch + Crawl4AI."""
+"""Example: a v2 Agent that researches a business using Crawl4AI."""
 
 import asyncio
-import os
 from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -11,8 +10,7 @@ from rich.json import JSON
 from kavalai import FunctionKernel, make_client
 from kavalai.run_context import RunContext
 from kavalai.agent import Agent
-from kavalai.tools.websearch.langsearch import langsearch_web_search
-from kavalai.tools.webtools.crawl4ai import crawl_url
+from kavalai.tools.webtools.crawl4ai import crawl_url, web_search
 
 
 class BusinessInfo(BaseModel):
@@ -37,16 +35,11 @@ console = Console()
 
 
 async def main():
-    if not os.environ.get("LANGSEARCH_API_KEY"):
-        print("Please set LANGSEARCH_API_KEY environment variable.")
-        return
-
     # 1. Register the tools the agent may call (addressed as python://<name>).
     #    Searching finds candidate pages; crawling reads the promising ones.
+    #    Both run on Crawl4AI, so no search API key is needed.
     kernel = FunctionKernel()
-    kernel.register_python_tool(
-        "websearch.langsearch_web_search", langsearch_web_search
-    )
+    kernel.register_python_tool("webtools.web_search", web_search)
     kernel.register_python_tool("webtools.crawl_url", crawl_url)
 
     # 2. Seed the run context with the query the agent will research.

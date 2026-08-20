@@ -14,12 +14,34 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-from typing import Optional, Dict, Any
+import json
+from typing import Optional, Dict, Any, List
+from urllib.parse import parse_qs, quote_plus, urlparse
 
 from loguru import logger
 from pydantic import BaseModel
 
 from kavalai.functionkernel import pythontool
+
+
+# Constants
+DUCKDUCKGO_HTML_ENDPOINT = "https://duckduckgo.com/html/"
+
+# CSS extraction schema for the DuckDuckGo HTML result list.
+DUCKDUCKGO_RESULT_SCHEMA = {
+    "name": "DuckDuckGo results",
+    "baseSelector": "div.result__body",
+    "fields": [
+        {"name": "title", "selector": "a.result__a", "type": "text"},
+        {
+            "name": "url",
+            "selector": "a.result__a",
+            "type": "attribute",
+            "attribute": "href",
+        },
+        {"name": "snippet", "selector": "a.result__snippet", "type": "text"},
+    ],
+}
 
 
 class Crawl4aiResponse(BaseModel):
@@ -30,6 +52,53 @@ class Crawl4aiResponse(BaseModel):
     status_code: Optional[int] = None
     metadata: Optional[Dict[str, Any]] = None
     error_message: Optional[str] = None
+
+
+class WebSearchResult(BaseModel):
+    title: str
+    url: str
+    snippet: Optional[str] = None
+
+
+class WebSearchResponse(BaseModel):
+    query: str
+    success: bool
+    results: List[WebSearchResult] = []
+    error_message: Optional[str] = None
+
+
+def _resolve_result_url(href: Optional[str]) -> Optional[str]:
+    """Turn a DuckDuckGo result href into the target page URL."""
+    if not href:
+        return None
+
+    # Protocol-relative links (//duckduckgo.com/l/?uddg=...) need a scheme to parse.
+    if href.startswith("//"):
+        href = f"https:{href}"
+
+    parsed = urlparse(href)
+    if parsed.netloc.endswith("duckduckgo.com") and parsed.path.startswith("/l/"):
+        # Redirect link: the real URL sits in the (already decoded) 'uddg' parameter.
+        target = parse_qs(parsed.query).get("uddg")
+        return target[0] if target else None
+
+    return href if parsed.scheme in ("http", "https") else None
+
+
+def _parse_search_results(extracted_content: Optional[str]) -> List[WebSearchResult]:
+    """Convert the extracted DuckDuckGo JSON into search result models."""
+    if not extracted_content:
+        return []
+
+    results = []
+    for item in json.loads(extracted_content):
+        url = _resolve_result_url(item.get("url"))
+        title = (item.get("title") or "").strip()
+        if not url or not title:
+            continue
+        snippet = (item.get("snippet") or "").strip() or None
+        results.append(WebSearchResult(title=title, url=url, snippet=snippet))
+    return results
 
 
 @pythontool
@@ -74,3 +143,43 @@ async def crawl_url(
         metadata=result.metadata,
         error_message=result.error_message,
     )
+
+
+@pythontool
+async def web_search(
+    query: str,
+    count: int = 10,
+    timeout: float = 60.0,
+) -> WebSearchResponse:
+    """
+    Search the web with Crawl4AI by scraping the DuckDuckGo result page.
+
+    Args:
+        query: The search query.
+        count: Maximum number of results to return (default 10).
+        timeout: Page load timeout in seconds (default 60.0).
+    """
+    # Imported lazily so the optional 'tools' dependency is only required at call time.
+    from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode
+    from crawl4ai.extraction_strategy import JsonCssExtractionStrategy
+
+    search_url = f"{DUCKDUCKGO_HTML_ENDPOINT}?q={quote_plus(query)}"
+    browser_config = BrowserConfig(headless=True)
+    run_config = CrawlerRunConfig(
+        cache_mode=CacheMode.ENABLED,
+        page_timeout=int(timeout * 1000),
+        extraction_strategy=JsonCssExtractionStrategy(DUCKDUCKGO_RESULT_SCHEMA),
+    )
+
+    logger.info(f"Searching the web with Crawl4AI: {query}")
+    async with AsyncWebCrawler(config=browser_config) as crawler:
+        result = await crawler.arun(url=search_url, config=run_config)
+
+    if not result.success:
+        return WebSearchResponse(
+            query=query, success=False, error_message=result.error_message
+        )
+
+    results = _parse_search_results(result.extracted_content)
+    logger.debug(f"Found {len(results)} search results for: {query}")
+    return WebSearchResponse(query=query, success=True, results=results[:count])

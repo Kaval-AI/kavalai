@@ -221,8 +221,10 @@ tools over stdio and routes calls to them (needs the ``mcp`` extra):
    await kernel.close()
 
 Kaval.AI also ships ready-made tools — for example a Crawl4AI web scraper that
-renders a page in a headless browser and returns clean Markdown
-(``pip install "kavalai[tools]"``).
+renders a page in a headless browser and returns clean Markdown, plus a
+Crawl4AI-backed ``web_search`` tool that needs no search API key
+(``pip install "kavalai[tools]"``). See ``examples/business_info_agent.py`` for
+an agent that combines both.
 
 Where to next
 -------------

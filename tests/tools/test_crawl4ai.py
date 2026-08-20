@@ -14,13 +14,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
+import json
 import os
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
 from kavalai.tools.webtools.crawl4ai import (
     crawl_url,
+    web_search,
     Crawl4aiResponse,
+    WebSearchResponse,
 )
 
 
@@ -133,6 +136,116 @@ async def test_crawl_url_markdown_without_raw_attr():
     assert response.markdown == "plain markdown"
 
 
+def _make_search_result(extracted_content, success=True, error_message=None):
+    result = MagicMock()
+    result.success = success
+    result.extracted_content = extracted_content
+    result.error_message = error_message
+    return result
+
+
+@pytest.mark.asyncio
+async def test_web_search_success():
+    extracted = json.dumps(
+        [
+            {
+                "title": "Kaval AI",
+                # DuckDuckGo wraps result links in a protocol-relative redirect.
+                "url": "//duckduckgo.com/l/?uddg=https%3A%2F%2Fkaval.ai%2F&rut=abc",
+                "snippet": "YAML-based AI agent framework.",
+            },
+            {
+                "title": "Kaval AI on LinkedIn",
+                "url": "https://www.linkedin.com/company/kaval-ai",
+                "snippet": "",
+            },
+        ]
+    )
+    crawler_cls, crawler = _make_crawler_mock(_make_search_result(extracted))
+
+    with patch("crawl4ai.AsyncWebCrawler", crawler_cls):
+        response = await web_search(query="Kaval AI")
+
+    assert isinstance(response, WebSearchResponse)
+    assert response.success is True
+    assert response.query == "Kaval AI"
+    assert [r.url for r in response.results] == [
+        "https://kaval.ai/",
+        "https://www.linkedin.com/company/kaval-ai",
+    ]
+    assert response.results[0].snippet == "YAML-based AI agent framework."
+    # Empty snippets become None.
+    assert response.results[1].snippet is None
+
+    # The query must be URL-encoded into the DuckDuckGo HTML endpoint.
+    _, kwargs = crawler.arun.call_args
+    assert kwargs["url"] == "https://duckduckgo.com/html/?q=Kaval+AI"
+
+
+@pytest.mark.asyncio
+async def test_web_search_respects_count():
+    extracted = json.dumps(
+        [
+            {"title": f"Result {i}", "url": f"https://example.com/{i}", "snippet": "s"}
+            for i in range(5)
+        ]
+    )
+    crawler_cls, _ = _make_crawler_mock(_make_search_result(extracted))
+
+    with patch("crawl4ai.AsyncWebCrawler", crawler_cls):
+        response = await web_search(query="example", count=2)
+
+    assert [r.title for r in response.results] == ["Result 0", "Result 1"]
+
+
+@pytest.mark.asyncio
+async def test_web_search_skips_unusable_results():
+    extracted = json.dumps(
+        [
+            # Unresolvable redirect (no 'uddg' parameter).
+            {"title": "Redirect", "url": "//duckduckgo.com/l/?rut=abc", "snippet": "s"},
+            # Non-HTTP scheme.
+            {"title": "Mail", "url": "mailto:info@example.com", "snippet": "s"},
+            # Missing href.
+            {"title": "No link", "url": None, "snippet": "s"},
+            # Missing title.
+            {"title": "", "url": "https://example.com", "snippet": "s"},
+            {"title": "Good", "url": "https://example.com", "snippet": "s"},
+        ]
+    )
+    crawler_cls, _ = _make_crawler_mock(_make_search_result(extracted))
+
+    with patch("crawl4ai.AsyncWebCrawler", crawler_cls):
+        response = await web_search(query="example")
+
+    assert [r.title for r in response.results] == ["Good"]
+
+
+@pytest.mark.asyncio
+async def test_web_search_without_extracted_content():
+    crawler_cls, _ = _make_crawler_mock(_make_search_result(None))
+
+    with patch("crawl4ai.AsyncWebCrawler", crawler_cls):
+        response = await web_search(query="example")
+
+    assert response.success is True
+    assert response.results == []
+
+
+@pytest.mark.asyncio
+async def test_web_search_failure():
+    crawler_cls, _ = _make_crawler_mock(
+        _make_search_result(None, success=False, error_message="Timeout")
+    )
+
+    with patch("crawl4ai.AsyncWebCrawler", crawler_cls):
+        response = await web_search(query="example")
+
+    assert response.success is False
+    assert response.results == []
+    assert response.error_message == "Timeout"
+
+
 @pytest.mark.skipif(
     not os.environ.get("CRAWL4AI_INTEGRATION"),
     reason="CRAWL4AI_INTEGRATION not defined",
@@ -149,3 +262,21 @@ async def test_crawl_url_integration():
     assert response.success is True
     assert response.markdown is not None
     assert "Example Domain" in response.markdown
+
+
+@pytest.mark.skipif(
+    not os.environ.get("CRAWL4AI_INTEGRATION"),
+    reason="CRAWL4AI_INTEGRATION not defined",
+)
+@pytest.mark.asyncio
+async def test_web_search_integration():
+    """
+    Real integration test for the web_search tool.
+    Only runs if CRAWL4AI_INTEGRATION is defined and a browser is installed.
+    """
+    response = await web_search(query="Kaval AI agent framework", count=5)
+
+    assert isinstance(response, WebSearchResponse)
+    assert response.success is True
+    assert len(response.results) <= 5
+    assert all(r.url.startswith("http") for r in response.results)

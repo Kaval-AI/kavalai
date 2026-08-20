@@ -71,6 +71,18 @@ services:
       - kavalai
 
 
+  crawl4ai:
+    image: unclecode/crawl4ai:latest
+    container_name: crawl4ai
+    restart: unless-stopped
+    ports:
+      - "11235:11235"
+    # Chromium needs more shared memory than the Docker default of 64MB.
+    shm_size: "1g"
+    networks:
+      - kavalai
+
+
   torproxy:
     image: dperson/torproxy
     restart: always
