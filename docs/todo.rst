@@ -77,6 +77,37 @@ defaults ``response_code=200``). The provider LLM clients construct
 ``ModelCallStat`` directly and never set it, so it is always ``None`` for LLM
 calls — including in the backoffice's Model Calls table.
 
+Concurrent runs on one engine corrupt ``token_usage``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``WorkflowEngine`` holds a single ``TokenAccumulator`` (``engine.py:112``) and
+**resets it at the start of every run** (``engine.py:460``). Runs that overlap on
+the same engine therefore share one counter: each reports whatever total the
+accumulator happened to hold when it finished.
+
+Reproduced with four concurrent ``engine.run()`` calls on one engine, each a
+single-node workflow making exactly one model call. Outputs were all correct;
+the reported usage was:
+
+.. code-block:: text
+
+   {'model_calls': 2, ... 'total_tokens': 189}
+   {'model_calls': 3, ... 'total_tokens': 287}
+   {'model_calls': 1, ... 'total_tokens': 94}
+   {'model_calls': 4, ... 'total_tokens': 391}
+
+This matters in production: ``kavalai.server`` builds **one** engine and serves
+it to every concurrent request, so per-run token figures are unreliable under
+any real load — including the ones written to the run row and shown in the
+backoffice. Individual ``model_call_stats`` rows come from the client and remain
+correct, so the aggregate can be recomputed from them.
+
+*Suggested fix*: make the accumulator per-run — create it in ``run_stream`` and
+thread it through the client factory — rather than per-engine.
+
+*Docs meanwhile*: the :doc:`cookbook/index` batch recipe builds one engine per
+concurrent run and says why.
+
 Rough edges
 -----------
 
@@ -179,3 +210,44 @@ Documentation follow-ups
 * ``docs/ui/index.rst`` describes the RAG explorer's PCA projection and the
   Workflows timeline from the screenshots; neither was exercised against a live
   backoffice during this pass.
+
+Capability gaps found while comparing frameworks
+-------------------------------------------------
+
+Written up honestly in :doc:`tutorials/comparison`. None is a bug; each is a
+decision worth taking deliberately, since they are the questions evaluators ask
+first.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Gap
+     - Notes
+   * - No parallel node execution
+     - The engine walks one node at a time (no ``gather``/``TaskGroup`` in
+       ``engine.py``). A fan-out over N items costs N times one item. LangGraph,
+       LlamaIndex Workflows and n8n all fan out natively. Tool calls inside an
+       ``agent`` node *are* concurrent (``agent.py:350``).
+   * - No durable resume
+     - The run row is written at ``initialize_workflow_run`` and again at
+       ``_finish`` / ``_record_failure``; there is no mid-run checkpoint, so a
+       crash loses the run. This is LangGraph's headline feature and the reason
+       Pydantic AI integrates Temporal/DBOS/Prefect.
+   * - No human-in-the-loop
+     - No way to pause a run for approval and resume it mid-graph. CrewAI has
+       ``human_input``, LangGraph has interrupts, n8n has wait nodes. The
+       documented workaround makes the pause a boundary between runs.
+   * - No multi-agent patterns
+     - No handoff, delegation, crew or group-chat primitive — one agent loop per
+       node, with the graph doing the routing.
+   * - No evaluation tooling
+     - No dataset runner, scoring or regression harness for prompt changes. The
+       recorded runs are good raw material for one.
+   * - No OpenTelemetry export
+     - Observability is Kaval.AI's own tables plus loguru. Pydantic AI, the
+       OpenAI Agents SDK and the Microsoft Agent Framework all emit OTel, which
+       drops into existing tracing stacks.
+   * - No long-term memory
+     - Memory is the session's chat history plus ``history:`` inputs. There is
+       no semantic or summarising memory across sessions.

@@ -17,6 +17,42 @@ result is agentic software you can debug, test and put on call.
 
    pip install "kavalai[common]"
 
+Features
+--------
+
+* **Every provider behind one interface** — OpenAI, Google Gemini, Anthropic and
+  Ollama, chosen by a ``provider/model`` string.
+  → :doc:`tutorials/llm_clients`
+* **Structured inputs, outputs, tool calls and responses**, all with Pydantic
+  semantics and validated at every boundary.
+  → :doc:`tutorials/quickstart`
+* **A full workflow engine** — a typed YAML graph with conditional routing, tool
+  calls, agent loops and cycles.
+  → :doc:`tutorials/workflow`, :doc:`reference/yaml`
+* **Agents with real tools** — Python functions, REST endpoints and MCP servers
+  through one validated kernel, restrictable per node.
+  → :doc:`tutorials/agents`, :doc:`reference/tools`
+* **Retrieval-augmented generation** on PostgreSQL/pgvector or a portable SQLite
+  file, with local or hosted embeddings.
+  → :doc:`tutorials/rag`
+* **Streaming everywhere** — model tokens, per-node run events, and
+  Server-Sent Events over HTTP.
+  → :doc:`tutorials/streamer`
+* **Observability you host yourself** — every session, run, node and model call
+  recorded in your own database, browsable in the backoffice UI.
+  → :doc:`guides/observability`, :doc:`ui/index`
+* **Serving built in** — any workflow behind a typed FastAPI endpoint, with
+  optional basic auth.
+  → :doc:`tutorials/serving`
+* **Runs in the browser** via Pyodide and WebLLM — no server, no API key, no
+  data leaving the device.
+  → :doc:`tutorials/run_in_browser`
+* **Deterministic tests** — swap the model for a stub and run the graph offline.
+  → :doc:`guides/safety`
+
+Weighing it against LangGraph, CrewAI, n8n or Dify? :doc:`tutorials/comparison`
+lays out the trade-offs, including where Kaval.AI is behind.
+
 Call a model
 ------------
 
@@ -134,31 +170,6 @@ turns.
 The same graph is equally expressible in YAML, and the same engine serves it
 over HTTP. See :doc:`tutorials/quickstart` for this example end to end.
 
-What else is in the box
------------------------
-
-**Tools, through one kernel.** Python functions, REST endpoints and
-`MCP <https://modelcontextprotocol.io/>`__ servers all become typed, validated
-tools an agent can call — and ``allowed_tools`` decides which ones it may.
-→ :doc:`tutorials/agents`
-
-**Streaming everywhere.** Token-by-token model output, per-node run events, and
-Server-Sent Events over HTTP. → :doc:`tutorials/streamer`
-
-**Observability by default.** Every run records its trace, context, chat
-history, per-node tasks and token usage — reloadable in code and browsable in
-the backoffice UI. → :doc:`guides/observability`
-
-**Deterministic tests.** Swap the model for a stub client and your graph logic
-becomes fast, free and repeatable. → :doc:`guides/safety`
-
-**It runs in a browser.** The whole stack — engine, model and embeddings — can
-execute client-side over WebGPU, with no server and no API key.
-→ :doc:`tutorials/run_in_browser`
-
-**A management UI.** Configure agents, browse conversations, drill into any run
-or model call, and query your RAG collections. → :doc:`ui/index`
-
 Where to start
 --------------
 
@@ -167,6 +178,9 @@ Where to start
 * Want the full tour? Start at :doc:`tutorials/llm_clients` and work down.
 * Looking something up? :doc:`reference/index` has the YAML keys, the bundled
   tools and every environment variable.
+* Comparing frameworks? :doc:`tutorials/comparison` is honest about both sides.
+* Want worked recipes? :doc:`cookbook/index` has them, from RAG to
+  self-correcting loops.
 
 .. toctree::
    :hidden:

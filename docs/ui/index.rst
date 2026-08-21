@@ -68,7 +68,7 @@ This is the heart of observability. A **conversation** (session) groups the
 **runs** triggered within it; each run expands into the ordered **tasks** (the
 nodes the engine executed). You can read the chat turns, and for any run open its
 **Input**, **Output** and per-node **Tasks** — exactly the data the engine
-checkpointed through its storage and task-logger backends (see
+recorded through its agent service and task-logger backends (see
 :doc:`../guides/observability`).
 
 .. image:: /_static/ui/conversations.png

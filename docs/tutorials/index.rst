@@ -21,3 +21,4 @@ before? :doc:`../guides/concepts` covers the vocabulary first.
    Observability & storage <observability_storage>
    Serving over HTTP <serving>
    Running in the browser <run_in_browser>
+   How Kaval.AI compares <comparison>

@@ -2,7 +2,13 @@ Cookbook
 ========
 
 Short, self-contained recipes for things people actually build. Each one is
-complete enough to paste into a file and run once you have set a provider key.
+complete enough to paste into a file and run once you have set a provider key,
+and each was executed while writing this page.
+
+Several are the standard use cases other agent frameworks demonstrate —
+structured extraction, routing, evaluator–optimizer loops, batch classification
+— written the Kaval.AI way, so you can judge the fit. See
+:doc:`../tutorials/comparison` for where that fit ends.
 
 For the reasoning behind them, follow the links into the tutorials.
 
@@ -323,6 +329,310 @@ what you want for long answers.
 
 Over HTTP, ``POST /stream_agent`` serves these same events as Server-Sent
 Events — see :doc:`../tutorials/serving`.
+
+Extracting structured records from messy text
+----------------------------------------------
+
+The most reliably useful thing an LLM does: turn prose into a typed record.
+Nested models and lists work, so one call can return a whole document.
+
+.. code-block:: python
+
+   import asyncio
+
+   from pydantic import BaseModel, Field
+
+   from kavalai import make_client
+
+   NOTES = """
+   Village council, 14 March. Present: Thomas Cook, Greta Lindqvist, Agnes Whitlow.
+   Greta will order 200kg of flour before the Turnip Festival. Thomas agreed to
+   get three quotes for repairing the church bell by 1 April. We rejected the
+   proposal to widen Cobbler's Path. Agnes will ask the library to open on
+   Saturdays during the festival week.
+   """
+
+
+   class ActionItem(BaseModel):
+       owner: str
+       task: str
+       due: str | None = Field(default=None, description="Deadline if one was stated.")
+
+
+   class Minutes(BaseModel):
+       date: str
+       attendees: list[str]
+       actions: list[ActionItem]
+       decisions: list[str]
+
+
+   async def main():
+       client = make_client("openai/gpt-5.4-mini")
+       minutes = await client.prompt(
+           f"Extract the minutes from these notes:\n{NOTES}", response_model=Minutes
+       )
+
+       print("date     :", minutes.date)
+       print("attendees:", ", ".join(minutes.attendees))
+       for action in minutes.actions:
+           due = f" (due {action.due})" if action.due else ""
+           print(f"  - {action.owner}: {action.task}{due}")
+
+
+   asyncio.run(main())
+
+.. code-block:: text
+
+   date     : 14 March
+   attendees: Thomas Cook, Greta Lindqvist, Agnes Whitlow
+     - Greta Lindqvist: Order 200kg of flour before the Turnip Festival
+     - Thomas Cook: Get three quotes for repairing the church bell (due 1 April)
+     - Agnes Whitlow: Ask the library to open on Saturdays during the festival week
+
+Note ``due`` is ``str | None`` with a description: optional fields let the model
+say "not stated" without inventing a date, and the description is part of the
+schema it sees. See :doc:`../tutorials/llm_clients`.
+
+A self-correcting draft (evaluator–optimizer)
+----------------------------------------------
+
+A graph may contain cycles, which is what makes the classic
+*write → critique → revise → critique* loop expressible directly. The ``if``
+node decides whether to go round again, and a counter keeps the loop finite.
+
+.. code-block:: yaml
+
+   name: Notice writer
+   description: Drafts a village notice, critiques it, and revises until it passes.
+   llm_model: openai/gpt-5.4-mini
+   data_types:
+     input:
+       type: object
+       properties:
+         topic: {type: string}
+     draft:
+       type: object
+       properties:
+         text: {type: string}
+     review:
+       type: object
+       properties:
+         approved: {type: boolean}
+         feedback: {type: string}
+     attempts:
+       type: object
+       properties:
+         count: {type: integer}
+     output:
+       type: object
+       properties:
+         agent_response: {type: string}
+   nodes:
+     - {name: start, type: start, next: write}
+     - name: write
+       type: llm
+       prompt: |
+         Write a short notice for the Green Village noticeboard about:
+         {{ context.input.topic }}
+         Keep it under 40 words.
+       inputs: {input: {type: context, value: input}}
+       output: draft
+       next: critique
+     - name: critique
+       type: llm
+       prompt: |
+         You are a strict village clerk. Review this notice:
+         {{ context.draft.text }}
+         Approve only if it states what, when and where. Set approved and give feedback.
+       inputs: {draft: {type: context, value: draft}}
+       output: review
+       next: count
+     - name: count
+       type: function
+       tool: python://bump
+       inputs: {current: {type: context, value: attempts.count}}
+       output: attempts
+       next: decide
+     - name: decide
+       type: if
+       condition: "review.approved == True or attempts.count >= 3"
+       then: finish
+       else: revise
+     - name: revise
+       type: llm
+       prompt: |
+         Rewrite the notice addressing this feedback.
+         Notice: {{ context.draft.text }}
+         Feedback: {{ context.review.feedback }}
+       inputs: {review: {type: context, value: review}}
+       output: draft
+       next: critique
+     - name: finish
+       type: llm
+       prompt: "Return the final notice text unchanged in agent_response: {{ context.draft.text }}"
+       inputs: {draft: {type: context, value: draft}}
+       output: output
+       next: end
+     - {name: end, type: end, output: output}
+
+The counter is an ordinary tool. Note the ``Optional`` — on the first pass
+``attempts.count`` does not exist yet and resolves to ``None``:
+
+.. code-block:: python
+
+   from typing import Optional
+
+   from pydantic import BaseModel
+
+   from kavalai import pythontool
+
+
+   class Attempts(BaseModel):
+       count: int
+
+
+   @pythontool
+   def bump(current: Optional[int] = None) -> Attempts:
+       """Increment the revision counter."""
+       return Attempts(count=(current or 0) + 1)
+
+The trace records the loop, so you can see exactly how many rounds it took:
+
+.. code-block:: text
+
+   trace   : start → write → critique → count → decide → revise → critique → count → decide → finish → end
+   attempts: {'count': 2}
+   approved: True
+
+Always bound the loop. ``max_node_visits`` (1000 by default) will stop a runaway
+graph, but a stuck critique burns real tokens until it does — the explicit
+counter is what makes the cost predictable.
+
+Classifying a backlog concurrently
+-----------------------------------
+
+The engine executes one node at a time, but nothing stops you running many
+workflows at once. This is how you fan out today.
+
+.. code-block:: python
+
+   import asyncio
+
+   from pydantic import BaseModel
+
+   from kavalai.agent_service import AgentService
+   from kavalai.db import db_manager
+   from kavalai.workflow import WorkflowBuilder
+
+
+   class Note(BaseModel):
+       user_message: str
+
+
+   class Tagged(BaseModel):
+       agent_response: str
+       topic: str
+       urgent: bool
+
+
+   NOTES = [
+       "The church bell has been stuck since Tuesday.",
+       "May I put a beehive in my front garden?",
+       "The pub sign fell down and nearly hit someone.",
+       "When does the library open?",
+   ]
+
+
+   def build(service):
+       return (
+           WorkflowBuilder("Noticeboard triage", llm_model="openai/gpt-5.4-mini")
+           .data_model("input", Note)
+           .data_model("output", Tagged)
+           .start("tag")
+           .llm(
+               "tag",
+               prompt=(
+                   "Tag this note from the Green Village noticeboard. "
+                   "topic is one of: repair, permit, other. "
+                   "urgent is true only if someone could get hurt. "
+                   "agent_response is a one-line acknowledgement."
+               ),
+               inputs={"note": "input"},
+               output="output",
+               next="end",
+               use_history=False,
+           )
+           .end()
+           .build_engine(agent_service=service)
+       )
+
+
+   async def main():
+       await db_manager.init_sqlite()
+       service = AgentService(db_manager.get_sqlite_sessionmaker())
+
+       async def classify(note: str):
+           engine = build(service)       # one engine per concurrent run — see below
+           return await engine.run({"user_message": note})
+
+       for note, state in zip(NOTES, await asyncio.gather(*map(classify, NOTES))):
+           out = state.output_data
+           print(f"{out['topic']:<7} urgent={out['urgent']!s:<5} {note}")
+
+
+   asyncio.run(main())
+
+.. code-block:: text
+
+   repair  urgent=False The church bell has been stuck since Tuesday.
+   permit  urgent=False May I put a beehive in my front garden?
+   repair  urgent=True  The pub sign fell down and nearly hit someone.
+   other   urgent=False When does the library open?
+
+Two things make this work:
+
+**``use_history=False``.** Classification is not a conversation. Left on, each
+run would replay the session's earlier turns into the prompt — more tokens, and
+one note's wording nudging the next one's label.
+
+.. important::
+
+   **Build one engine per concurrent run**, as above. An engine keeps a single
+   token accumulator that it resets at the start of each run, so overlapping
+   runs on one engine report each other's token counts. The outputs are correct;
+   ``token_usage`` is not. Sharing one ``AgentService`` across those engines is
+   fine. See :doc:`../todo`.
+
+Pausing for a human
+-------------------
+
+Kaval.AI has no interrupt-and-resume primitive: a run goes from ``start`` to
+``end``. The pattern that works is to make the pause a *boundary between runs*,
+with the session carrying the state.
+
+.. code-block:: python
+
+   # Run 1 — draft a reply and stop. Nothing is sent.
+   draft = await engine.run(
+       {"user_message": "The church bell has been stuck since Tuesday."},
+       external_id="ticket-91",
+   )
+   show_to_reviewer(draft.output_data["agent_response"])
+
+   # …the human decides, minutes or days later…
+
+   # Run 2 — same session, so the draft and its context are already in history.
+   final = await engine.run(
+       {"user_message": "Approved, but mention the bell ringer's name."},
+       external_id="ticket-91",
+   )
+
+Because both runs share a session, the second one sees the first through chat
+history, and a node can read a specific earlier value with a ``history:`` input
+(see :doc:`../reference/yaml`). What you do not get is a suspended run resuming
+mid-graph — the second run starts at ``start`` again. For approval steps in the
+*middle* of a long graph, LangGraph or n8n do this natively; see
+:doc:`../tutorials/comparison`.
 
 Watching what a run cost
 ------------------------
