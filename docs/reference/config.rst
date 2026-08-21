@@ -62,6 +62,18 @@ Models
    * - ``KAVALAI_EMBEDDING_NORMALIZER_YAML``
      - Path to a YAML file describing a custom embedding
        :class:`~kavalai.Normalizer`.
+   * - ``KAVALAI_PROVIDER_MODULES``
+     - Comma-separated modules the agent server imports before loading the
+       workflow, so any backends they register with
+       :func:`~kavalai.register_llm_provider`,
+       :func:`~kavalai.register_embedding_provider` or
+       :func:`~kavalai.register_rag_service` can be named from the YAML. Every
+       dotted registration is resolved afterwards, so a mistyped path fails at
+       start-up rather than at the first request that reaches that node.
+   * - ``KAVALAI_RAG_SERVICE``
+     - Name of a registered RAG service for
+       ``python -m kavalai.tools.index_csv`` to index into. Unset means the
+       Postgres service built from ``KAVALAI_DB_URI``.
 
 Agent database
 --------------

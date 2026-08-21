@@ -42,6 +42,17 @@ The ``browser/`` provider needs a WebGPU-capable page rather than a Python
 process; see :doc:`/tutorials/run_in_browser` for what it can do and how models
 are downloaded and cached.
 
+Registering your own
+--------------------
+
+The provider names above are the built-ins, not the whole set:
+:func:`~kavalai.register_llm_provider` and
+:func:`~kavalai.register_embedding_provider` add more, so
+``mycorp/model-x`` resolves anywhere a model name is accepted --- including
+workflow YAML. See :doc:`/cookbook/index` for the recipe.
+
+.. automodule:: kavalai.llm_clients.registry
+
 Base client and models
 ----------------------
 

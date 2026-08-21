@@ -38,6 +38,21 @@ class BaseEmbeddingClient:
     def __init__(self, model: str):
         self.model = model
 
+    @classmethod
+    def from_model(cls, model: str, **defaults) -> "BaseEmbeddingClient":
+        """Construct this client for a resolved model name.
+
+        The registry calls this rather than the constructor, because embedding
+        clients do not share one: they variously take ``api_key``, ``host``,
+        ``base_url``, ``cache_dir`` or nothing at all. ``defaults`` are the
+        keyword arguments bound at registration.
+
+        Args:
+            model: Model name with the provider prefix already removed.
+            **defaults: Extra constructor arguments bound at registration.
+        """
+        return cls(model, **defaults)
+
     async def compute_embeddings(
         self,
         texts: List[str],
@@ -209,6 +224,23 @@ class FastEmbedClient(BaseEmbeddingClient):
         self.init_kwargs = kwargs
         self._embedding_model = None
 
+    @classmethod
+    def from_model(cls, model: str, **defaults) -> "FastEmbedClient":
+        """Fall back to ``FASTEMBED_CACHE_DIR`` / ``FASTEMBED_THREADS``.
+
+        The other embedding clients read their credential inside ``__init__``;
+        FastEmbed needs no credential but does take two environment-tunable
+        knobs, so the same fallback lives here instead.
+        """
+        threads = defaults.pop("threads", None) or os.getenv("FASTEMBED_THREADS")
+        cache_dir = defaults.pop("cache_dir", None) or os.getenv("FASTEMBED_CACHE_DIR")
+        return cls(
+            model,
+            cache_dir=cache_dir,
+            threads=int(threads) if threads else None,
+            **defaults,
+        )
+
     def _get_model(self):
         if self._embedding_model is None:
             from fastembed import TextEmbedding
@@ -308,32 +340,32 @@ class BrowserEmbeddingClient(BaseEmbeddingClient):
         return embeddings, stats
 
 
-def make_embedding_client(model: str) -> BaseEmbeddingClient:
-    """Construct a v2 embedding client from a ``provider/model`` string.
+def make_embedding_client(model: str, **kwargs) -> BaseEmbeddingClient:
+    """Construct an embedding client from a ``provider/model`` string.
 
-    Supported providers: ``openai``, ``gemini``, ``ollama``, ``fastembed``,
-    ``browser``. The provider is split off and the remainder (which may itself
-    contain slashes, e.g. ``fastembed/BAAI/bge-small-en-v1.5``) is the model
-    name. The ``browser`` provider runs entirely client-side via a WebLLM
-    bridge (Pyodide only) and needs no API key.
+    The provider is the part before the first ``/``; the remainder is the model
+    name and may itself contain slashes
+    (``fastembed/BAAI/bge-small-en-v1.5``). Built-in providers are ``openai``,
+    ``gemini``, ``ollama``, ``fastembed`` and ``browser``; ``browser`` runs
+    client-side via a WebLLM bridge (Pyodide only) and needs no API key.
+
+    Any provider registered with
+    :func:`~kavalai.register_embedding_provider` resolves here too, and an
+    exact ``provider/model`` registration takes precedence over the
+    provider-wide one.
+
+    Args:
+        model: The ``provider/model`` identifier.
+        **kwargs: Extra constructor arguments, overriding any bound at
+            registration.
+
+    Raises:
+        ValueError: ``model`` has no provider prefix.
+        RegistryError: No provider is registered for the prefix.
     """
+    from kavalai.llm_clients import registry
+
     if "/" not in model:
         raise ValueError(f"Embedding model must be 'provider/model', got '{model}'.")
-    provider, model_name = model.split("/", maxsplit=1)
-
-    if provider == "openai":
-        return OpenAIEmbeddingClient(model_name, api_key=os.getenv("OPENAI_API_KEY"))
-    if provider == "gemini":
-        return GeminiEmbeddingClient(model_name, api_key=os.getenv("GEMINI_API_KEY"))
-    if provider == "ollama":
-        return OllamaEmbeddingClient(model_name, host=os.getenv("OLLAMA_HOST"))
-    if provider == "fastembed":
-        threads = os.getenv("FASTEMBED_THREADS")
-        return FastEmbedClient(
-            model_name,
-            cache_dir=os.getenv("FASTEMBED_CACHE_DIR"),
-            threads=int(threads) if threads else None,
-        )
-    if provider == "browser":
-        return BrowserEmbeddingClient(model_name)
-    raise ValueError(f"Unsupported embedding provider: '{provider}'.")
+    _, model_name = model.split("/", maxsplit=1)
+    return registry.embedding_providers.build(model, model_name, **kwargs)

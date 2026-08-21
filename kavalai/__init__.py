@@ -42,6 +42,7 @@ from kavalai.workflow import (
     LLMNode,
     AgentNode,
     FunctionNode,
+    RagQueryNode,
     IfNode,
     SwitchNode,
     RestServer,
@@ -60,6 +61,17 @@ from kavalai.workflow import (
     SqliteTaskLogger,
 )
 from kavalai.workflow.clients import make_client
+from kavalai.llm_clients.registry import (
+    RegistryError,
+    make_rag_service,
+    register_embedding_provider,
+    register_llm_provider,
+    register_rag_service,
+    registered_embedding_providers,
+    registered_llm_providers,
+    registered_rag_services,
+    verify_registrations,
+)
 
 # --- Agent & tools ---------------------------------------------------------
 from kavalai.agent import Agent, ToolCall
@@ -90,6 +102,7 @@ from kavalai.llm_clients.embeddings import (
 # provider clients below which pull in optional SDKs.
 from kavalai.llm_clients.browser_client import BrowserLLMClient
 
+
 # The provider LLM clients (``OpenAIClient`` / ``GeminiClient`` /
 # ``AnthropicClient`` / ``OllamaClient``) pull in optional SDKs that are not
 # part of the pyodide-compatible core (``openai`` / ``google-genai`` /
@@ -97,12 +110,27 @@ from kavalai.llm_clients.browser_client import BrowserLLMClient
 # below so that ``import kavalai`` works in lightweight / pyodide environments
 # where only the core dependencies are installed. Install ``kavalai[common]``
 # (or just the one SDK) to use them.
-_LAZY_CLIENTS = {
-    "OpenAIClient": ("kavalai.llm_clients.openai_client", "openai"),
-    "GeminiClient": ("kavalai.llm_clients.gemini_client", "google-genai"),
-    "AnthropicClient": ("kavalai.llm_clients.anthropic_client", "anthropic"),
-    "OllamaClient": ("kavalai.llm_clients.ollama_client", "ollama"),
-}
+#
+# The table is derived from the registry's built-in provider registrations, so
+# the two cannot drift: a provider added there becomes importable here.
+def _lazy_clients() -> dict[str, tuple[str, str]]:
+    from kavalai.llm_clients.registry import (
+        BUILTIN_LLM_PACKAGES,
+        _BUILTIN_LLM_PROVIDERS,
+    )
+
+    table = {}
+    for provider, dotted in _BUILTIN_LLM_PROVIDERS.items():
+        package = BUILTIN_LLM_PACKAGES.get(provider)
+        if package is None:
+            # ``browser`` needs no SDK; it is imported eagerly below.
+            continue
+        module_path, _, class_name = dotted.rpartition(".")
+        table[class_name] = (module_path, package)
+    return table
+
+
+_LAZY_CLIENTS = _lazy_clients()
 
 
 def __getattr__(name: str):
@@ -157,6 +185,7 @@ __all__ = [
     "LLMNode",
     "AgentNode",
     "FunctionNode",
+    "RagQueryNode",
     "IfNode",
     "SwitchNode",
     "evaluate_expression",
@@ -196,6 +225,16 @@ __all__ = [
     "BrowserLLMClient",
     "make_embedding_client",
     "BrowserEmbeddingClient",
+    # Backend registration
+    "register_llm_provider",
+    "register_embedding_provider",
+    "register_rag_service",
+    "registered_llm_providers",
+    "registered_embedding_providers",
+    "registered_rag_services",
+    "verify_registrations",
+    "RegistryError",
+    "make_rag_service",
     # Streaming
     "Streamer",
     "StreamContent",

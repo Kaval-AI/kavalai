@@ -41,6 +41,7 @@ import os
 import sys
 from typing import List, Optional, Generator, Dict, Any
 
+from kavalai.llm_clients.registry import make_rag_service
 from kavalai.rag import BaseRagService, PostgresRagService
 
 
@@ -93,8 +94,19 @@ def _split_content(
         yield {"text": content, "meta": row_meta, "source_id": source_id}
 
 
-def rag_service_from_env(model: Optional[str] = None) -> PostgresRagService:
-    """Build the Postgres RAG service this script indexes into."""
+def rag_service_from_env(model: Optional[str] = None) -> BaseRagService:
+    """Build the RAG service this script indexes into.
+
+    Defaults to Postgres, configured from the environment. Set
+    ``KAVALAI_RAG_SERVICE`` to the name of any service registered with
+    :func:`~kavalai.register_rag_service` to index somewhere else; the
+    registration carries that backend's own settings, so no environment
+    variable here has to know about them.
+    """
+    service_name = os.environ.get("KAVALAI_RAG_SERVICE")
+    if service_name:
+        return make_rag_service(service_name)
+
     model = model if model else os.environ["KAVALAI_DEFAULT_EMBEDDING_MODEL"]
     return PostgresRagService.from_uri(
         uri=os.environ["KAVALAI_DB_URI"],

@@ -88,6 +88,9 @@ class PostgresRagService(BaseRagService):
     :class:`BaseRagService` interface; here it maps to a table.
     """
 
+    #: Both optional methods of the interface are implemented here.
+    capabilities = frozenset({"count_entries", "iter_entries"})
+
     REGISTRY_TABLE = "rag_collections"
 
     def __init__(
@@ -561,8 +564,7 @@ class PostgresRagService(BaseRagService):
             for info in infos:
                 await session.execute(
                     text(
-                        f"DELETE FROM {self._qualified(info.table_name)} "
-                        f"WHERE id = :id"
+                        f"DELETE FROM {self._qualified(info.table_name)} WHERE id = :id"
                     ).bindparams(id=item_id)
                 )
             await session.commit()
@@ -590,13 +592,19 @@ class PostgresRagService(BaseRagService):
     # Querying
     # ------------------------------------------------------------------
 
-    def _map_row(self, row, info: CollectionInfo, query_index=None) -> RagServiceResult:
+    def _map_row(
+        self,
+        row,
+        info: CollectionInfo,
+        query_index=None,
+        include_content: bool = True,
+    ) -> RagServiceResult:
         return RagServiceResult(
             id=row.id,
             model=info.model,
             collection_name=info.name,
             source_id=row.source_id,
-            content=row.content,
+            content=row.content if include_content else None,
             embedding_size=info.embedding_size,
             rag_metadata=row.metadata or {},
             similarity=1.0 - float(row.distance) if row.distance is not None else 0.0,
@@ -612,6 +620,7 @@ class PostgresRagService(BaseRagService):
         collection_name: Optional[str] = None,
         source_ids: Optional[list[str]] = None,
         keep_best: bool = False,
+        include_content: bool = True,
     ) -> list[RagServiceResult]:
         """
         Query one collection for similarities to the input text.
@@ -626,6 +635,7 @@ class PostgresRagService(BaseRagService):
             collection_name=collection_name,
             source_ids=source_ids,
             keep_best=keep_best,
+            include_content=include_content,
         )
         out = results[0]
         for item in out:
@@ -639,6 +649,7 @@ class PostgresRagService(BaseRagService):
         collection_name: Optional[str] = None,
         source_ids: Optional[list[str]] = None,
         keep_best: bool = False,
+        include_content: bool = True,
     ) -> list[list[RagServiceResult]]:
         """
         Query one collection for similarities to multiple input texts in a
@@ -680,7 +691,9 @@ class PostgresRagService(BaseRagService):
             }
             for row in rows:
                 idx = int(row.query_idx) - 1
-                results_by_query[idx].append(self._map_row(row, info, idx))
+                results_by_query[idx].append(
+                    self._map_row(row, info, idx, include_content)
+                )
             return [results_by_query[i] for i in range(len(texts))]
 
     def build_batch_query_cte(
@@ -950,8 +963,7 @@ class PostgresRagService(BaseRagService):
             mean_vector = (
                 await session.execute(
                     sql_text(
-                        f"SELECT avg(embedding) FROM "
-                        f"{self._qualified(info.table_name)}"
+                        f"SELECT avg(embedding) FROM {self._qualified(info.table_name)}"
                     )
                 )
             ).scalar()

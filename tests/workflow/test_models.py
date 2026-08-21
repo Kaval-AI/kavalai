@@ -287,3 +287,130 @@ def test_rest_server_accepts_a_single_url_source():
 def test_mcp_server_accepts_a_single_transport():
     assert McpServer(name="m", command="echo").command == "echo"
     assert McpServer(name="m", url="http://x").url == "http://x"
+
+
+# --------------------------------------------------------- model-name validation
+MINIMAL_NODES = [
+    {"name": "s", "type": "start", "next": "e"},
+    {"name": "e", "type": "end", "output": "output"},
+]
+
+
+def test_registered_provider_is_accepted():
+    assert make_graph(MINIMAL_NODES, llm_model="openai/gpt-4o").llm_model
+
+
+def test_no_model_at_all_is_accepted():
+    # KAVALAI_DEFAULT_LLM_MODEL may supply one at run time.
+    assert make_graph(MINIMAL_NODES).llm_model is None
+
+
+def test_unregistered_provider_warns_but_still_loads(caplog):
+    """A placeholder provider is legitimate: client_factory may supply the
+    client, sometimes assigned after the engine is built. So this warns rather
+    than refusing to load --- but it warns at load, not on a rare branch."""
+    graph = make_graph(MINIMAL_NODES, llm_model="opeanai/gpt-4o")
+
+    assert graph.llm_model == "opeanai/gpt-4o"
+    warning = "\n".join(record.message for record in caplog.records)
+    assert "Unsupported LLM provider" in warning
+    assert "register_llm_provider()" in warning
+
+
+def test_node_level_model_is_checked_too(caplog):
+    nodes = [
+        {"name": "s", "type": "start", "next": "ask"},
+        {
+            "name": "ask",
+            "type": "llm",
+            "prompt": "hi",
+            "output": "output",
+            "next": "e",
+            "llm_model": "nosuch/model",
+        },
+        {"name": "e", "type": "end", "output": "output"},
+    ]
+    make_graph(nodes)
+
+    assert "node 'ask' llm_model" in "\n".join(r.message for r in caplog.records)
+
+
+def test_model_without_a_provider_prefix_is_rejected():
+    with pytest.raises(ValidationError, match="'provider/model' form"):
+        make_graph(MINIMAL_NODES, llm_model="gpt-4o")
+
+
+def test_dotted_python_path_is_rejected_as_a_provider():
+    """A workflow document must never be able to name an importable class."""
+    with pytest.raises(ValidationError, match="never an importable Python path"):
+        make_graph(MINIMAL_NODES, llm_model="mypkg.mymodule.MyClient/model")
+
+
+# ------------------------------------------------------------- rag_query nodes
+def rag_nodes(**extra):
+    return [
+        {"name": "s", "type": "start", "next": "r"},
+        {
+            "name": "r",
+            "type": "rag_query",
+            "query": "{{ context.input.user_message }}",
+            "output": "docs",
+            "next": "e",
+            **extra,
+        },
+        {"name": "e", "type": "end", "output": "output"},
+    ]
+
+
+def test_rag_query_output_is_exempt_from_data_types():
+    """The node owns its output shape, so no author has to describe it."""
+    graph = make_graph(rag_nodes())
+
+    assert graph.node_map["r"].output == "docs"
+    assert "docs" not in graph.data_types
+
+
+def test_llm_output_is_still_required_to_be_declared():
+    nodes = [
+        {"name": "s", "type": "start", "next": "ask"},
+        {
+            "name": "ask",
+            "type": "llm",
+            "prompt": "hi",
+            "output": "undeclared",
+            "next": "e",
+        },
+        {"name": "e", "type": "end", "output": "output"},
+    ]
+    with pytest.raises(ValidationError, match="not declared in data_types"):
+        make_graph(nodes)
+
+
+def test_rag_query_defaults_are_conservative():
+    node = make_graph(rag_nodes()).node_map["r"]
+
+    assert node.top_k == 5
+    assert node.store == "results"
+    assert node.keep_best is False
+    assert node.service is None and node.collection is None
+
+
+def test_rag_query_accepts_graph_level_defaults():
+    graph = make_graph(rag_nodes(), rag_service="docs", rag_collection="handbook")
+
+    assert (graph.rag_service, graph.rag_collection) == ("docs", "handbook")
+
+
+def test_rag_query_rejects_an_unknown_store_mode():
+    with pytest.raises(ValidationError):
+        make_graph(rag_nodes(store="everything"))
+
+
+@pytest.mark.parametrize(
+    "service",
+    ["postgresql://user:pw@host/db", "sqlite:///docs.db", "user@host"],
+)
+def test_rag_query_rejects_a_connection_string_as_a_service(service):
+    """GET /workflow serves the document, so it must not carry credentials."""
+    with pytest.raises(ValidationError, match="looks like a connection string"):
+        make_graph(rag_nodes(service=service))

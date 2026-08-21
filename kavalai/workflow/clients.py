@@ -1,4 +1,5 @@
-"""
+"""Build LLM clients from ``provider/model`` identifiers.
+
 Copyright 2026 OÜ KAVAL AI (registry code 17393877)
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -16,6 +17,7 @@ limitations under the License.
 
 from typing import Any, Optional
 
+from kavalai.llm_clients import registry
 from kavalai.llm_clients.base_client import (
     BaseLlmClient,
     LlmClientParameters,
@@ -42,57 +44,35 @@ def make_client(
     model: str,
     parameters: Optional[LlmClientParameters] = None,
     stats_receiver: Optional[ModelStatsReceiver] = None,
+    **kwargs: Any,
 ) -> BaseLlmClient:
-    """Construct a v2 LLM client from a ``provider/model`` string.
+    """Construct an LLM client from a ``provider/model`` string.
 
-    Supported providers: ``openai``, ``gemini``, ``anthropic``, ``ollama``,
-    ``browser``.
-    The ``browser`` provider runs inference client-side via a WebLLM bridge
-    (Pyodide only) and needs no API key — see
+    The provider is the part before the first ``/``; the remainder is the model
+    name. Built-in providers are ``openai``, ``gemini``, ``anthropic``,
+    ``ollama`` and ``browser``. The ``browser`` provider runs inference
+    client-side via a WebLLM bridge (Pyodide only) and needs no API key --- see
     :class:`~kavalai.llm_clients.browser_client.BrowserLLMClient`.
+
+    Any provider registered with :func:`~kavalai.register_llm_provider`
+    resolves here too, and an exact ``provider/model`` registration takes
+    precedence over the provider-wide one, so a single model can be pinned to
+    its own client class.
+
+    Args:
+        model: The ``provider/model`` identifier.
+        parameters: Optional per-call sampling and timeout parameters.
+        stats_receiver: Where the client reports model-call statistics.
+        **kwargs: Extra constructor arguments, overriding any bound at
+            registration.
+
+    Raises:
+        ValueError: ``model`` has no provider prefix.
+        RegistryError: No provider is registered for the prefix.
     """
     if "/" not in model:
         raise ValueError(f"Model must be in 'provider/model' form, got '{model}'.")
-    provider, model_name = model.split("/", maxsplit=1)
-
-    if provider == "openai":
-        from kavalai.llm_clients.openai_client import OpenAIClient
-
-        return OpenAIClient(
-            model_name,
-            llm_client_parameters=parameters,
-            model_stats_receiver=stats_receiver,
-        )
-    if provider == "gemini":
-        from kavalai.llm_clients.gemini_client import GeminiClient
-
-        return GeminiClient(
-            model_name,
-            llm_client_parameters=parameters,
-            model_stats_receiver=stats_receiver,
-        )
-    if provider == "anthropic":
-        from kavalai.llm_clients.anthropic_client import AnthropicClient
-
-        return AnthropicClient(
-            model_name,
-            llm_client_parameters=parameters,
-            model_stats_receiver=stats_receiver,
-        )
-    if provider == "ollama":
-        from kavalai.llm_clients.ollama_client import OllamaClient
-
-        return OllamaClient(
-            model_name,
-            llm_client_parameters=parameters,
-            model_stats_receiver=stats_receiver,
-        )
-    if provider == "browser":
-        from kavalai.llm_clients.browser_client import BrowserLLMClient
-
-        return BrowserLLMClient(
-            model_name,
-            llm_client_parameters=parameters,
-            model_stats_receiver=stats_receiver,
-        )
-    raise ValueError(f"Unsupported LLM provider: '{provider}'.")
+    _, model_name = model.split("/", maxsplit=1)
+    return registry.llm_providers.build(
+        model, model_name, parameters, stats_receiver, **kwargs
+    )

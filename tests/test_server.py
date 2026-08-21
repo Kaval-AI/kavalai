@@ -445,3 +445,37 @@ nodes:""",
     (server,) = resp.json()["mcp_servers"]
     assert server["env"] == {"GITHUB_TOKEN": "***"}
     assert server["command"] == "mcp-github"
+
+
+# ------------------------------------------------------- provider module loading
+def test_load_provider_modules_imports_named_modules():
+    from kavalai.server import load_provider_modules
+
+    assert load_provider_modules("json, os") == ["json", "os"]
+
+
+def test_load_provider_modules_ignores_blanks():
+    from kavalai.server import load_provider_modules
+
+    assert load_provider_modules("") == []
+    assert load_provider_modules(" , ") == []
+
+
+def test_load_provider_modules_fails_loudly_on_a_missing_module():
+    from kavalai.server import load_provider_modules
+
+    with pytest.raises(ImportError):
+        load_provider_modules("kavalai_no_such_provider_module")
+
+
+def test_load_provider_modules_verifies_registrations(monkeypatch):
+    """A mistyped dotted path fails at start-up, not at the first request."""
+    from kavalai.llm_clients import registry
+    from kavalai.server import load_provider_modules
+
+    registry.register_llm_provider("broken-at-boot", "no.such.module.Client")
+    try:
+        with pytest.raises(registry.RegistryError, match="broken-at-boot"):
+            load_provider_modules("")
+    finally:
+        registry.llm_providers.unregister("broken-at-boot")

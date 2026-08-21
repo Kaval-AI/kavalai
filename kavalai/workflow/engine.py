@@ -19,7 +19,7 @@ import importlib
 import json
 import os
 import time
-from typing import Any, AsyncGenerator, Callable, Optional, Type
+from typing import Any, AsyncGenerator, Callable, Optional, Type, Union
 from uuid import UUID, uuid4
 
 import yaml
@@ -40,6 +40,7 @@ from kavalai.workflow.models import (
     LLMNode,
     Node,
     ParallelNode,
+    RagQueryNode,
     SwitchNode,
     WorkflowException,
     WorkflowGraph,
@@ -54,6 +55,11 @@ from kavalai.llm_clients.common import safe_parse_json
 from kavalai.llm_clients.streamer import StreamContent
 
 ClientFactory = Callable[..., BaseLlmClient]
+
+#: Name a ``rag_query`` node resolves to when neither it nor the workflow says
+#: otherwise. It matches ``BaseRagService``'s own default collection and source
+#: identifiers, so the simple case never has to name anything.
+DEFAULT_RAG_SERVICE = "default"
 
 DEFAULT_MAX_NODE_VISITS = 1000
 
@@ -113,6 +119,14 @@ class WorkflowEngine:
         Factory ``(model, parameters, stats_receiver) -> BaseLlmClient`` used to
         build LLM clients. Defaults to the provider factory; inject a fake for
         offline testing.
+    rag_services: Optional[BaseRagService | dict[str, BaseRagService]]
+        Services available to ``rag_query`` nodes. A bare service is registered
+        under ``"default"``, which is what a node resolves to when neither it
+        nor the workflow names one. Anything not passed here is looked up among
+        the services registered with
+        :func:`~kavalai.register_rag_service`, so a workflow served by
+        ``python -m kavalai.server`` --- where nobody constructs the engine ---
+        still works.
     max_node_visits: int
         Safety cap on total node executions to guard against infinite loops.
     """
@@ -125,6 +139,7 @@ class WorkflowEngine:
         task_logger: Optional[TaskLogger] = None,
         client_factory: Optional[ClientFactory] = None,
         data_models: Optional[dict[str, type[BaseModel]]] = None,
+        rag_services: Optional[Union[Any, dict[str, Any]]] = None,
         max_node_visits: int = DEFAULT_MAX_NODE_VISITS,
     ):
         self.graph = graph
@@ -132,6 +147,15 @@ class WorkflowEngine:
         self.task_logger = task_logger
         self.client_factory = client_factory or client_factory_module.make_client
         self.max_node_visits = max_node_visits
+
+        # A single service is stored under "default", so the common case --- one
+        # index, one collection --- names nothing at all in the YAML.
+        if rag_services is None:
+            self.rag_services: dict[str, Any] = {}
+        elif isinstance(rag_services, dict):
+            self.rag_services = dict(rag_services)
+        else:
+            self.rag_services = {DEFAULT_RAG_SERVICE: rag_services}
 
         # Data types are usually JSON-schema fragments compiled to Pydantic models
         # by the SchemaParser. ``data_models`` lets callers (e.g. the
@@ -143,6 +167,11 @@ class WorkflowEngine:
         self.models = self.parser.parse_all()
         self.models.update(overrides)
         self.node_map = graph.node_map
+
+        # Resolve every rag_query node's service name now, so a typo fails here
+        # rather than the first time that branch is taken. Existence only ---
+        # the service itself is built on first use.
+        self._validate_rag_services()
 
         # Build the function kernel and register declared servers / tools, reusing
         # the v1 registration approach.
@@ -241,6 +270,50 @@ class WorkflowEngine:
                 "or KAVALAI_DEFAULT_LLM_MODEL)."
             )
         return model
+
+    def _validate_rag_services(self) -> None:
+        """Fail at load if a ``rag_query`` node names an unavailable service."""
+        from kavalai.llm_clients import registry
+
+        for node in self.graph.nodes:
+            if not isinstance(node, RagQueryNode):
+                continue
+            name = node.service or self.graph.rag_service or DEFAULT_RAG_SERVICE
+            if name in self.rag_services:
+                continue
+            if registry.rag_services.lookup(name) is not None:
+                continue
+            passed = sorted(self.rag_services) or "(none)"
+            raise WorkflowException(
+                f"Node '{node.name}' needs RAG service '{name}', which is "
+                f"neither passed to the engine (rag_services={passed}) nor "
+                f"registered ({registry.registered_rag_services()}). Pass it "
+                "as rag_services=, or call register_rag_service() before the "
+                "workflow is loaded."
+            )
+
+    def _resolve_rag_service(self, node_service: Optional[str]):
+        """Find the RAG service a ``rag_query`` node should use.
+
+        Mirrors :meth:`_resolve_model`: the node wins, then the workflow's
+        ``rag_service``, then ``"default"``. Services passed to the engine take
+        precedence over registered ones, so a test can hand in a fake without
+        touching global state.
+        """
+        name = node_service or self.graph.rag_service or DEFAULT_RAG_SERVICE
+        service = self.rag_services.get(name)
+        if service is not None:
+            return service
+
+        from kavalai.llm_clients.registry import RegistryError, make_rag_service
+
+        try:
+            return make_rag_service(name)
+        except RegistryError as error:
+            passed = sorted(self.rag_services) or "(none)"
+            raise WorkflowException(
+                f"No RAG service '{name}'. Passed to the engine: {passed}. {error}"
+            ) from error
 
     def _make_llm_client(
         self, node_model: Optional[str], llm_kwargs: dict, run_context: RunContext
@@ -414,6 +487,45 @@ class WorkflowEngine:
             duration=duration,
         )
 
+    async def _run_rag_query_node(
+        self, node: RagQueryNode, run_context: RunContext
+    ) -> None:
+        """Query a RAG service and store the hits in the run context.
+
+        Read-only: ``query`` is the only method this reaches for.
+        """
+        service = self._resolve_rag_service(node.service)
+        query = await run_context.render_prompt(node.query)
+        collection = node.collection or self.graph.rag_collection
+
+        start = time.perf_counter()
+        hits = await service.query(
+            text=query,
+            top_k=node.top_k,
+            collection_name=collection,
+            source_ids=node.source_ids,
+            keep_best=node.keep_best,
+            include_content=True,
+        )
+        duration = time.perf_counter() - start
+
+        # "results" keeps scores and metadata reachable for routing; "content"
+        # is what a following llm node's prompt usually wants, without the
+        # UUIDs and timestamps a serialised result list would carry into it.
+        if node.store == "content":
+            value = "\n\n".join(hit.content or "" for hit in hits)
+        else:
+            value = hits
+
+        run_context.data[node.output] = value
+        self._log_node(
+            run_context,
+            node,
+            inputs={"query": query, "collection": collection},
+            output=value,
+            duration=duration,
+        )
+
     def _log_node(
         self,
         run_context: RunContext,
@@ -469,6 +581,8 @@ class WorkflowEngine:
                 yield event
         elif isinstance(node, FunctionNode):
             await self._run_function_node(node, run_context)
+        elif isinstance(node, RagQueryNode):
+            await self._run_rag_query_node(node, run_context)
         elif isinstance(node, ParallelNode):
             async for event in self._run_parallel_node(
                 node, run_context, state, budget

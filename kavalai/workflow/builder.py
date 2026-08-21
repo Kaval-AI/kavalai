@@ -23,6 +23,7 @@ from kavalai.workflow.models import (
     ArgumentInfo,
     EndNode,
     FunctionNode,
+    RagQueryNode,
     IfNode,
     LLMNode,
     McpServer,
@@ -111,12 +112,16 @@ class WorkflowBuilder:
         version: str = "2.0",
         llm_model: Optional[str] = None,
         llm_kwargs: Optional[dict[str, Any]] = None,
+        rag_service: Optional[str] = None,
+        rag_collection: Optional[str] = None,
     ):
         self.name = name
         self.description = description
         self.version = version
         self.llm_model = llm_model
         self.llm_kwargs = llm_kwargs or {}
+        self.rag_service = rag_service
+        self.rag_collection = rag_collection
         self._data_types: dict[str, dict] = {}
         self._data_models: dict[str, type[BaseModel]] = {}
         self._nodes: list = []
@@ -262,6 +267,44 @@ class WorkflowBuilder:
         )
         return self
 
+    def rag_query(
+        self,
+        name: str,
+        *,
+        query: str,
+        output: str,
+        next: str,
+        service: Optional[str] = None,
+        collection: Optional[str] = None,
+        top_k: int = 5,
+        source_ids: Optional[list[str]] = None,
+        keep_best: bool = False,
+        store: str = "results",
+    ) -> "WorkflowBuilder":
+        """Add a read-only retrieval node.
+
+        ``query`` is a template, like an ``llm`` node's prompt. ``service`` and
+        ``collection`` default to the workflow's ``rag_service`` /
+        ``rag_collection``; leave both unset when there is only one index.
+        ``store="content"`` keeps just the hit texts, which is what a following
+        ``llm`` node's prompt usually wants.
+        """
+        self._nodes.append(
+            RagQueryNode(
+                name=name,
+                query=query,
+                output=output,
+                next=next,
+                service=service,
+                collection=collection,
+                top_k=top_k,
+                source_ids=source_ids,
+                keep_best=keep_best,
+                store=store,
+            )
+        )
+        return self
+
     def parallel(
         self,
         name: str,
@@ -339,6 +382,8 @@ class WorkflowBuilder:
             version=self.version,
             llm_model=self.llm_model,
             llm_kwargs=self.llm_kwargs,
+            rag_service=self.rag_service,
+            rag_collection=self.rag_collection,
             data_types=self._data_types,
             nodes=self._nodes,
             rest_servers=self._rest_servers,

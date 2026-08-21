@@ -313,6 +313,88 @@ The engine drives clients through ``_run_chat_completions``, so that is the
 method a stub implements — not ``chat_completions``. See
 :doc:`../guides/safety`.
 
+Using a provider Kaval.AI does not ship
+---------------------------------------
+
+The built-in provider names are a starting set, not a closed one. Implement
+:class:`~kavalai.BaseLlmClient` --- one method --- and register it under a name
+of your own:
+
+.. code-block:: python
+
+   from kavalai import BaseLlmClient, register_llm_provider
+
+
+   class MyCorpClient(BaseLlmClient):
+       provider = "mycorp"
+
+       def __init__(self, model, llm_client_parameters=None,
+                    model_stats_receiver=None, base_url=None):
+           super().__init__(llm_client_parameters, model_stats_receiver)
+           self.model = model
+           self.base_url = base_url
+
+       async def _run_chat_completions(self, chat_history, response_model,
+                                       streamer):
+           ...  # call your API, then stream the result
+
+
+   register_llm_provider("mycorp", MyCorpClient)
+
+``mycorp/model-x`` now works everywhere a model name is accepted --- in
+``make_client``, in a workflow's ``llm_model``, in
+``KAVALAI_DEFAULT_LLM_MODEL``. Forwarding ``model_stats_receiver`` to the base
+class is what puts your client's token usage in the backoffice next to the
+built-in providers.
+
+Three things can be registered, and there are three ways to name each:
+
+.. code-block:: python
+
+   # A class.
+   register_llm_provider("mycorp", MyCorpClient)
+
+   # A dotted path — imported on first use, not at registration.
+   register_llm_provider("mycorp", "mycorp.llm.MyCorpClient")
+
+   # A class plus bound arguments, so one class serves several names.
+   register_llm_provider(
+       "mycorp-eu", MyCorpClient, base_url="https://eu.mycorp.example/v1"
+   )
+
+   register_embedding_provider("mycorp", "mycorp.embeddings.MyEmbeddings")
+   register_rag_service(
+       "handbook", SqliteRagService,
+       filename="handbook.db", model="fastembed/BAAI/bge-small-en-v1.5",
+   )
+
+Registering a name that already exists raises, as duplicate tool names do.
+Deliberately replacing one --- pointing ``openai`` at an internal gateway, say
+--- takes ``replace=True`` and is logged, because it changes what every later
+lookup means.
+
+Two rules are worth knowing before you rely on this:
+
+**Register before you load.** A workflow's model names are checked when the
+graph is parsed, and a ``rag_query`` node resolves its service then too. An
+import two lines too late looks exactly like a typo.
+
+**A workflow names a registration, never a Python path.** Workflow documents
+are served by ``GET /workflow`` and edited in the backoffice, so a dotted path
+in one would turn "edit a workflow" into "run code in the agent server". Both
+that and connection strings in a ``rag_query`` node's ``service`` are rejected
+when the workflow loads.
+
+Under ``python -m kavalai.server`` nobody constructs the engine, so name the
+modules that do the registering and let the entry point import them first:
+
+.. code-block:: bash
+
+   KAVALAI_PROVIDER_MODULES=mycorp.providers,mycorp.rag
+
+Every dotted registration is resolved right after, so a bad path stops the
+container at boot instead of failing the first request that reaches that node.
+
 Streaming a run to a UI
 -----------------------
 

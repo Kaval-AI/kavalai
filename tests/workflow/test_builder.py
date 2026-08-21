@@ -302,3 +302,31 @@ def test_data_model_validates_input_at_runtime():
     # A payload that violates the Email model is rejected.
     with pytest.raises(Exception):
         asyncio.run(engine.run({"sender": "a@b.c"}))  # missing 'content'
+
+
+def test_builder_rag_query_matches_the_yaml_node():
+    """Both front doors terminate in the same graph, so they cannot drift."""
+    from kavalai import WorkflowBuilder
+    from kavalai.workflow.models import RagQueryNode
+
+    graph = (
+        WorkflowBuilder("wf", rag_service="docs", rag_collection="handbook")
+        .data_type("input", {"user_message": str})
+        .data_type("output", {"agent_response": str})
+        .start(next="retrieve")
+        .rag_query(
+            "retrieve",
+            query="{{ context.input.user_message }}",
+            output="docs",
+            next="e",
+            top_k=3,
+            store="content",
+        )
+        .end(name="e", output="output")
+        .build()
+    )
+
+    node = graph.node_map["retrieve"]
+    assert isinstance(node, RagQueryNode)
+    assert (node.top_k, node.store) == (3, "content")
+    assert (graph.rag_service, graph.rag_collection) == ("docs", "handbook")

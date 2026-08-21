@@ -431,6 +431,37 @@ def mask_db_uri(db_uri: str) -> str:
     return db_uri
 
 
+def load_provider_modules(module_names: str) -> list[str]:
+    """Import modules that register custom LLM, embedding or RAG backends.
+
+    Each module is expected to call :func:`~kavalai.register_llm_provider`,
+    :func:`~kavalai.register_embedding_provider` or
+    :func:`~kavalai.register_rag_service` at import time. After they are
+    loaded, every dotted registration is resolved, so a mistyped path fails
+    here rather than on the first request that happens to reach that node.
+
+    Args:
+        module_names: Comma-separated dotted module names; blanks are ignored.
+
+    Returns:
+        The module names that were imported, in order.
+
+    Raises:
+        ImportError: A named module could not be imported.
+        RegistryError: A registration names a path that cannot be resolved.
+    """
+    import importlib
+
+    from kavalai.llm_clients.registry import verify_registrations
+
+    names = [name.strip() for name in module_names.split(",") if name.strip()]
+    for name in names:
+        logger.info(f"Importing provider module {name}.")
+        importlib.import_module(name)
+    verify_registrations()
+    return names
+
+
 def create_app_from_env_conf(
     workflow_path: Optional[str] = None,
     db_uri: Optional[str] = None,
@@ -453,6 +484,8 @@ def create_app_from_env_conf(
     - KAVALAI_DB_MAX_OVERFLOW: Database connection pool max overflow (optional, default: 0).
     - KAVALAI_SQL_ECHO: Whether to log SQL queries (optional, default: False).
     - KAVALAI_OPENAI_SERVICE_TIER: The service tier to use for OpenAI API calls (optional, e.g. "priority").
+    - KAVALAI_PROVIDER_MODULES: Comma-separated modules to import before the
+      workflow loads, so their backend registrations exist (optional).
 
     Args:
         workflow_path: Path to the workflow YAML file.
@@ -468,6 +501,12 @@ def create_app_from_env_conf(
     """
     if workflow_path is None:
         workflow_path = env.str("KAVALAI_AGENT_WORKFLOW_PATH")
+
+    # Custom backends have to be registered before the workflow is loaded: the
+    # graph validates its model names at load time, and a `rag_query` node
+    # resolves its service the same way. The operator names the modules; the
+    # library discovers nothing on its own.
+    load_provider_modules(env.str("KAVALAI_PROVIDER_MODULES", ""))
 
     # Log database connection info
     if db_uri is None:

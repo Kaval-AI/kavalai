@@ -21,6 +21,7 @@ declarations and the workflow exception) and the v2 workflow graph (nodes and
 import json
 from typing import Optional, Literal, Union, Annotated, Any, ClassVar
 
+from loguru import logger
 from pydantic import BaseModel, Field, model_validator
 
 from kavalai.utils import to_plain
@@ -361,6 +362,71 @@ class ParallelNode(BaseNode):
         return self
 
 
+class RagQueryNode(BaseNode):
+    """Retrieval node: queries a RAG service and stores the hits.
+
+    **Read-only by construction.** The node calls exactly one method,
+    ``BaseRagService.query``; nothing that writes to an index is reachable from
+    a workflow document. Retrieval is idempotent, so a cycle revisiting the
+    node is harmless, whereas indexing is a side effect whose blast radius is a
+    corrupted index -- that belongs in a script or a tool, where the author is
+    holding the service object.
+
+    ``query`` is a template rendered exactly like an ``llm`` node's ``prompt``,
+    so it may reference ``{{ context.* }}``, ``{{ templates.* }}`` and
+    ``{{ history.* }}``.
+
+    ``service`` and ``collection`` follow the ``llm_model`` pattern: a
+    workflow-level default that a node may override. The common case is one
+    service and one collection, and that case needs neither field:
+
+    .. code-block:: yaml
+
+       - name: retrieve
+         type: rag_query
+         query: "{{ context.user_message }}"
+         output: docs
+         next: answer
+
+    The service is resolved as *node* → *workflow* ``rag_service`` →
+    ``"default"``, looked up first among the services passed to the engine and
+    then among those registered with
+    :func:`~kavalai.register_rag_service`. A workflow names a service; it never
+    carries a connection string, because the document is served by
+    ``GET /workflow`` and edited in the backoffice.
+
+    Attributes:
+        query: Query text, rendered as a template.
+        output: Context variable the hits are stored under.
+        next: The node to continue at.
+        service: Registered service name. Defaults to the workflow's
+            ``rag_service``, then ``"default"``.
+        collection: Collection to search. Defaults to the workflow's
+            ``rag_collection``, then the backend's own default.
+        top_k: Maximum number of hits.
+        source_ids: Restrict the search to these source identifiers.
+        keep_best: Keep only the best hit per ``source_id``. Useful when one
+            document was indexed as many chunks.
+        store: ``"results"`` (default) stores the full
+            :class:`~kavalai.rag.RagServiceResult` list, so scores and metadata
+            stay available for routing. ``"content"`` stores just the hit texts
+            joined by blank lines, which is what a following ``llm`` node's
+            prompt usually wants.
+    """
+
+    type: Literal["rag_query"] = "rag_query"
+    query: str
+    output: str
+    next: str
+
+    service: Optional[str] = None
+    collection: Optional[str] = None
+    top_k: int = 5
+    source_ids: Optional[list[str]] = None
+    keep_best: bool = False
+    store: Literal["results", "content"] = "results"
+
+
 Node = Annotated[
     Union[
         StartNode,
@@ -371,9 +437,15 @@ Node = Annotated[
         IfNode,
         SwitchNode,
         ParallelNode,
+        RagQueryNode,
     ],
     Field(discriminator="type"),
 ]
+
+
+#: Node types that declare their own output model, so the author does not have
+#: to name one in ``data_types``. See ``validate_graph``.
+_NODES_WITH_OWN_OUTPUT_TYPE = frozenset({RagQueryNode})
 
 
 class WorkflowStreamEvent(BaseModel):
@@ -418,6 +490,45 @@ class WorkflowStreamEvent(BaseModel):
     token_usage: Optional[dict] = None
 
 
+def _validate_model_name(label: str, model: str) -> None:
+    """Check a model name is well formed, and warn if nothing serves it.
+
+    A workflow document is served by ``GET /workflow`` and edited through the
+    backoffice, so it is not a trusted place to name Python. A provider
+    containing a dot would look like an importable path, and accepting one
+    would turn "edit a workflow" into "run code in the agent server"; it is
+    rejected explicitly rather than left to fail later as an unknown provider.
+
+    A malformed name and a Python path are hard errors. An unregistered
+    provider is only a warning --- see below.
+    """
+    from kavalai.llm_clients import registry
+
+    if "/" not in model:
+        raise ValueError(
+            f"{label} is '{model}', which is not in 'provider/model' form."
+        )
+    provider = model.split("/", maxsplit=1)[0]
+    if "." in provider:
+        raise ValueError(
+            f"{label} names provider '{provider}'. A workflow names a "
+            "registered provider, never an importable Python path -- register "
+            "the client in code and name the registration here."
+        )
+    if registry.llm_providers.lookup(model) is None:
+        # A warning, not an error. The name only means anything if the default
+        # factory resolves it, and callers legitimately override
+        # ``WorkflowEngine.client_factory`` --- sometimes after construction ---
+        # to run a graph offline against a stub, naming a placeholder provider.
+        # Refusing to load would break that. Surfacing it at load still puts a
+        # typo in the start-up log rather than on a branch taken once a month.
+        logger.warning(
+            f"{label}: {registry.llm_providers.unknown_message(model)} "
+            "The workflow will still load; this fails when the node runs, "
+            "unless a client_factory supplies the client."
+        )
+
+
 class WorkflowGraph(BaseModel):
     """A workflow: a directed graph of nodes forming a state machine.
 
@@ -434,6 +545,11 @@ class WorkflowGraph(BaseModel):
         Default LLM model (``provider/model``); nodes may override it.
     ``llm_kwargs``
         Default LLM kwargs; nodes may override them.
+    ``rag_service``
+        Default RAG service name for ``rag_query`` nodes; nodes may override
+        it. Falls back to ``"default"``.
+    ``rag_collection``
+        Default collection for ``rag_query`` nodes; nodes may override it.
     ``data_types``
         JSON-schema data type definitions, compiled to Pydantic models by
         ``SchemaParser``. ``input`` and ``output`` are the workflow's own
@@ -457,6 +573,8 @@ class WorkflowGraph(BaseModel):
     version: str = "2.0"
     llm_model: Optional[str] = None
     llm_kwargs: dict[str, Any] = Field(default_factory=dict)
+    rag_service: Optional[str] = None
+    rag_collection: Optional[str] = None
     data_types: dict[str, dict]
     rest_servers: list[RestServer] = []
     mcp_servers: list[McpServer] = []
@@ -488,6 +606,17 @@ class WorkflowGraph(BaseModel):
     def model_dump_public_json(self) -> str:
         """:meth:`model_dump_public`, JSON-encoded."""
         return json.dumps(to_plain(self.model_dump_public()))
+
+    def _named_models(self) -> list[tuple[str, str]]:
+        """Every ``provider/model`` string in the document, with its location."""
+        found = []
+        if self.llm_model:
+            found.append(("workflow 'llm_model'", self.llm_model))
+        for node in self.nodes:
+            model = getattr(node, "llm_model", None)
+            if model:
+                found.append((f"node '{node.name}' llm_model", model))
+        return found
 
     @model_validator(mode="after")
     def validate_graph(self) -> "WorkflowGraph":
@@ -525,13 +654,38 @@ class WorkflowGraph(BaseModel):
                         f"Node '{node.name}' transitions to unknown node '{target}'."
                     )
 
-        # Validate that node outputs are declared data types.
+        # Validate that node outputs are declared data types. Nodes whose
+        # output shape Kaval.AI owns rather than the author are exempt: a
+        # `rag_query` node returns hits or joined text, and no author could
+        # reasonably write that as a JSON-schema fragment. The boundary is
+        # still typed -- by a model we ship instead of one they wrote.
         for node in self.nodes:
             output = getattr(node, "output", None)
-            if output is not None and output not in self.data_types:
+            if output is None or type(node) in _NODES_WITH_OWN_OUTPUT_TYPE:
+                continue
+            if output not in self.data_types:
                 raise ValueError(
                     f"Node '{node.name}' output '{output}' is not declared in data_types."
                 )
+
+        # A rag_query node names a service; it never carries a connection.
+        # The document is served by GET /workflow and edited in the backoffice,
+        # so a DSN here would put credentials somewhere they must not be.
+        for node in self.nodes:
+            service = getattr(node, "service", None)
+            if service and ("://" in service or "@" in service):
+                raise ValueError(
+                    f"Node '{node.name}' service '{service}' looks like a "
+                    "connection string. A workflow names a registered RAG "
+                    "service; pass the connection to the service itself, in "
+                    "code or at registration."
+                )
+
+        # Every model named must resolve to a registered provider. Without
+        # this a typo loads, renders and diagrams cleanly, then raises the
+        # first time that node runs -- possibly on a branch taken once a month.
+        for label, model in self._named_models():
+            _validate_model_name(label, model)
 
         # Branches of a 'parallel' node run concurrently on private copies of
         # the run context, so they have to be independent. That is checkable

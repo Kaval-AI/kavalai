@@ -253,6 +253,36 @@ class BaseLlmClient:
             chat_history=history, response_model=response_model
         )
 
+    @classmethod
+    def from_model(
+        cls,
+        model: str,
+        parameters: Optional[LlmClientParameters] = None,
+        stats_receiver: Optional[ModelStatsReceiver] = None,
+        **defaults,
+    ) -> "BaseLlmClient":
+        """Construct this client for a resolved model name.
+
+        The registry calls this rather than the constructor, so a client whose
+        ``__init__`` does not take the shape below can say so once here instead
+        of making every registration wrap it in a lambda. ``defaults`` are the
+        keyword arguments bound at registration (a base URL, a host, a key).
+
+        Args:
+            model: Model name with the provider prefix already removed.
+            parameters: Optional per-call sampling/timeout parameters.
+            stats_receiver: Where model-call statistics are reported. Passing
+                it through is what puts a custom client's usage in the
+                backoffice alongside the built-in providers.
+            **defaults: Extra constructor arguments bound at registration.
+        """
+        return cls(
+            model,
+            llm_client_parameters=parameters,
+            model_stats_receiver=stats_receiver,
+            **defaults,
+        )
+
     async def _send_model_call_stats(self, stats: ModelCallStat):
         """Subclasses should use this method to report model stats."""
         if self.model_stats_receiver is not None:

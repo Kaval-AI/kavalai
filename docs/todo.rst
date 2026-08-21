@@ -149,3 +149,21 @@ evaluators ask first.
    * - No long-term memory
      - Memory is the session's chat history plus ``history:`` inputs. There is
        no semantic or summarising memory that persists across sessions.
+   * - Provider credentials are read inside the clients
+     - :class:`~kavalai.OpenAIClient` and the other provider and embedding
+       clients fall back to ``os.getenv`` in ``__init__``, which is at odds
+       with "library code reads no environment variables". Keeping the
+       fallback is deliberate for now --- it is what makes "set the key and it
+       works" true --- and an explicit ``api_key=`` (or a registration default)
+       already wins. The real fix is for entry points to pass credentials in,
+       which touches every construction site.
+   * - Only two RAG backends
+     - PostgreSQL/pgvector and SQLite. The interface, the capability tiers and
+       ``tests/rag/test_conformance.py`` were all shaped with hosted vector
+       databases in mind, so a Pinecone or Qdrant backend is a contained piece
+       of work --- but nothing verifies that until one exists. Two constraints
+       found while designing for them and worth re-checking against current
+       vendor docs before starting: ``similarity`` must be normalised to
+       higher-is-better cosine, and the default
+       ``compute_similarity_matrix`` asks for ``len(source_ids) * 100``
+       candidates, which is at or beyond what a hosted store will return.

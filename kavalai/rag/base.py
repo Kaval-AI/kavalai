@@ -29,14 +29,22 @@ class RagServiceResult(BaseModel):
     Represents a single result from a RAG query.
 
     Attributes:
-        id (UUID): Unique identifier of the indexed item.
+        id (UUID): Unique identifier of the indexed item. Kaval.AI mints these,
+            and backends must be able to store one: a store whose identifiers
+            are integers or bounded strings has to accept a UUID (as text if
+            necessary) and give the same value back.
         model (str): The embedding model used for this item.
         collection_name (str): The name of the collection this item belongs to.
         source_id (str): An external identifier for the source of this item.
         content (Optional[str]): The original text content that was indexed.
         embedding_size (int): The dimension of the embedding vector.
         rag_metadata (dict): Additional metadata associated with the item.
-        similarity (float): The similarity score (1.0 - distance) relative to the query.
+        similarity (float): How close the item is to the query, **higher is
+            better**, comparable across backends for the same embedding model.
+            Backends index with cosine distance and report ``1.0 - distance``,
+            so a perfect match scores ``1.0``. A backend whose store reports a
+            metric-dependent score must normalise to this convention rather
+            than passing its own number through.
         created_at (Optional[datetime]): Timestamp when the item was created.
         updated_at (Optional[datetime]): Timestamp when the item was last updated.
         query_index (Optional[int]): Index of the query in batch queries (for query_batch results).
@@ -60,12 +68,49 @@ class BaseRagService(ABC):
     Interface for RAG (Retrieval-Augmented Generation) storage backends.
 
     A RAG service indexes text documents as embeddings and answers similarity
-    queries against them. Concrete backends (e.g.
-    :class:`~kavalai.rag.postgres.PostgresRagService`) implement the abstract
-    methods; ``compute_similarity_matrix`` and ``learn_normalizer`` have
-    generic default implementations that backends may override with more
-    efficient or exact versions.
+    queries against them. The interface is generic; the implementations are
+    deliberately not. ``PostgresRagService`` pushes similarity into pgvector
+    and carries a dozen methods this interface never mentions, and that is the
+    intended shape --- a backend is free to expose whatever its store does well,
+    as long as the declared surface below behaves identically everywhere.
+
+    The surface comes in three tiers:
+
+    **Required.** :meth:`index`, :meth:`index_batch`, :meth:`query`,
+    :meth:`query_batch`, :meth:`delete` and :meth:`delete_by_source_id` are
+    abstract. Every backend implements all six.
+
+    **Optional.** :meth:`count_entries` and :meth:`iter_entries` raise
+    ``NotImplementedError`` by default. Ask :meth:`supports` before calling
+    them rather than catching the exception.
+
+    **Defaulted.** :meth:`compute_similarity_matrix` and
+    :meth:`learn_normalizer` work on every backend as written, and may be
+    overridden with an exact or cheaper implementation.
+
+    ``tests/rag/test_conformance.py`` runs the declared contract against every
+    backend, so "implements the interface correctly" is checked rather than
+    assumed.
     """
+
+    #: Optional methods this backend actually implements. Subclasses that
+    #: override ``count_entries`` or ``iter_entries`` list them here.
+    capabilities: frozenset = frozenset()
+
+    def supports(self, capability: str) -> bool:
+        """Whether an optional method is implemented by this backend.
+
+        ``count_entries`` and ``iter_entries`` are optional, so a caller that
+        needs one (the backoffice embedding projector needs ``iter_entries``)
+        should ask rather than catch ``NotImplementedError``.
+
+        Args:
+            capability: An optional method name, e.g. ``"iter_entries"``.
+
+        Returns:
+            True if this backend implements it.
+        """
+        return capability in self.capabilities
 
     # Number of candidates fetched per source by the default (query_batch-based)
     # compute_similarity_matrix implementation. Sources with more indexed items
@@ -79,7 +124,7 @@ class BaseRagService(ABC):
         source_metadata: Optional[dict] = None,
         collection_name: str = "default",
         source_id: str = "default",
-    ):
+    ) -> dict:
         """
         Index a single text blob with metadata.
 
@@ -90,7 +135,12 @@ class BaseRagService(ABC):
             source_id (str): Source identifier. Defaults to "default".
 
         Returns:
-            The created index entry (backend-specific type).
+            dict: The created entry. It always carries ``id``, ``model``,
+            ``collection_name``, ``source_id``, ``content``,
+            ``embedding_size``, ``rag_metadata``, ``created_at`` and
+            ``updated_at``; a backend may add its own keys (Postgres also
+            returns ``embedding``). The guaranteed keys are part of the
+            contract, not a backend detail.
         """
 
     @abstractmethod
@@ -100,7 +150,7 @@ class BaseRagService(ABC):
         metadata_list: list[dict],
         source_ids: Optional[list[str]] = None,
         collection_name: str = "default",
-    ):
+    ) -> list[dict]:
         """
         Index multiple text items in a single batch.
 
@@ -115,7 +165,7 @@ class BaseRagService(ABC):
             collection_name (str): Name of the collection to add items to. Defaults to "default".
 
         Returns:
-            List of created index entries (backend-specific type).
+            list[dict]: The created entries, each shaped as in :meth:`index`.
 
         Raises:
             ValueError: If the lengths of texts, metadata_list, or source_ids do not match.
@@ -129,6 +179,7 @@ class BaseRagService(ABC):
         collection_name: Optional[str] = None,
         source_ids: Optional[list[str]] = None,
         keep_best: bool = False,
+        include_content: bool = True,
     ) -> list[RagServiceResult]:
         """
         Query the indexed items for similarities to the input text.
@@ -138,11 +189,21 @@ class BaseRagService(ABC):
             top_k (int): Number of top results to return. Defaults to 5.
             collection_name (Optional[str]): If provided, filter by collection name.
             source_ids (Optional[list[str]]): If provided, filter by source identifiers.
-            keep_best (bool): If True, only the best result per source_id is returned.
-                             Useful when a single source is split into multiple indexed items.
+            keep_best (bool): If True, only the best result per source_id is
+                returned. Useful when a single source is split into multiple
+                indexed items. Backends whose store cannot group server-side
+                over-fetch and reduce in the client, which makes the result
+                approximate when a source has more indexed items than the
+                over-fetch window --- the same caveat
+                :meth:`compute_similarity_matrix` carries.
+            include_content (bool): When False, ``content`` is omitted from the
+                results. Everything else is unchanged. Free on a local
+                database; on a remote store it avoids transferring text that
+                the caller is only going to discard.
 
         Returns:
-            list[RagServiceResult]: List of results with similarity scores.
+            list[RagServiceResult]: Results ordered by descending
+            ``similarity``.
         """
 
     @abstractmethod
@@ -152,6 +213,7 @@ class BaseRagService(ABC):
         top_k: int = 5,
         collection_name: Optional[str] = None,
         source_ids: Optional[list[str]] = None,
+        include_content: bool = True,
     ) -> list[list[RagServiceResult]]:
         """
         Query the indexed items for similarities to multiple input texts.
@@ -164,6 +226,8 @@ class BaseRagService(ABC):
             top_k (int): Number of top results to return per query. Defaults to 5.
             collection_name (Optional[str]): If provided, filter by collection name.
             source_ids (Optional[list[str]]): If provided, filter by source identifiers.
+            include_content (bool): When False, ``content`` is omitted from the
+                results. See :meth:`query`.
 
         Returns:
             list[list[RagServiceResult]]: A list of result lists, where each inner list contains

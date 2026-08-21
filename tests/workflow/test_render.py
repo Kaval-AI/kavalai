@@ -168,3 +168,28 @@ def test_transitions_to_unknown_nodes_are_skipped():
 
     assert "ghost" not in svg
     assert ">s<" in svg and ">e<" in svg
+
+
+def test_rag_query_node_renders():
+    from kavalai.workflow.render import render_workflow_svg
+
+    graph = {
+        "name": "wf",
+        "data_types": {"input": {}, "output": {}},
+        "nodes": [
+            {"name": "s", "type": "start", "next": "r"},
+            {
+                "name": "r",
+                "type": "rag_query",
+                "query": "q",
+                "output": "docs",
+                "next": "e",
+            },
+            {"name": "e", "type": "end", "output": "output"},
+        ],
+    }
+
+    svg = render_workflow_svg(graph)
+
+    assert "<svg" in svg
+    assert "r" in svg

@@ -1167,3 +1167,261 @@ def test_tool_allow_list_understands_the_wildcard():
     assert _is_tool_allowed("python://exact", ["python://exact"])
     assert not _is_tool_allowed("python://anything", [])
     assert _is_tool_allowed("python://anything", None)
+
+
+# ------------------------------------------------------------------- rag_query
+class RecordingRagService:
+    """A stand-in that records calls and refuses anything but ``query``.
+
+    ``rag_query`` is read-only by construction, so the write side is defined
+    here to explode rather than being merely absent: the test then proves the
+    node never reaches for it, instead of the attribute quietly not existing.
+    """
+
+    def __init__(self, hits=None):
+        self.hits = hits if hits is not None else []
+        self.calls = []
+
+    async def query(self, **kwargs):
+        self.calls.append(kwargs)
+        return self.hits
+
+    def _forbidden(self, *args, **kwargs):
+        raise AssertionError("rag_query must only ever call query()")
+
+    index = index_batch = delete = delete_by_source_id = _forbidden
+
+
+def rag_hit(content, source_id="s", similarity=0.9):
+    from kavalai.rag import RagServiceResult
+
+    return RagServiceResult(
+        id=UUID(int=abs(hash(content)) % (2**128)),
+        model="fake/embedding",
+        collection_name="default",
+        source_id=source_id,
+        content=content,
+        embedding_size=4,
+        rag_metadata={},
+        similarity=similarity,
+    )
+
+
+def rag_graph(**node_extra):
+    """The four-line case: a rag_query node that names nothing."""
+    nodes = [
+        {"name": "s", "type": "start", "next": "retrieve"},
+        {
+            "name": "retrieve",
+            "type": "rag_query",
+            "query": "{{ context.input.user_message }}",
+            "output": "docs",
+            "next": "e",
+            **node_extra,
+        },
+        {"name": "e", "type": "end", "output": "output"},
+    ]
+    return graph_dict(nodes)
+
+
+async def test_rag_query_needs_no_configuration_when_there_is_one_service():
+    service = RecordingRagService([rag_hit("Green Village has 104 residents.")])
+    engine = WorkflowEngine.from_dict(rag_graph(), rag_services=service)
+
+    state = await engine.run({"user_message": "How many residents?"})
+
+    assert service.calls[0]["text"] == "How many residents?"
+    # state.data is to_plain(run_context.data), so hits arrive as dicts here
+    # while nodes downstream still see RagServiceResult models.
+    assert state.data["docs"][0]["content"] == "Green Village has 104 residents."
+
+
+async def test_rag_query_output_need_not_be_declared_in_data_types():
+    # 'docs' is nowhere in DATA_TYPES; the node owns its own output shape.
+    assert "docs" not in DATA_TYPES
+    WorkflowEngine.from_dict(rag_graph(), rag_services=RecordingRagService())
+
+
+async def test_rag_query_only_ever_calls_query():
+    service = RecordingRagService([rag_hit("a fact")])
+    engine = WorkflowEngine.from_dict(rag_graph(), rag_services=service)
+
+    await engine.run({"user_message": "q"})
+
+    assert len(service.calls) == 1
+
+
+async def test_rag_query_passes_its_parameters_through():
+    service = RecordingRagService()
+    engine = WorkflowEngine.from_dict(
+        rag_graph(top_k=3, source_ids=["policies"], keep_best=True),
+        rag_services=service,
+    )
+
+    await engine.run({"user_message": "q"})
+
+    call = service.calls[0]
+    assert call["top_k"] == 3
+    assert call["source_ids"] == ["policies"]
+    assert call["keep_best"] is True
+
+
+async def test_rag_query_renders_templates_in_the_query():
+    service = RecordingRagService()
+    graph = rag_graph()
+    graph["templates"] = [{"name": "suffix", "value": "in Green Village"}]
+    graph["nodes"][1]["query"] = (
+        "{{ context.input.user_message }} {{ templates.suffix }}"
+    )
+    engine = WorkflowEngine.from_dict(graph, rag_services=service)
+
+    await engine.run({"user_message": "the bakery"})
+
+    assert service.calls[0]["text"] == "the bakery in Green Village"
+
+
+async def test_store_content_joins_the_hit_texts():
+    service = RecordingRagService([rag_hit("fact one"), rag_hit("fact two")])
+    engine = WorkflowEngine.from_dict(rag_graph(store="content"), rag_services=service)
+
+    state = await engine.run({"user_message": "q"})
+
+    assert state.data["docs"] == "fact one\n\nfact two"
+
+
+async def test_store_results_keeps_scores_reachable():
+    service = RecordingRagService([rag_hit("fact", similarity=0.42)])
+    engine = WorkflowEngine.from_dict(rag_graph(), rag_services=service)
+
+    state = await engine.run({"user_message": "q"})
+
+    assert state.data["docs"][0]["similarity"] == 0.42
+
+
+async def test_retrieved_content_reaches_a_following_prompt():
+    """The point of the node: hits land in the next node's prompt."""
+    service = RecordingRagService([rag_hit("Lake Miller is 1.2 meters deep.")])
+    nodes = [
+        {"name": "s", "type": "start", "next": "retrieve"},
+        {
+            "name": "retrieve",
+            "type": "rag_query",
+            "query": "{{ context.input.user_message }}",
+            "output": "docs",
+            "next": "answer",
+            "store": "content",
+        },
+        {
+            "name": "answer",
+            "type": "llm",
+            "prompt": "Facts:\n{{ context.docs }}",
+            "output": "output",
+            "next": "e",
+        },
+        {"name": "e", "type": "end", "output": "output"},
+    ]
+    seen = {}
+
+    class CapturingClient(BaseLlmClient):
+        async def _run_chat_completions(self, chat_history, response_model, streamer):
+            seen["prompt"] = chat_history.messages[0].content
+            vs = streamer.get_value_streamer("response", response_model=response_model)
+            await vs.stream_partial('{"agent_response": "ok"}')
+            await vs.stream_complete()
+
+    engine = WorkflowEngine.from_dict(
+        graph_dict(nodes),
+        client_factory=lambda *a, **k: CapturingClient(),
+        rag_services=service,
+    )
+    await engine.run({"user_message": "how deep is the pond"})
+
+    assert "Lake Miller is 1.2 meters deep." in seen["prompt"]
+
+
+# --------------------------------------------------- service/collection defaults
+async def test_node_service_beats_workflow_default():
+    node_service, workflow_service = RecordingRagService(), RecordingRagService()
+    graph = rag_graph(service="special")
+    graph["rag_service"] = "wide"
+    engine = WorkflowEngine.from_dict(
+        graph, rag_services={"special": node_service, "wide": workflow_service}
+    )
+
+    await engine.run({"user_message": "q"})
+
+    assert node_service.calls and not workflow_service.calls
+
+
+async def test_workflow_service_beats_default():
+    named, fallback = RecordingRagService(), RecordingRagService()
+    graph = rag_graph()
+    graph["rag_service"] = "wide"
+    engine = WorkflowEngine.from_dict(
+        graph, rag_services={"wide": named, "default": fallback}
+    )
+
+    await engine.run({"user_message": "q"})
+
+    assert named.calls and not fallback.calls
+
+
+async def test_collection_precedence_matches_service_precedence():
+    service = RecordingRagService()
+    graph = rag_graph(collection="handbook")
+    graph["rag_collection"] = "wide"
+    engine = WorkflowEngine.from_dict(graph, rag_services=service)
+
+    await engine.run({"user_message": "q"})
+
+    assert service.calls[0]["collection_name"] == "handbook"
+
+
+async def test_workflow_collection_is_used_when_the_node_is_silent():
+    service = RecordingRagService()
+    graph = rag_graph()
+    graph["rag_collection"] = "handbook"
+    engine = WorkflowEngine.from_dict(graph, rag_services=service)
+
+    await engine.run({"user_message": "q"})
+
+    assert service.calls[0]["collection_name"] == "handbook"
+
+
+async def test_passed_service_beats_a_registered_one_of_the_same_name():
+    from kavalai.llm_clients import registry
+
+    registered = RecordingRagService()
+    registry.register_rag_service("default", lambda: registered)
+    try:
+        passed = RecordingRagService()
+        engine = WorkflowEngine.from_dict(rag_graph(), rag_services=passed)
+        await engine.run({"user_message": "q"})
+
+        assert passed.calls and not registered.calls
+    finally:
+        registry.rag_services.unregister("default")
+
+
+async def test_a_registered_service_is_found_when_none_is_passed():
+    """The deployment path: nobody constructs the engine, so nothing is passed."""
+    from kavalai.llm_clients import registry
+
+    service = RecordingRagService([rag_hit("registered")])
+    registry.register_rag_service("default", lambda: service)
+    try:
+        engine = WorkflowEngine.from_dict(rag_graph())
+        state = await engine.run({"user_message": "q"})
+
+        assert state.data["docs"][0]["content"] == "registered"
+    finally:
+        registry.rag_services.unregister("default")
+
+
+async def test_unknown_service_fails_at_load_not_at_execution():
+    with pytest.raises(WorkflowException) as error:
+        WorkflowEngine.from_dict(rag_graph(service="nosuch"))
+
+    message = str(error.value)
+    assert "nosuch" in message
+    assert "register_rag_service()" in message

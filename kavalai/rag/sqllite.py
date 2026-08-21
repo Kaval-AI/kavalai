@@ -72,6 +72,9 @@ class SqliteRagService(BaseRagService):
     stats are logged but not persisted (the index file has no stats table).
     """
 
+    #: Both optional methods of the interface are implemented here.
+    capabilities = frozenset({"count_entries", "iter_entries"})
+
     def __init__(
         self,
         filename: str,
@@ -106,7 +109,7 @@ class SqliteRagService(BaseRagService):
         self.table_name = table_name
         self.model = model
         self.normalizer = normalizer
-        self.embedding_client = make_embedding_client(model)
+        self._embedding_client = None
         self._dimension: Optional[int] = None
         self._vector_initialized = False
 
@@ -127,6 +130,22 @@ class SqliteRagService(BaseRagService):
                     f"Table {table_name!r} does not exist in {filename!r} (auto_create=False)."
                 )
             self._create_table()
+
+    @property
+    def embedding_client(self):
+        """Embedding client, created on first use.
+
+        Resolved lazily, as ``PostgresRagService`` does: building it in
+        ``__init__`` meant an unregistered embedding provider raised before the
+        caller ever held the service, leaving no chance to assign one.
+        """
+        if self._embedding_client is None:
+            self._embedding_client = make_embedding_client(self.model)
+        return self._embedding_client
+
+    @embedding_client.setter
+    def embedding_client(self, client) -> None:
+        self._embedding_client = client
 
     def _load_vector_extension(self) -> None:
         """Load the sqlite-vector extension unless it is already built in (WASM)."""
@@ -339,6 +358,7 @@ class SqliteRagService(BaseRagService):
         collection_name: Optional[str] = None,
         source_ids: Optional[list[str]] = None,
         keep_best: bool = False,
+        include_content: bool = True,
     ) -> list[RagServiceResult]:
         """
         Query the indexed items for similarities to the input text.
@@ -360,6 +380,7 @@ class SqliteRagService(BaseRagService):
             collection_name=collection_name,
             source_ids=source_ids,
             keep_best=keep_best,
+            include_content=include_content,
         )
         for result in results[0]:
             result.query_index = None
@@ -372,6 +393,7 @@ class SqliteRagService(BaseRagService):
         collection_name: Optional[str] = None,
         source_ids: Optional[list[str]] = None,
         keep_best: bool = False,
+        include_content: bool = True,
     ) -> list[list[RagServiceResult]]:
         """
         Query the indexed items for similarities to multiple input texts.
@@ -409,7 +431,10 @@ class SqliteRagService(BaseRagService):
                 sql, (json.dumps(embedding), *filter_params)
             ).fetchall()
             batch_results.append(
-                [self._map_row_to_result(row, query_index) for row in rows]
+                [
+                    self._map_row_to_result(row, query_index, include_content)
+                    for row in rows
+                ]
             )
         return batch_results
 
@@ -466,7 +491,10 @@ class SqliteRagService(BaseRagService):
         return sql, params
 
     def _map_row_to_result(
-        self, row: sqlite3.Row, query_index: Optional[int]
+        self,
+        row: sqlite3.Row,
+        query_index: Optional[int],
+        include_content: bool = True,
     ) -> RagServiceResult:
         """Map a database row to a RagServiceResult."""
         return RagServiceResult(
@@ -474,7 +502,7 @@ class SqliteRagService(BaseRagService):
             model=row["model"],
             collection_name=row["collection_name"],
             source_id=row["source_id"],
-            content=row["content"],
+            content=row["content"] if include_content else None,
             embedding_size=row["embedding_size"],
             rag_metadata=json.loads(row["metadata"]) if row["metadata"] else {},
             similarity=1.0 - float(row["distance"]),

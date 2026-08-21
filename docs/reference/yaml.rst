@@ -49,6 +49,15 @@ Top level
      - Default sampling/reliability options merged into
        :class:`~kavalai.LlmClientParameters` (``temperature``, ``top_p``,
        ``timeout_seconds``, …). Nodes may override individual keys.
+   * - ``rag_service``
+     - no
+     - Default RAG service name for ``rag_query`` nodes. A node may override
+       it. Falls back to ``"default"``, which is the name a single service
+       passed as ``rag_services=`` is registered under.
+   * - ``rag_collection``
+     - no
+     - Default collection for ``rag_query`` nodes. A node may override it. If
+       omitted, the backend's own default applies.
    * - ``data_types``
      - yes
      - JSON-schema fragments compiled into Pydantic models. See below.
@@ -285,6 +294,65 @@ URI.
      - Node to run afterwards. Required.
    * - ``method``
      - HTTP method for ``rest://`` tools. Default ``get``.
+
+rag_query
+^^^^^^^^^
+
+One retrieval against a RAG service. **Read-only** — the node calls
+``query`` and nothing else, so no workflow document can write to an index.
+
+``query`` is a template, rendered exactly like an ``llm`` node's ``prompt``.
+
+.. code-block:: yaml
+
+   - name: retrieve
+     type: rag_query
+     query: "{{ context.input.question }}"
+     output: facts
+     next: answer
+
+That is the whole node when there is one index: ``service`` and ``collection``
+default to the workflow's ``rag_service`` / ``rag_collection``, and a single
+service passed to the engine is registered as ``"default"``.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 80
+
+   * - Key
+     - Description
+   * - ``query``
+     - Query text, rendered as a template. Required.
+   * - ``output``
+     - Where the hits are stored. Required. Unlike other nodes, this name need
+       **not** appear in ``data_types``: the node's output shape is Kaval.AI's
+       (a list of :class:`~kavalai.rag.RagServiceResult`, or a string), not the
+       author's.
+   * - ``next``
+     - Node to run afterwards. Required.
+   * - ``service``
+     - Registered service name. Defaults to the workflow's ``rag_service``,
+       then ``"default"``. This is a **name**, never a connection string --- a
+       value containing ``://`` is rejected when the workflow loads.
+   * - ``collection``
+     - Collection to search. Defaults to the workflow's ``rag_collection``.
+   * - ``top_k``
+     - Maximum hits. Default ``5``.
+   * - ``source_ids``
+     - Restrict the search to these source identifiers.
+   * - ``keep_best``
+     - Keep only the best hit per ``source_id``, for documents indexed as many
+       chunks. Default ``false``.
+   * - ``store``
+     - ``results`` (default) stores the full hit list, so scores and metadata
+       remain available to ``if`` / ``switch`` nodes. ``content`` stores just
+       the hit texts joined by blank lines, which is what a following ``llm``
+       node's prompt usually wants.
+
+The service itself is supplied by the caller
+(``WorkflowEngine(..., rag_services=my_service)``) or registered with
+:func:`~kavalai.register_rag_service`; a node naming a service that is neither
+fails when the workflow loads, not when the branch first runs.
 
 if
 ^^

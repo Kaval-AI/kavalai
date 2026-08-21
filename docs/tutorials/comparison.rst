@@ -171,8 +171,15 @@ achievable with enough glue code.
      - Python + MCP
      - Python + MCP
      - nodes + MCP
+   * - Model providers
+     - 5 built in, plus a registry [#fprov]_
+     - ~30 packages
+     - many
+     - many
+     - 14 native + 14 compatible
+     - many
    * - RAG built in
-     - yes
+     - yes [#frag]_
      - via LangChain
      - yes
      - yes (its focus)
@@ -220,6 +227,14 @@ achievable with enough glue code.
 .. [#f2] An ``agent`` node runs a full tool-using loop, and a graph can route
    between several of them — but there is no agent-to-agent handoff primitive,
    and no agent can delegate to another agent by itself.
+.. [#fprov] OpenAI, Gemini, Anthropic, Ollama and in-browser WebLLM ship with
+   Kaval.AI; :func:`~kavalai.register_llm_provider` adds any other under a name
+   of your own, usable from YAML like a built-in.
+
+.. [#frag] Two backends (pgvector, SQLite) behind one interface, plus a
+   ``rag_query`` node, so retrieval is expressible in the workflow document
+   rather than only from Python.
+
 .. [#f3] Every framework here can call a REST API, either by writing a Python
    function that does so or through an OpenAPI toolkit. The distinction is that
    Kaval.AI registers the endpoint itself as a tool with its own schemas, so
