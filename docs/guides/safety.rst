@@ -52,15 +52,38 @@ offline with canned model output:
 
 .. code-block:: python
 
-   from kavalai import WorkflowEngine
+   from kavalai import BaseLlmClient, WorkflowEngine
+
+
+   class StubClient(BaseLlmClient):
+       """Returns canned structured output — no network, no API key."""
+
+       def __init__(self, *args, **kwargs):
+           super().__init__()
+
+       async def _run_chat_completions(self, chat_history, response_model, streamer):
+           value_streamer = streamer.get_value_streamer(
+               "response", response_model=response_model
+           )
+           canned = response_model(
+               **{
+                   name: ("repair" if name == "intent" else "Stubbed reply.")
+                   for name in response_model.model_fields
+               }
+           )
+           await value_streamer.stream_partial(canned.model_dump_json())
+           await value_streamer.stream_complete()
+
 
    engine = WorkflowEngine.from_yaml(
        yaml,
        client_factory=lambda model, parameters, stats_receiver: StubClient(),
    )
 
-A ``StubClient`` subclasses :class:`BaseLlmClient` and implements
-``chat_completions`` to return canned ``response_model`` instances. This makes
-workflow logic — branching, data flow, node wiring — testable and repeatable
-without a single live model call, which complements the run-level auditing
-described in :doc:`observability`.
+Note the method: every run goes through :meth:`~kavalai.WorkflowEngine.run_stream`,
+so the engine drives clients via ``_run_chat_completions``, pushing values into a
+streamer. A stub that overrides ``chat_completions`` instead is never called.
+
+This makes workflow logic — branching, data flow, node wiring — testable and
+repeatable without a single live model call, which complements the run-level
+auditing described in :doc:`observability`.

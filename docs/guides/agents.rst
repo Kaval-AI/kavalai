@@ -18,16 +18,17 @@ Construction
    from kavalai import Agent, OpenAIClient, FunctionKernel
 
    agent = Agent(
-       llm_client=OpenAIClient("gpt-4.1-mini"),
+       llm_client=OpenAIClient("gpt-5.4-mini"),
        kernel=FunctionKernel(),   # optional
        run_context=...,           # optional
        prompt_template=...,       # optional Jinja2 Template
-       debug=False,
+       allowed_tools=None,        # optional; None = every registered tool
+       debug=False,               # print each step's reasoning and tool calls
    )
 
 Any provider client works, since they share the :class:`BaseLlmClient`
 interface — :class:`~kavalai.OpenAIClient`, :class:`~kavalai.GeminiClient`, or
-:class:`~kavalai.OllamaClient` (e.g. ``GeminiClient("gemini-2.5-flash")``). See
+:class:`~kavalai.OllamaClient` (e.g. ``GeminiClient("gemini-3.1-flash-lite")``). See
 :doc:`../tutorials/llm_clients`.
 
 Running a prompt
@@ -61,6 +62,12 @@ Each step of the loop does the same four things:
 This explicit bound is a safety feature: an agent can never loop forever, and it
 can only act through tools you have registered (see :doc:`tools` and
 :doc:`safety`).
+
+Narrow it further with ``allowed_tools``, a list of tool URIs
+(``python://web.crawl``, or ``rest://api.*`` for a whole server). Excluded tools
+are neither described to the model nor callable, so the restriction is enforced
+rather than suggested. ``None`` allows every registered tool; an empty list
+allows none.
 
 Structured output
 -----------------

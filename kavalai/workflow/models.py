@@ -345,15 +345,35 @@ class WorkflowStreamEvent(BaseModel):
 class WorkflowGraph(BaseModel):
     """A workflow: a directed graph of nodes forming a state machine.
 
-    Attributes:
-        name: Workflow / agent name.
-        description: Human-readable description.
-        version: Schema version.
-        llm_model: Default LLM model (``provider/model``); nodes may override.
-        llm_kwargs: Default LLM kwargs; nodes may override.
-        data_types: JSON-schema data type definitions (parsed by SchemaParser).
-        nodes: The graph vertices; exactly one ``start`` node, and every
-            ``end`` node returns the same ``output`` data type.
+    This is the root of the YAML document a workflow is loaded from, so every
+    field below is also a top-level YAML key.
+
+    ``name``
+        Workflow / agent name. Also the agent name runs are recorded under.
+    ``description``
+        Human-readable description.
+    ``version``
+        Schema version (``"2.0"``).
+    ``llm_model``
+        Default LLM model (``provider/model``); nodes may override it.
+    ``llm_kwargs``
+        Default LLM kwargs; nodes may override them.
+    ``data_types``
+        JSON-schema data type definitions, compiled to Pydantic models by
+        ``SchemaParser``. ``input`` and ``output`` are the workflow's own
+        input and output types.
+    ``rest_servers`` / ``mcp_servers``
+        Tool servers registered on the kernel before the run
+        (see :class:`RestServer`, :class:`McpServer`).
+    ``python_functions``
+        Python tools to import and register by module path
+        (see :class:`PythonFunction`).
+    ``templates``
+        Named prompt fragments reusable across nodes
+        (see :class:`TemplateModel`).
+    ``nodes``
+        The graph vertices; exactly one ``start`` node, and every ``end``
+        node returns the same ``output`` data type.
     """
 
     name: str

@@ -5,7 +5,28 @@ Kaval.AI can run **entirely in the browser** — the workflow engine, the LLM an
 the embeddings all execute on the user's device, with no API key, no server and
 no CORS. Python runs through `Pyodide <https://pyodide.org>`_ and models run over
 WebGPU through a `WebLLM <https://github.com/mlc-ai/web-llm>`_ bridge. The
-**Run in browser ▶** buttons throughout these docs use exactly this setup.
+**Run in browser ▶** buttons on this page use exactly this setup, as does the
+chatbot below.
+
+A chatbot running in this page
+------------------------------
+
+Before the details, here is the thing itself: a complete Kaval.AI workflow — a
+one-node chatbot with structured output and memory — running entirely in your
+browser. No server, no API key, nothing sent anywhere.
+
+The code on the right is what the chat on the left is running; edit it and press
+run. The first load downloads the model (or takes it from the browser cache),
+so give it a moment.
+
+.. raw:: html
+   :file: ../_includes/chatbot-demo.html
+
+Because the workflow returns a structured ``Reply`` (an ``agent_response`` plus
+a list of ``choices``), the chat can render those choices as quick-reply chips —
+a concrete reason to ask for typed output rather than prose. The conversation is
+kept in an in-browser SQLite database, which is what lets each turn see the last
+one.
 
 Why run in the browser
 ----------------------

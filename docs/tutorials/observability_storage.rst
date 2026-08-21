@@ -78,7 +78,7 @@ node writes its result under its ``output`` name; later nodes read it back by
             inputs={"email": "input"}, output="output", next="end")
        .end()
        .build_engine(
-           agent_service=AgentService(db_manager.get_sqlite_compat_sessionmaker())
+           agent_service=AgentService(db_manager.get_sqlite_sessionmaker())
        )
    )
 
@@ -109,15 +109,15 @@ One service, any database
 
 There is a single persistence service, :class:`~kavalai.agent_service.AgentService`;
 what varies is the database its sessionmaker points at. You can drive it
-directly; this runs **in your browser** over in-browser SQLite:
+directly — here over in-memory SQLite:
 
 .. code-block:: python
-   :class: run-in-browser
 
    from kavalai.agent_service import AgentService
    from kavalai.db import db_manager
 
-   service = AgentService(db_manager.get_sqlite_compat_sessionmaker())
+   await db_manager.init_sqlite()
+   service = AgentService(db_manager.get_sqlite_sessionmaker())
 
    # A run belongs to a session. Reuse the external id and the conversation
    # accumulates under one session.
@@ -141,6 +141,15 @@ directly; this runs **in your browser** over in-browser SQLite:
    for m in await service.get_chat_history(session.id):
        print(f"{m.role:>9}: {m.content}")
 
+.. code-block:: text
+
+   same agent  : True
+   same session: True
+   two runs    : True
+        user: My name is Ada.
+   assistant: Hi Ada!
+        user: What's my name?
+
 For local development and tests use SQLite — in-memory or file-backed:
 
 .. code-block:: python
@@ -151,8 +160,11 @@ For local development and tests use SQLite — in-memory or file-backed:
    await db_manager.init_sqlite()               # create the tables
    service = AgentService(db_manager.get_sqlite_sessionmaker())
 
-(``get_sqlite_compat_sessionmaker()`` above is its greenlet-free sibling for
-the browser, where SQLAlchemy's async engine cannot run.)
+``init_sqlite()`` creates the tables; ``get_sqlite_sessionmaker()`` hands the
+service an ordinary async session. Under Pyodide, where neither greenlet nor
+``aiosqlite`` exists, use ``get_sqlite_compat_sessionmaker()`` instead — it
+exposes the same awaitable surface over a synchronous engine. See
+:doc:`run_in_browser`.
 
 In production, point the very same service at Postgres:
 
@@ -201,7 +213,9 @@ identical tables — so a run looks identical wherever it lives:
      - Per-node debug data: each node's inputs and output, for drilling into what a
        step actually did.
    * - ``model_call_stats``
-     - One row per LLM or embedding call: model, token counts, duration and cost.
+     - One row per LLM or embedding call: model, token counts and duration.
+       (The table has a ``cost`` column, but the runtime does not compute one —
+       see :doc:`../todo`.)
 
 The first four are written by ``AgentService``; ``tasks`` and
 ``model_call_stats`` come from ``TaskLogger``. The relationship is a simple
@@ -230,7 +244,7 @@ register several (local, staging, production) behind one UI.
 So point your ``AgentService`` at a database, add that database as a project,
 and every session, run, task and model call becomes browsable — drill from a
 *conversation* down to an individual *run*, *node* or *model call*, with token
-and cost metrics along the way. See :doc:`../ui/index`.
+and token metrics along the way. See :doc:`../ui/index`.
 
 Where to next
 -------------

@@ -3,170 +3,180 @@
    :align: left
    :alt: Kaval.AI
 
-**Kaval.AI is an opinionated, elegant, production-grade library for building
-LLM-powered workflows, chatbots and agents, and connecting them to databases and
-tooling — with a focus on observability and debuggability.**
+|
 
-Kaval.AI uses `Pydantic <https://pydantic.dev/docs/validation/latest/get-started/>`__
-for every workflow input and output, and for all intermediate steps including
-tool calls.
+**Kaval.AI is an opinionated Python library for building production-grade
+agentic workflows, chatbots and tools.**
 
+Every input, output and intermediate step is a validated `Pydantic
+<https://docs.pydantic.dev/latest/>`__ model, every run is recorded and
+inspectable, and every provider sits behind one small async interface. The
+result is agentic software you can debug, test and put on call.
+
+.. code-block:: bash
+
+   pip install "kavalai[common]"
+
+Call a model
+------------
+
+One interface over OpenAI, Gemini, Anthropic and Ollama. The provider lives in
+the model id, so switching is a one-string change.
+
+.. code-block:: python
+
+   from kavalai import make_client
+
+   client = make_client("openai/gpt-5.4-mini")
+
+   print(await client.prompt("What is the capital of Estonia? Answer in one sentence."))
+
+.. code-block:: text
+
+   The capital of Estonia is Tallinn.
+
+Get data back, not prose
+------------------------
+
+Pass a Pydantic model and the answer comes back validated, with any provider —
+no parsing, no coaxing.
 
 .. code-block:: python
 
    from pydantic import BaseModel
 
-   class Message(BaseModel):
-       message: str
+   class City(BaseModel):
+       name: str
+       country: str
+       population: int
+       fun_fact: str
 
-   class Reply(BaseModel):
-       agent_response: str
-       choices: list[str]
+   city = await client.prompt("Describe Tallinn.", response_model=City)
 
+   print(city.population, "—", city.fun_fact)
 
-Using structured data types makes developing agentic AI workflows pleasant and
-predictable. The simplest way to create a workflow is the
-:class:`~kavalai.WorkflowBuilder`:
+.. code-block:: text
+
+   450000 — Tallinn's UNESCO-listed Old Town is one of the best-preserved medieval city centers in Europe.
+
+Answer from your own documents
+------------------------------
+
+Index text once, retrieve what matters, and let the model answer from it. Here
+the corpus is the collected knowledge of Green Village, a place no model has
+heard of.
 
 .. code-block:: python
 
-   from kavalai.agent_service import AgentService
-   from kavalai.db import db_manager
-   from kavalai.workflow import WorkflowBuilder
+   from kavalai.rag import SqliteRagService
 
-   # A short example or two helps a tiny model answer well and fill the choices
-   # in the right shape; the structured output schema enforces the format.
-   prompt = """You are a friendly, concise chatbot. Reply to the user in
-   agent_response, and suggest up to 3 short quick-reply choices the user might
-   tap next. Use earlier messages in the conversation for context.
+   FACTS = [
+       "Green Village's oldest resident is Agnes Whitlow (born 02.06.1929).",
+       "Green Village has 104 residents.",
+       "The village pond, Lake Miller, is 1.2 metres deep at its deepest point.",
+       # …and a dozen more
+   ]
 
-   Example:
-   user: hi
-   agent_response: Hey there! What can I help you with today?
-   choices: ["What can you do?", "Tell me a joke", "Give me an idea"]
-   """
+   rag = SqliteRagService(":memory:", model="fastembed/BAAI/bge-small-en-v1.5")
+   await rag.index_batch(
+       texts=FACTS,
+       metadata_list=[{}] * len(FACTS),
+       source_ids=[f"fact-{i}" for i in range(len(FACTS))],
+   )
+
+   for hit in await rag.query("Who has lived in the village the longest?", top_k=2):
+       print(f"{hit.similarity:.3f}  {hit.content}")
+
+.. code-block:: text
+
+   0.676  Green Village's oldest resident is Agnes Whitlow (born 02.06.1929).
+   0.628  Green Village has 104 residents.
+
+Retrieval is semantic, not lexical: nothing in the question says "oldest" or
+"Agnes", yet the right fact comes first. Hand those passages to a model and you
+have grounded answers; see :doc:`tutorials/rag`.
+
+Compose it into a workflow
+--------------------------
+
+A workflow is a typed graph: input in, output out, one node per step. The engine
+validates every boundary, records every run, and gives the bot memory across
+turns.
+
+.. code-block:: python
 
    workflow = (
-       WorkflowBuilder("Chatbot", llm_model="browser/Llama-3.2-1B-Instruct-q4f32_1-MLC")
+       WorkflowBuilder("Village greeter", llm_model="openai/gpt-5.4-mini")
        .data_model("input", Message)
        .data_model("output", Reply)
        .start("reply")
        .llm(
            "reply",
-           prompt=prompt,
+           prompt="You are the greeter of Green Village. Reply warmly in one "
+                  "sentence, and suggest up to 3 quick-reply choices.",
            inputs={"message": "input"},
            output="output",
            next="end",
        )
        .end()
-       .build_engine(
-           agent_service=AgentService(db_manager.get_sqlite_compat_sessionmaker())
-       )
+       .build_engine(agent_service=AgentService(db_manager.get_sqlite_sessionmaker()))
    )
 
-Let's go over the code step-by-step.
+   state = await workflow.run({"user_message": "Hi, I'm visiting from Tallinn!"})
 
-.. code-block:: python
+.. code-block:: text
 
-   WorkflowBuilder("Chatbot", llm_model="browser/Llama-3.2-1B-Instruct-q4f32_1-MLC")
+   Welcome to Green Village—so lovely to have you here from Tallinn!
+   choices: ['Thanks!', 'What's nearby?', 'Tell me about the pub']
+   path   : start → reply → end
+   tokens : 165
 
-This creates the builder for a workflow named ``Chatbot``. The ``llm_model``
-argument is the default model every LLM node uses unless it overrides it.
-Kaval.AI supports several providers — OpenAI, Gemini, Anthropic, Ollama and an
-in-browser WebGPU provider; see :doc:`/tutorials/llm_clients`.
+The same graph is equally expressible in YAML, and the same engine serves it
+over HTTP. See :doc:`tutorials/quickstart` for this example end to end.
 
-Here we use the ``browser`` provider so a small model runs **right in this page**
-with no API key, backed by the in-browser ``BrowserLLMClient`` (see
-:doc:`/api/llm_clients`). ``Llama-3.2-1B-Instruct-q4f32_1-MLC`` is a tiny model
-that downloads on first use; the live playground below also lets you pick a
-different one from its dropdown.
+What else is in the box
+-----------------------
 
-.. code-block:: python
+**Tools, through one kernel.** Python functions, REST endpoints and
+`MCP <https://modelcontextprotocol.io/>`__ servers all become typed, validated
+tools an agent can call — and ``allowed_tools`` decides which ones it may.
+→ :doc:`tutorials/agents`
 
-   .data_model("input", Message)
-   .data_model("output", Reply)
+**Streaming everywhere.** Token-by-token model output, per-node run events, and
+Server-Sent Events over HTTP. → :doc:`tutorials/streamer`
 
-``data_model`` registers a Pydantic model as a workflow data type. ``input`` and
-``output`` are special: they are the workflow's overall input and output types.
-Declaring them explicitly is what lets the runner validate every value and ask
-the model for exactly the right shape.
+**Observability by default.** Every run records its trace, context, chat
+history, per-node tasks and token usage — reloadable in code and browsable in
+the backoffice UI. → :doc:`guides/observability`
 
-.. code-block:: python
+**Deterministic tests.** Swap the model for a stub client and your graph logic
+becomes fast, free and repeatable. → :doc:`guides/safety`
 
-   .start("reply")
+**It runs in a browser.** The whole stack — engine, model and embeddings — can
+execute client-side over WebGPU, with no server and no API key.
+→ :doc:`tutorials/run_in_browser`
 
-This names the first node to run — here, the ``reply`` node defined next.
+**A management UI.** Configure agents, browse conversations, drill into any run
+or model call, and query your RAG collections. → :doc:`ui/index`
 
-.. code-block:: python
+Where to start
+--------------
 
-   .llm(
-       "reply",
-       prompt=prompt,
-       inputs={"message": "input"},
-       output="output",
-       next="end",
-   )
-
-This adds an LLM node named ``reply``. ``inputs`` maps a **local name** to a
-value from the run context: ``{"message": "input"}`` takes the workflow's
-``input`` and hands it to the prompt under the name ``message``, so the model
-sees the message text next to your instructions. ``output="output"`` stores the
-model's answer — validated against ``Reply`` — under ``output``, and
-``next="end"`` says which node runs after this one.
-
-.. code-block:: python
-
-   .build_engine(
-       agent_service=AgentService(db_manager.get_sqlite_compat_sessionmaker())
-   )
-
-Finally, ``build_engine`` validates the graph and returns a ready-to-run
-:class:`~kavalai.WorkflowEngine`. Passing an
-:class:`~kavalai.agent_service.AgentService` gives the bot **memory**: LLM
-nodes read the conversation history by default (``use_history=True``), so each
-turn sees what was said before. The chat keeps one session, stored here in an
-in-browser SQLite database that lives for the page's lifetime; in production
-the very same service points at Postgres instead.
-
-Here is that chatbot, running entirely in your browser. The first run takes a
-moment to download the model (or load it from cache), and because the model is
-tiny its answers will vary — but it remembers the conversation, and its reply is
-a structured ``Reply`` whose ``choices`` become the quick-reply buttons.
-
-.. raw:: html
-   :file: _includes/chatbot-demo.html
-
-
-Under the hood that chatbot is a tiny workflow — one LLM node between ``start``
-and ``end``:
-
-.. image:: /_static/workflows/chatbot.svg
-   :alt: The chatbot workflow: start → reply (an LLM node) → end.
-   :align: center
-
-This is just a small glimpse of what Kaval.AI can do. Check out the tutorials and
-examples — they cover a wide range of topics for building production-grade
-agentic workflows.
-
-Get started
------------
-
-Kaval.AI is more than a workflow engine. It ships native LLM clients for OpenAI,
-Gemini, Anthropic and Ollama behind one streaming interface (plus the in-browser
-WebGPU client you just used); a :class:`~kavalai.FunctionKernel` that exposes Python,
-REST and MCP tools to your agents through a single validated interface; a
-:class:`~kavalai.RagService` for indexing and querying embeddings, so agents can
-answer from your own documents (retrieval-augmented generation); and a
-**backoffice UI** for configuring agents and monitoring conversations, runs,
-tasks, token usage and cost. The guides, tutorials and API reference below cover
-each of these in depth.
+* Never built with LLMs before? :doc:`guides/concepts` explains the vocabulary.
+* Want something running in five minutes? :doc:`tutorials/quickstart`.
+* Want the full tour? Start at :doc:`tutorials/llm_clients` and work down.
+* Looking something up? :doc:`reference/index` has the YAML keys, the bundled
+  tools and every environment variable.
 
 .. toctree::
-   :maxdepth: 1
+   :hidden:
+   :caption: Get started
 
-   Installation <tutorials/installation>
+   tutorials/installation
+   tutorials/quickstart
 
 .. toctree::
+   :hidden:
    :maxdepth: 2
    :caption: Learn
 
@@ -174,20 +184,25 @@ each of these in depth.
    guides/index
 
 .. toctree::
+   :hidden:
    :maxdepth: 2
    :caption: Operate
 
    ui/index
+   deploy/index
 
 .. toctree::
+   :hidden:
    :maxdepth: 2
    :caption: Reference
 
+   reference/index
+   cookbook/index
    api/index
 
-Indices and tables
-------------------
+.. toctree::
+   :hidden:
+   :caption: Project
 
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
+   todo
+   genindex

@@ -13,7 +13,8 @@ programmatically with the fluent :class:`~kavalai.WorkflowBuilder`. Both compile
 to the same :class:`~kavalai.WorkflowGraph` and run on the same
 :class:`~kavalai.WorkflowEngine`.
 
-For a hands-on walkthrough, see :doc:`../tutorials/workflow`.
+For a hands-on walkthrough see :doc:`../tutorials/workflow`; for every key,
+field by field, see :doc:`../reference/yaml`.
 
 The graph model
 ---------------

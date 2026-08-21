@@ -1,19 +1,23 @@
 Tutorials
 =========
 
-Already installed? These hands-on guides and notebooks walk through Kaval.AI
-feature by feature. (New here? Start with :doc:`/tutorials/installation`.) Each
-notebook is executable — find the matching ``.ipynb`` under ``notebooks/`` in the
-repository and run it cell by cell.
+Hands-on, in the order most people need them. Each notebook is executable: find
+the matching ``.ipynb`` under ``notebooks/`` in the repository and run it cell by
+cell — the outputs you see here are from real runs.
+
+New here? :doc:`installation` then :doc:`quickstart`. Never built with LLMs
+before? :doc:`../guides/concepts` covers the vocabulary first.
 
 .. toctree::
    :maxdepth: 1
-   :caption: Guides & notebooks
 
+   Installation <installation>
+   Quickstart <quickstart>
    LLM clients <llm_clients>
    Agents & tools <agents>
    Workflows <workflow>
-   Observability & storage <observability_storage>
-   Streaming <streamer>
    RAG <rag>
+   Streaming <streamer>
+   Observability & storage <observability_storage>
+   Serving over HTTP <serving>
    Running in the browser <run_in_browser>

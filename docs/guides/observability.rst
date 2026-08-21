@@ -69,6 +69,9 @@ produces a ``ModelCallStat`` with token usage and timing, delivered through the
 ``ModelStatsReceiver`` callback interface (``ModelStatsLogger`` simply logs
 them). See :doc:`../tutorials/llm_clients`.
 
+The runtime records **usage**, not spend: multiply the token counts by your
+provider's published prices to get money.
+
 TaskLogger and fire-and-forget
 ------------------------------
 

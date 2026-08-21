@@ -18,7 +18,8 @@ migrations and starts the backoffice:
 
    docker compose up postgres_db backoffice-migrations backoffice
 
-The UI is then served at ``http://localhost:8000``. Agents write their runs into
+The UI is then served at ``http://localhost:8000``. For production settings,
+migrations and the environment variables involved, see :doc:`../deploy/index`. Agents write their runs into
 the same database (the ``agents`` schema), so anything you execute with the SDK
 shows up in the views below.
 
@@ -100,7 +101,7 @@ RAG explorer
 The **RAG** page inspects and queries the project's vector collections. Enter a
 query, choose an embedding model and collection, set *top-k*, and review the
 nearest matches; you can also compute a PCA projection of the embedding space.
-It is the UI counterpart to :class:`~kavalai.RagService`.
+It is the UI counterpart to :class:`~kavalai.PostgresRagService` (see :doc:`../tutorials/rag`).
 
 .. image:: /_static/ui/rag.png
    :alt: RAG query page with embedding model, collection and top-k controls

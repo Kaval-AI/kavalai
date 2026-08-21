@@ -8,7 +8,8 @@ that hosts three kinds of tool behind one calling convention. Routing actions
 through one typed kernel keeps a pipeline observable (every call is the same
 shape) and safe (every argument and return value is validated).
 
-For a hands-on walkthrough, see :doc:`../tutorials/agents`.
+For a hands-on walkthrough see :doc:`../tutorials/agents`; for the tools
+Kaval.AI already ships, see :doc:`../reference/tools`.
 
 Three tool kinds, one interface
 -------------------------------
@@ -86,8 +87,8 @@ Register a server, then its tools:
 MCP tools
 ---------
 
-For MCP, register a server and the kernel starts the process, speaks MCP over
-stdio, discovers the available tools, and routes calls to them:
+For MCP, register a server; the kernel starts the process, speaks MCP over
+stdio, discovers the tools it offers and routes calls to them:
 
 .. code-block:: python
 
@@ -96,6 +97,15 @@ stdio, discovers the available tools, and routes calls to them:
    kernel.register_mcp_server(McpServer(name=..., command=..., args=[...]))
    ...
    await kernel.close()   # shut the process(es) down
+
+.. warning::
+
+   Discovery happens when the server's session opens, and the session opens on
+   the **first call** to that server — not at registration. Until then
+   ``get_tool_descriptions()`` does not list its tools, so an agent handed a
+   freshly-registered MCP server is told it has none and will answer without
+   them. Make one call first (or address the tool from a ``function`` node) to
+   warm it up. See :doc:`../todo`.
 
 Both :class:`~kavalai.RestServer` and :class:`~kavalai.McpServer` are importable
 from the top-level :mod:`kavalai` package.

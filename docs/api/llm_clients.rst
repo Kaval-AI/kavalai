@@ -6,56 +6,41 @@ embedding providers. Every call returns a :class:`~kavalai.ModelCallStat` with
 token usage and timing, and structured output is validated against a Pydantic
 ``response_model``.
 
-Run in the browser
-------------------
+Providers
+---------
 
-The ``browser/`` provider runs a model entirely client-side over WebGPU — no API
-key, no server, no CORS. The same :func:`~kavalai.make_client` /
-:func:`~kavalai.make_embedding_client` factories you use on the server return a
-:class:`~kavalai.BrowserLLMClient` / :class:`~kavalai.BrowserEmbeddingClient`,
-so your code is identical apart from the ``provider/model`` string. The two
-snippets below have a **Run in browser ▶** button (the model id comes from the
-panel's dropdown):
+:func:`~kavalai.make_client` builds a client from a ``"provider/model"`` id and
+reads the matching credential from the environment:
 
-.. code-block:: python
-   :class: run-in-browser
+.. list-table::
+   :header-rows: 1
+   :widths: 18 34 48
 
-   from kavalai import make_client
+   * - Prefix
+     - Class
+     - Credential
+   * - ``openai/``
+     - :class:`~kavalai.OpenAIClient`
+     - ``OPENAI_API_KEY``
+   * - ``gemini/``
+     - :class:`~kavalai.GeminiClient`
+     - ``GEMINI_API_KEY``
+   * - ``anthropic/``
+     - :class:`~kavalai.AnthropicClient`
+     - ``ANTHROPIC_API_KEY``
+   * - ``ollama/``
+     - :class:`~kavalai.OllamaClient`
+     - ``OLLAMA_HOST`` (no key)
+   * - ``browser/``
+     - :class:`~kavalai.BrowserLLMClient`
+     - none — runs client-side over WebGPU
 
-   client = make_client(f"browser/{KAVAL_BROWSER_MODEL}")
-   colours = await client.prompt("Name the three primary colours, comma-separated.")
-   print(colours)
+:func:`~kavalai.make_embedding_client` mirrors it for embeddings, adding the
+``fastembed/`` prefix for local, key-free embedding.
 
-Embeddings work the same way. Embedding models are distinct from chat models;
-``KAVAL_BROWSER_EMBED_MODEL`` is a small, full-precision Snowflake Arctic model:
-
-.. code-block:: python
-   :class: run-in-browser
-
-   from kavalai import make_embedding_client
-
-   client = make_embedding_client(f"browser/{KAVAL_BROWSER_EMBED_MODEL}")
-   texts = [
-       "Tallinn is the capital of Estonia.",
-       "Estonia's capital city is Tallinn.",
-       "I had pasta for dinner last night.",
-   ]
-   vectors, stats = await client.compute_embeddings(texts, normalize=True)
-   print(f"{len(vectors)} vectors of dimension {len(vectors[0])}")
-
-   # Vectors are L2-normalised, so cosine similarity is just their dot product.
-   def similarity(a, b):
-       return sum(x * y for x, y in zip(a, b))
-
-   print(f"sim(0, 1) = {similarity(vectors[0], vectors[1]):.3f}  # same meaning")
-   print(f"sim(0, 2) = {similarity(vectors[0], vectors[2]):.3f}  # unrelated")
-
-.. note::
-
-   ``browser/`` models need a WebGPU-capable browser (recent Chrome/Edge, or
-   Firefox with ``dom.webgpu.enabled``). The model downloads on first use and is
-   cached by the browser. Outside the browser, use an ``openai/``, ``gemini/``,
-   ``anthropic/`` or ``ollama/`` model instead.
+The ``browser/`` provider needs a WebGPU-capable page rather than a Python
+process; see :doc:`/tutorials/run_in_browser` for what it can do and how models
+are downloaded and cached.
 
 Base client and models
 ----------------------
