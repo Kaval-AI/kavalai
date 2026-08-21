@@ -286,6 +286,67 @@ class SwitchNode(BaseNode):
     default: Optional[str] = None
 
 
+class ParallelNode(BaseNode):
+    """Fan-out node: runs several independent branches concurrently.
+
+    Each name in ``branches`` is the **entry node of a branch** — a subgraph
+    walked exactly like the main graph, up to (and not including) the join
+    node named by ``next``. All branches start together, and the run continues
+    at ``next`` once every branch has reached it.
+
+    Branches each get their own copy of the run context, so a node in one
+    branch cannot see another branch's outputs while they run; the outputs are
+    merged back into the parent context at the join. Because of that, branches
+    must be independent, which the graph validator enforces at load time:
+
+    * branch subgraphs must be disjoint from each other,
+    * no two branches may write the same ``output`` variable,
+    * a branch may not contain an ``end`` node or re-enter the ``parallel``
+      node itself.
+
+    Loops, ``if``/``switch`` routing and nested ``parallel`` nodes inside a
+    branch are all fine.
+
+    .. code-block:: yaml
+
+       - name: gather
+         type: parallel
+         branches: [fetch_weather, fetch_news]
+         next: summarise
+         max_concurrency: 4
+
+    Attributes:
+        branches: Entry node of each branch. Branches run concurrently.
+        next: The join node; every branch ends by transitioning to it, and the
+            run resumes there once all branches have arrived.
+        max_concurrency: Cap on branches running at once (``None`` = all of
+            them). Useful when the branches hit a rate-limited provider.
+    """
+
+    type: Literal["parallel"] = "parallel"
+    branches: list[str]
+    next: str
+    max_concurrency: Optional[int] = None
+
+    @model_validator(mode="after")
+    def check_branches(self) -> "ParallelNode":
+        if not self.branches:
+            raise ValueError(
+                f"Parallel node '{self.name}': 'branches' must name at least one node."
+            )
+        if len(self.branches) != len(set(self.branches)):
+            dupes = {b for b in self.branches if self.branches.count(b) > 1}
+            raise ValueError(
+                f"Parallel node '{self.name}': duplicate branch entries "
+                f"{sorted(dupes)}."
+            )
+        if self.max_concurrency is not None and self.max_concurrency < 1:
+            raise ValueError(
+                f"Parallel node '{self.name}': 'max_concurrency' must be >= 1."
+            )
+        return self
+
+
 Node = Annotated[
     Union[
         StartNode,
@@ -295,6 +356,7 @@ Node = Annotated[
         FunctionNode,
         IfNode,
         SwitchNode,
+        ParallelNode,
     ],
     Field(discriminator="type"),
 ]
@@ -432,7 +494,95 @@ class WorkflowGraph(BaseModel):
                     f"Node '{node.name}' output '{output}' is not declared in data_types."
                 )
 
+        # Branches of a 'parallel' node run concurrently on private copies of
+        # the run context, so they have to be independent. That is checkable
+        # here, once, instead of racing at run time.
+        for node in self.nodes:
+            if isinstance(node, ParallelNode):
+                self._validate_parallel(node)
+
         return self
+
+    def _validate_parallel(self, node: "ParallelNode") -> None:
+        """Check that a ``parallel`` node's branches can safely run together."""
+        node_map = self.node_map
+        start_name = self.start
+        reach: dict[str, list[str]] = {}
+
+        for entry in node.branches:
+            if entry == node.next:
+                raise ValueError(
+                    f"Parallel node '{node.name}': branch '{entry}' is also the "
+                    f"join node ('next'), so the branch is empty."
+                )
+            branch = self._reachable(entry, stop_at=node.next, node_map=node_map)
+            reach[entry] = branch
+
+            if node.name in branch:
+                raise ValueError(
+                    f"Parallel node '{node.name}': branch '{entry}' loops back "
+                    f"into the parallel node itself. A branch must rejoin at "
+                    f"'{node.next}'."
+                )
+            if start_name in branch:
+                raise ValueError(
+                    f"Parallel node '{node.name}': branch '{entry}' reaches the "
+                    f"start node '{start_name}'."
+                )
+            ends = [n for n in branch if isinstance(node_map[n], EndNode)]
+            if ends:
+                raise ValueError(
+                    f"Parallel node '{node.name}': branch '{entry}' can reach "
+                    f"end node '{ends[0]}'. A branch must rejoin at "
+                    f"'{node.next}'; only the main path may end the run."
+                )
+
+        # Disjoint subgraphs: a node shared by two branches would execute twice,
+        # concurrently, against two different contexts.
+        entries = list(node.branches)
+        for i, left in enumerate(entries):
+            for right in entries[i + 1 :]:
+                shared = sorted(set(reach[left]) & set(reach[right]))
+                if shared:
+                    raise ValueError(
+                        f"Parallel node '{node.name}': branches '{left}' and "
+                        f"'{right}' share node(s) {shared}. Branch subgraphs "
+                        f"must be disjoint."
+                    )
+
+        # Disjoint writes: two branches writing one context variable is a race
+        # whose winner depends on which branch finishes last.
+        writes = {
+            entry: {
+                getattr(node_map[n], "output")
+                for n in names
+                if getattr(node_map[n], "output", None) is not None
+            }
+            for entry, names in reach.items()
+        }
+        for i, left in enumerate(entries):
+            for right in entries[i + 1 :]:
+                clash = sorted(writes[left] & writes[right])
+                if clash:
+                    raise ValueError(
+                        f"Parallel node '{node.name}': branches '{left}' and "
+                        f"'{right}' both write {clash}. Each branch must write "
+                        f"its own output variable."
+                    )
+
+    def _reachable(
+        self, entry: str, *, stop_at: str, node_map: dict[str, "Node"]
+    ) -> list[str]:
+        """Node names reachable from ``entry`` without passing through ``stop_at``."""
+        seen: list[str] = []
+        pending = [entry]
+        while pending:
+            current = pending.pop()
+            if current == stop_at or current in seen:
+                continue
+            seen.append(current)
+            pending.extend(self._transition_targets(node_map[current]))
+        return seen
 
     @staticmethod
     def _transition_targets(node: "Node") -> list[str]:
@@ -444,6 +594,8 @@ class WorkflowGraph(BaseModel):
             if node.default is not None:
                 targets.append(node.default)
             return targets
+        if isinstance(node, ParallelNode):
+            return [*node.branches, node.next]
         if isinstance(node, EndNode):
             return []
         return [node.next]

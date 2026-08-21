@@ -167,9 +167,30 @@ async def test_anthropic_parameters():
 
     call_kwargs = stream_mock.call_args.kwargs
     assert call_kwargs["temperature"] == 0.0
-    assert call_kwargs["top_p"] == 1.0
+    # The Messages API rejects a request carrying both sampling parameters, so
+    # top_p is dropped when temperature is also set.
+    assert "top_p" not in call_kwargs
     assert call_kwargs["service_tier"] == "auto"
     assert call_kwargs["max_tokens"] == DEFAULT_MAX_TOKENS
+
+
+@pytest.mark.asyncio
+async def test_anthropic_top_p_sent_when_temperature_unset():
+    params = LlmClientParameters(top_p=0.9)
+    client = AnthropicClient(
+        model="claude-haiku-4-5", llm_client_parameters=params, api_key="fake"
+    )
+
+    chat_history = ChatHistory(messages=[ChatMessage(role="user", content="Say 'Hi'")])
+    stream_mock = mock_stream(client, [make_text_event("Hi")], make_final_message())
+
+    streamer = await client.stream_chat_completions(chat_history=chat_history)
+    async for _ in streamer:
+        pass
+
+    call_kwargs = stream_mock.call_args.kwargs
+    assert call_kwargs["top_p"] == 0.9
+    assert "temperature" not in call_kwargs
 
 
 @pytest.mark.asyncio

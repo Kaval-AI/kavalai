@@ -796,9 +796,12 @@ async def projects_remove_member(project_id: UUID, user_id: UUID, request: Reque
 
 
 if __name__ == "__main__":
+    # Only the entry point reads the environment; the rest of the module takes
+    # its configuration from arguments.
     config = uvicorn.Config(
         "kavalai.backoffice.server:app",
-        port=8000,
+        host=os.environ.get("KAVALAI_BO_HOST", "127.0.0.1"),
+        port=int(os.environ.get("KAVALAI_BO_PORT", "8000")),
         log_level="info",
         reload=True,
         access_log=True,

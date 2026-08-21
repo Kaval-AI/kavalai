@@ -20,7 +20,8 @@ The diagram shows each node by name and connects them with arrows following the
 workflow's transitions (the output of one node flows to the next). Branch nodes
 mark the deciding condition on each outgoing arrow: an ``if`` labels its arrows
 with the condition and ``else``; a ``switch`` labels each arrow with the case it
-matches (plus ``default``).
+matches (plus ``default``). A ``parallel`` node draws one arrow per branch; the
+join is where those branches' arrows converge.
 
 ``render_workflow_svg`` accepts either a :class:`~kavalai.WorkflowGraph` or the
 plain ``dict`` JSON the backoffice stores for an agent, so the same renderer
@@ -40,6 +41,7 @@ _NODE_COLORS = {
     "function": ("#0891b2", "#0e7490"),
     "if": ("#d97706", "#b45309"),
     "switch": ("#d97706", "#b45309"),
+    "parallel": ("#4f46e5", "#4338ca"),
 }
 _DEFAULT_COLOR = ("#475569", "#334155")
 
@@ -95,6 +97,12 @@ def _node_edges(node: dict) -> list[tuple[str, Optional[str]]]:
         default = node.get("default")
         if default:
             edges.append((default, "default"))
+    elif node_type == "parallel":
+        # One arrow per branch. The join (``next``) needs no arrow of its own:
+        # every branch's last node already transitions to it.
+        for target in node.get("branches") or []:
+            if target:
+                edges.append((target, None))
     elif node_type != "end":
         nxt = node.get("next")
         if nxt:

@@ -26,6 +26,7 @@ from kavalai.workflow.models import (
     IfNode,
     LLMNode,
     McpServer,
+    ParallelNode,
     PythonFunction,
     RestServer,
     StartNode,
@@ -257,6 +258,31 @@ class WorkflowBuilder:
                 next=next,
                 inputs=_coerce_inputs(inputs),
                 method=method,
+            )
+        )
+        return self
+
+    def parallel(
+        self,
+        name: str,
+        *,
+        branches: list[str],
+        next: str,
+        max_concurrency: Optional[int] = None,
+    ) -> "WorkflowBuilder":
+        """Fan out to independent branches and rejoin at ``next``.
+
+        Each entry in ``branches`` names the first node of a branch; every
+        branch is walked concurrently up to ``next``. Branch subgraphs must be
+        disjoint and must not write the same output variable — both are checked
+        by :meth:`build`.
+        """
+        self._nodes.append(
+            ParallelNode(
+                name=name,
+                branches=branches,
+                next=next,
+                max_concurrency=max_concurrency,
             )
         )
         return self

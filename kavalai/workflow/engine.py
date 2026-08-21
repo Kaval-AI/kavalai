@@ -39,6 +39,7 @@ from kavalai.workflow.models import (
     IfNode,
     LLMNode,
     Node,
+    ParallelNode,
     SwitchNode,
     WorkflowException,
     WorkflowGraph,
@@ -55,6 +56,29 @@ from kavalai.llm_clients.streamer import StreamContent
 ClientFactory = Callable[..., BaseLlmClient]
 
 DEFAULT_MAX_NODE_VISITS = 1000
+
+
+class _VisitBudget:
+    """Shared node-visit counter for one run.
+
+    A run may walk several paths at once (``parallel`` branches), so the loop
+    guard has to be counted per run rather than per walk — otherwise N branches
+    each get the full budget.
+    """
+
+    __slots__ = ("limit", "used")
+
+    def __init__(self, limit: int):
+        self.limit = limit
+        self.used = 0
+
+    def spend(self) -> None:
+        self.used += 1
+        if self.used > self.limit:
+            raise WorkflowException(
+                f"Exceeded max node visits ({self.limit}); "
+                "the workflow may contain an infinite loop."
+            )
 
 
 def make_prompt(prompt: str, input_data: dict) -> str:
@@ -395,7 +419,11 @@ class WorkflowEngine:
         return node.next
 
     async def _execute_node(
-        self, node: Node, run_context: RunContext
+        self,
+        node: Node,
+        run_context: RunContext,
+        state: WorkflowState,
+        budget: "_VisitBudget",
     ) -> AsyncGenerator[WorkflowStreamEvent, None]:
         """Run a side-effecting node (branch nodes are pure routing)."""
         if isinstance(node, LLMNode):
@@ -406,7 +434,132 @@ class WorkflowEngine:
                 yield event
         elif isinstance(node, FunctionNode):
             await self._run_function_node(node, run_context)
+        elif isinstance(node, ParallelNode):
+            async for event in self._run_parallel_node(
+                node, run_context, state, budget
+            ):
+                yield event
         # start / if / switch / end nodes have no side effects here.
+
+    # ------------------------------------------------------------------ parallel
+    @staticmethod
+    def _branch_context(parent: RunContext) -> RunContext:
+        """A private context for one branch, seeded with the parent's data.
+
+        The copy is shallow: branches read the same input objects but write
+        their own keys, so nothing they produce is visible to a sibling until
+        :meth:`_merge_branch_contexts` runs at the join.
+        """
+        return RunContext(
+            agent_id=parent.agent_id,
+            session_id=parent.session_id,
+            run_id=parent.run_id,
+            data=dict(parent.data),
+            templates=parent.templates,
+            agent_service=parent.agent_service,
+        )
+
+    @staticmethod
+    def _merge_branch_contexts(
+        parent: RunContext, branch_contexts: list[RunContext]
+    ) -> None:
+        """Copy each branch's writes back into the parent context.
+
+        Only entries a branch actually replaced are copied — everything else is
+        still the identical object the branch was seeded with. The graph
+        validator guarantees no two branches write the same key, so the merge
+        order cannot matter.
+        """
+        for context in branch_contexts:
+            for key, value in context.data.items():
+                if key not in parent.data or parent.data[key] is not value:
+                    parent.data[key] = value
+
+    async def _run_parallel_node(
+        self,
+        node: ParallelNode,
+        run_context: RunContext,
+        state: WorkflowState,
+        budget: "_VisitBudget",
+    ) -> AsyncGenerator[WorkflowStreamEvent, None]:
+        """Walk every branch concurrently and rejoin at ``node.next``.
+
+        Events from all branches are interleaved onto one stream as they are
+        produced; each carries its own node name, so a client can tell them
+        apart. Node traces are kept per branch and appended in branch order, so
+        ``state.trace`` stays deterministic even though execution is not.
+        """
+        contexts = [self._branch_context(run_context) for _ in node.branches]
+        traces: list[list[str]] = [[] for _ in node.branches]
+        queue: asyncio.Queue = asyncio.Queue()
+        limit = (
+            asyncio.Semaphore(node.max_concurrency)
+            if node.max_concurrency is not None
+            else None
+        )
+
+        async def walk_branch(index: int, entry: str) -> None:
+            try:
+                if limit is not None:
+                    await limit.acquire()
+                try:
+                    async for event in self._walk_from(
+                        entry,
+                        contexts[index],
+                        state,
+                        budget,
+                        trace=traces[index],
+                        stop_at=node.next,
+                        record_state=False,
+                    ):
+                        queue.put_nowait(("event", event))
+                finally:
+                    if limit is not None:
+                        limit.release()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # surfaced to the driver below
+                queue.put_nowait(("error", exc))
+                return
+            queue.put_nowait(("done", None))
+
+        tasks = [
+            asyncio.create_task(walk_branch(i, entry), name=f"{node.name}:{entry}")
+            for i, entry in enumerate(node.branches)
+        ]
+        logger.debug(
+            f"Parallel node '{node.name}' fanning out to {len(tasks)} branch(es): "
+            f"{', '.join(node.branches)}"
+        )
+        try:
+            remaining = len(tasks)
+            while remaining:
+                kind, payload = await queue.get()
+                if kind == "event":
+                    yield payload
+                elif kind == "done":
+                    remaining -= 1
+                else:
+                    # One branch failed: stop the siblings before propagating,
+                    # so a long-running branch cannot outlive the run.
+                    await self._cancel_all(tasks)
+                    raise payload
+        finally:
+            await self._cancel_all(tasks)
+
+        for trace in traces:
+            state.trace.extend(trace)
+        self._merge_branch_contexts(run_context, contexts)
+
+    @staticmethod
+    async def _cancel_all(tasks: list[asyncio.Task]) -> None:
+        """Cancel any still-running branch tasks and wait for them to unwind."""
+        pending = [t for t in tasks if not t.done()]
+        if not pending:
+            return
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
 
     # ----------------------------------------------------------------------- run
     async def run(
@@ -577,27 +730,70 @@ class WorkflowEngine:
     async def _walk(
         self, run_context: RunContext, state: WorkflowState
     ) -> AsyncGenerator[WorkflowStreamEvent, None]:
-        current: Optional[str] = self.graph.start
-        visits = 0
+        """Walk the whole graph, from the start node to an end node."""
+        async for event in self._walk_from(
+            self.graph.start,
+            run_context,
+            state,
+            _VisitBudget(self.max_node_visits),
+            trace=state.trace,
+        ):
+            yield event
+
+    async def _walk_from(
+        self,
+        start: str,
+        run_context: RunContext,
+        state: WorkflowState,
+        budget: "_VisitBudget",
+        *,
+        trace: list[str],
+        stop_at: Optional[str] = None,
+        record_state: bool = True,
+    ) -> AsyncGenerator[WorkflowStreamEvent, None]:
+        """Walk the graph from ``start`` until an end node — or ``stop_at``.
+
+        The main path walks with ``stop_at=None`` and ``record_state=True``;
+        a ``parallel`` branch walks its own subgraph with ``stop_at`` set to the
+        join node and ``record_state`` off, so concurrent branches do not
+        overwrite each other's view of ``state.current_node`` / ``state.data``.
+
+        Args:
+            start: Node to begin at.
+            run_context: Context the walked nodes read and write.
+            state: Run state; lifecycle fields are only touched when
+                ``record_state`` is set.
+            budget: Run-wide node-visit guard, shared by every concurrent walk.
+            trace: List each executed node name is appended to.
+            stop_at: Node name to stop *before* (the join of a parallel node).
+            record_state: Whether to publish progress onto ``state``.
+        """
+        current: Optional[str] = start
 
         while current is not None:
+            if current == stop_at:
+                return
             node = self.node_map[current]
-            visits += 1
-            if visits > self.max_node_visits:
-                raise WorkflowException(
-                    f"Exceeded max node visits ({self.max_node_visits}); "
-                    "the workflow may contain an infinite loop."
-                )
+            budget.spend()
 
-            state.current_node = node.name
+            if record_state:
+                state.current_node = node.name
             yield WorkflowStreamEvent(type="node_started", name=node.name)
-            async for event in self._execute_node(node, run_context):
+            async for event in self._execute_node(node, run_context, state, budget):
                 yield event
-            state.trace.append(node.name)
-            state.data = to_plain(run_context.data)
+            trace.append(node.name)
+            if record_state:
+                state.data = to_plain(run_context.data)
             yield WorkflowStreamEvent(type="node_completed", name=node.name)
 
             if isinstance(node, EndNode):
+                if not record_state:
+                    # The graph validator rejects end nodes inside a parallel
+                    # branch; this is the belt-and-braces version.
+                    raise WorkflowException(
+                        f"End node '{node.name}' was reached inside a parallel "
+                        "branch; only the main path may end a run."
+                    )
                 await self._finish(node, run_context, state)
                 return
 
@@ -605,7 +801,7 @@ class WorkflowEngine:
 
         # A non-end node with no outgoing transition (switch with no default match).
         raise WorkflowException(
-            f"Workflow halted at node '{state.current_node}' with no next node "
+            f"Workflow halted at node '{node.name}' with no next node "
             "and without reaching an end node."
         )
 
