@@ -22,8 +22,8 @@ With ``pip``:
    source .venv/bin/activate
    pip install "kavalai[common]"
 
-Which extra?
-------------
+Choosing an extra
+-----------------
 
 The bare ``kavalai`` package is deliberately small and provider-agnostic: it is
 restricted to libraries that also work under Pyodide, so the core can run in a

@@ -11,7 +11,7 @@ chatbot below.
 A chatbot running in this page
 ------------------------------
 
-Before the details, here is the thing itself: a complete Kaval.AI workflow — a
+Before the details, here is the artefact itself: a complete Kaval.AI workflow — a
 one-node chatbot with structured output and memory — running entirely in your
 browser. No server, no API key, nothing sent anywhere.
 
@@ -31,7 +31,7 @@ one.
 Why run in the browser
 ----------------------
 
-The browser is a surprisingly good place to *ship* an agent when you would
+The browser is an unexpectedly suitable place to *ship* an agent where one would
 rather not run infrastructure:
 
 * **No infrastructure.** There is no server to deploy, scale or pay for, and no
@@ -45,7 +45,7 @@ rather not run infrastructure:
 The trade-off is capacity: you are limited to **small** open models and need a
 WebGPU-capable browser (recent Chrome/Edge, or Firefox with
 ``dom.webgpu.enabled``). For heavy reasoning you will still want a hosted
-provider (see :doc:`llm_clients`) — but for a lot of agentic UI work, in-browser
+provider (see :doc:`llm_clients`) — but for much agentic interface work, in-browser
 is enough.
 
 To embed the playground on your own page (or self-host it), see the
@@ -76,7 +76,8 @@ your code as ``KAVAL_BROWSER_MODEL`` (and the embedding model as
    from kavalai import make_client
 
    client = make_client(f"browser/{KAVAL_BROWSER_MODEL}")
-   print(f"Loading {KAVAL_BROWSER_MODEL} (first run downloads it; then it's cached)…")
+   print(f"Loading {KAVAL_BROWSER_MODEL} "
+         "(the first run downloads it; afterwards it is cached)…")
    print(await client.prompt("Say hello in one short sentence."))
 
 Embeddings in the browser
@@ -85,7 +86,7 @@ Embeddings in the browser
 Embeddings work the same way through ``make_embedding_client``. Embedding models
 are small and distinct from chat models; ``snowflake-arctic-embed-s`` runs even
 on GPUs without FP16. ``compute_embeddings`` returns ``(vectors, stats)``;
-``normalize=True`` gives unit vectors, so cosine similarity is just a dot
+``normalize=True`` yields unit vectors, so cosine similarity reduces to a dot
 product:
 
 .. code-block:: python
@@ -103,7 +104,7 @@ A RAG you can query in the browser
 
 In production, retrieval-augmented generation uses :doc:`rag` backed by Postgres
 + pgvector. The browser has no pgvector — but for a **pre-built, read-only**
-corpus you don't need it: embed the documents, embed the query, and rank by
+corpus it is unnecessary: embed the documents, embed the query, and rank by
 cosine similarity in a few lines of Python. Then hand the best matches to the
 model. The whole loop — retrieve **and** generate — runs in the page:
 
@@ -112,7 +113,7 @@ model. The whole loop — retrieve **and** generate — runs in the page:
 
    from kavalai import make_client, make_embedding_client
 
-   # A tiny lyric corpus. (For a real corpus you pre-build this offline — below.)
+   # A small lyric corpus. A real corpus is pre-built offline; see below.
    lyrics = [
        "Is this the real life? Is this just fantasy?",
        "We will, we will rock you",
@@ -124,12 +125,18 @@ model. The whole loop — retrieve **and** generate — runs in the page:
 
    # Embed the question with the *same* model and rank by cosine similarity.
    question = "Which song is about silence?"
-   (q_vector,), _ = await embedder.compute_embeddings([question], normalize=True)
+   (q_vector,), _ = await embedder.compute_embeddings(
+       [question], normalize=True
+   )
 
    def cosine(a, b):
        return sum(x * y for x, y in zip(a, b))  # unit vectors -> dot product
 
-   ranked = sorted(zip(lyrics, doc_vectors), key=lambda d: cosine(q_vector, d[1]), reverse=True)
+   ranked = sorted(
+       zip(lyrics, doc_vectors),
+       key=lambda d: cosine(q_vector, d[1]),
+       reverse=True,
+   )
    top = [line for line, _ in ranked[:2]]
    print("Retrieved:", top)
 
@@ -175,7 +182,7 @@ Run this once, locally, over the song lyrics in ``local_data/``:
 
    asyncio.run(build())
 
-Then, in the browser, **fetch** the pre-built index and query it — only the tiny
+Then, in the browser, **fetch** the pre-built index and query it — only the small
 query embedding is computed on the device:
 
 .. code-block:: python
@@ -188,12 +195,18 @@ query embedding is computed on the device:
    index = await response.json()
 
    embedder = make_embedding_client(f"browser/{KAVAL_BROWSER_EMBED_MODEL}")
-   (q_vector,), _ = await embedder.compute_embeddings(["heartbreak and rain"], normalize=True)
+   (q_vector,), _ = await embedder.compute_embeddings(
+       ["heartbreak and rain"], normalize=True
+   )
 
    def cosine(a, b):
        return sum(x * y for x, y in zip(a, b))
 
-   ranked = sorted(index, key=lambda song: cosine(q_vector, song["embedding"]), reverse=True)
+   ranked = sorted(
+       index,
+       key=lambda song: cosine(q_vector, song["embedding"]),
+       reverse=True,
+   )
    for song in ranked[:3]:
        print(f"{song['artist']} — {song['title']}")
 

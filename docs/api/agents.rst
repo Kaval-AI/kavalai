@@ -23,6 +23,15 @@ Agent service & persistence
 
 .. automodule:: kavalai.backoffice.sessions
 
+Database models
+---------------
+
+The ORM models below define the agent runtime schema. Their purpose and
+relationships are described in :doc:`../guides/data_model`.
+
+.. automodule:: kavalai.db
+   :exclude-members: VectorType, Base, metadata, registry
+
 Remote agent client
 --------------------
 

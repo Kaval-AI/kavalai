@@ -12,7 +12,9 @@ Load one with:
 
    from kavalai import WorkflowEngine
 
-   engine = WorkflowEngine.from_yaml_path("support_agent.yaml", agent_service=service)
+   engine = WorkflowEngine.from_yaml_path(
+       "support_agent.yaml", agent_service=service
+   )
    state = await engine.run({"user_message": "I want a refund"})
 
 ``from_yaml`` (a string) and ``from_dict`` (an already-parsed dict) take the same
@@ -318,6 +320,60 @@ Evaluates ``expr``, converts the result to a string, and matches it against
 
 If no case matches and there is no ``default``, the run fails with a
 :class:`~kavalai.WorkflowException`.
+
+parallel
+^^^^^^^^
+
+Runs several independent branches concurrently and rejoins them at a single
+node.
+
+.. code-block:: yaml
+
+   - name: gather
+     type: parallel
+     branches: [fetch_weather, fetch_news, fetch_stocks]
+     next: summarise
+     max_concurrency: 4
+
+Each name in ``branches`` is the **entry node of a branch** — an ordinary
+subgraph, walked exactly as the main graph is, up to but not including the join.
+All branches start together, and the run resumes at ``next`` once every branch
+has arrived there.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 78
+
+   * - Key
+     - Meaning
+   * - ``branches``
+     - Entry node of each branch. At least one, and no duplicates.
+   * - ``next``
+     - The join node. Every branch ends by transitioning to it.
+   * - ``max_concurrency``
+     - Optional cap on how many branches run at once. Omit it to run them all;
+       set it when the branches share a rate-limited provider.
+
+Each branch receives its own copy of the run context, so a node in one branch
+cannot observe a sibling's output while both are running; outputs are merged
+into the parent context at the join. Because branches must therefore be
+independent, the graph validator rejects a workflow at load time if branch
+subgraphs overlap, if two branches write the same ``output`` variable, or if a
+branch contains an ``end`` node or re-enters the ``parallel`` node itself.
+
+Loops, ``if`` / ``switch`` routing and nested ``parallel`` nodes inside a branch
+are all permitted.
+
+Three properties of a fan-out are worth knowing when reading a run back. Branch
+events interleave onto the single event stream as they are produced, each
+tagged with its own node name, so a streaming client can separate them. The
+recorded trace, by contrast, collects each branch's nodes and appends them in
+declaration order, so ``state.trace`` is stable across runs even though the
+execution is not. And the first branch to raise cancels its siblings and
+propagates, so a failed run does not leave a long branch running behind it.
+
+Note that tool calls made *within* a single ``agent`` node already execute
+concurrently; ``parallel`` concerns concurrency between nodes.
 
 Node inputs
 -----------

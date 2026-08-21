@@ -1,7 +1,7 @@
 Cookbook
 ========
 
-Short, self-contained recipes for things people actually build. Each one is
+Short, self-contained recipes for the tasks practitioners most often build. Each is
 complete enough to paste into a file and run once you have set a provider key,
 and each was executed while writing this page.
 
@@ -49,10 +49,18 @@ engine replays that conversation's history into each ``llm`` node.
            .llm("reply", prompt="You are a warm, concise guide to Green Village.",
                 inputs={"message": "input"}, output="output", next="end")
            .end()
-           .build_engine(agent_service=AgentService(db_manager.get_sqlite_sessionmaker()))
+           .build_engine(
+               agent_service=AgentService(
+                   db_manager.get_sqlite_sessionmaker()
+               )
+           )
        )
 
-       for turn in ["I'm Agnes, visiting on Friday.", "What did I say my name was?"]:
+       turns = [
+           "I'm Agnes, visiting on Friday.",
+           "What did I say my name was?",
+       ]
+       for turn in turns:
            state = await bot.run({"user_message": turn}, external_id="villager-42")
            print(f"> {turn}\n  {state.output_data['agent_response']}")
 
@@ -144,7 +152,11 @@ SQLite index.
                next="end",
            )
            .end()
-           .build_engine(agent_service=AgentService(db_manager.get_sqlite_sessionmaker()))
+           .build_engine(
+               agent_service=AgentService(
+                   db_manager.get_sqlite_sessionmaker()
+               )
+           )
        )
        engine.kernel.register_python_tool("search_village", search_village)
 
@@ -239,7 +251,8 @@ to the model nor callable.
    kernel = FunctionKernel()
    kernel.register_python_tool("web.search", web_search)
    kernel.register_python_tool("web.crawl", crawl_url)
-   kernel.register_python_tool("db.delete_customer", delete_customer)   # not for agents!
+   # Registered on the kernel, but withheld from the agent below.
+   kernel.register_python_tool("db.delete_customer", delete_customer)
 
    researcher = Agent(
        llm_client=make_client("openai/gpt-5.4-mini"),
@@ -305,7 +318,7 @@ Streaming a run to a UI
 
 Turn on ``stream_output`` for the node whose text the user should watch, then
 forward the events. ``stream_delta`` sends only new text per chunk, which is
-what you want for long answers.
+what is wanted for long answers.
 
 .. code-block:: python
 
@@ -321,7 +334,8 @@ what you want for long answers.
        .build_engine(agent_service=service)
    )
 
-   async for event in engine.run_stream({"user_message": "Tell me about the tower."}):
+   question = {"user_message": "Tell me about the tower."}
+   async for event in engine.run_stream(question):
        if event.type == "partial" and event.name == "reply":
            print(event.value, end="", flush=True)
        elif event.type == "workflow_failed":
@@ -330,10 +344,11 @@ what you want for long answers.
 Over HTTP, ``POST /stream_agent`` serves these same events as Server-Sent
 Events — see :doc:`../tutorials/serving`.
 
-Extracting structured records from messy text
-----------------------------------------------
+Extracting structured records from unstructured text
+----------------------------------------------------
 
-The most reliably useful thing an LLM does: turn prose into a typed record.
+The most reliably useful operation a language model performs: turning prose
+into a typed record.
 Nested models and lists work, so one call can return a whole document.
 
 .. code-block:: python
@@ -356,7 +371,9 @@ Nested models and lists work, so one call can return a whole document.
    class ActionItem(BaseModel):
        owner: str
        task: str
-       due: str | None = Field(default=None, description="Deadline if one was stated.")
+       due: str | None = Field(
+           default=None, description="Deadline if one was stated."
+       )
 
 
    class Minutes(BaseModel):
@@ -469,7 +486,9 @@ node decides whether to go round again, and a counter keeps the loop finite.
        next: critique
      - name: finish
        type: llm
-       prompt: "Return the final notice text unchanged in agent_response: {{ context.draft.text }}"
+       prompt: >
+         Return the final notice text unchanged in agent_response:
+         {{ context.draft.text }}
        inputs: {draft: {type: context, value: draft}}
        output: output
        next: end
@@ -500,7 +519,8 @@ The trace records the loop, so you can see exactly how many rounds it took:
 
 .. code-block:: text
 
-   trace   : start → write → critique → count → decide → revise → critique → count → decide → finish → end
+   trace   : start → write → critique → count → decide → revise
+             → critique → count → decide → finish → end
    attempts: {'count': 2}
    approved: True
 
@@ -604,10 +624,14 @@ the figures stay per-run no matter how much they overlap:
 
 .. code-block:: text
 
-   {'model_calls': 1, 'prompt_tokens': 119, 'completion_tokens': 29, 'total_tokens': 148}
-   {'model_calls': 1, 'prompt_tokens': 122, 'completion_tokens': 37, 'total_tokens': 159}
-   {'model_calls': 1, 'prompt_tokens': 120, 'completion_tokens': 34, 'total_tokens': 154}
-   {'model_calls': 1, 'prompt_tokens': 116, 'completion_tokens': 30, 'total_tokens': 146}
+   {'model_calls': 1, 'prompt_tokens': 119,
+    'completion_tokens': 29, 'total_tokens': 148}
+   {'model_calls': 1, 'prompt_tokens': 122,
+    'completion_tokens': 37, 'total_tokens': 159}
+   {'model_calls': 1, 'prompt_tokens': 120,
+    'completion_tokens': 34, 'total_tokens': 154}
+   {'model_calls': 1, 'prompt_tokens': 116,
+    'completion_tokens': 30, 'total_tokens': 146}
 
 Sharing the engine is in fact the better shape: it parses the workflow once and
 keeps one set of tool-server connections, which matters when the workflow
@@ -629,7 +653,8 @@ with the session carrying the state.
    )
    show_to_reviewer(draft.output_data["agent_response"])
 
-   # …the human decides, minutes or days later…
+   # The reviewer decides here. That may take minutes or days; the
+   # process is free to exit in the meantime.
 
    # Run 2 — same session, so the draft and its context are already in history.
    final = await engine.run(
@@ -654,7 +679,8 @@ Token usage is aggregated per run, and every individual call is recorded.
    state = await engine.run({"user_message": "Is the pub open on Sundays?"})
 
    print(state.token_usage)
-   # {'model_calls': 2, 'prompt_tokens': 181, 'completion_tokens': 121, 'total_tokens': 302}
+   # {'model_calls': 2, 'prompt_tokens': 181,
+   #  'completion_tokens': 121, 'total_tokens': 302}
 
    for call in await service.get_model_call_stats(call_type="llm", limit=5):
        print(call.model, call.total_tokens, f"{call.duration_seconds:.2f}s")

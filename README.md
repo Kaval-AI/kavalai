@@ -6,24 +6,33 @@ Kaval.AI is an opinionated and elegant Python library for building production-gr
 
 
 Features:
-- Support commercial (OpenAI, Google, Anthropic) and open source LLM providers.
-  → [LLM clients](https://docs.kaval.ai/tutorials/llm_clients.html)
-- Runs in browser via WebLLM and Pyodide.
-  → [Running in the browser](https://docs.kaval.ai/tutorials/run_in_browser.html)
-- Excellent support for retrieval-augmented generation (RAG) on various storage engines.
-  → [RAG](https://docs.kaval.ai/tutorials/rag.html)
-- Structured inputs, outputs, tool calls and responses using Pydantic semantics.
-  → [Typed inputs and outputs](https://docs.kaval.ai/tutorials/agents.html#typed-inputs-and-outputs)
-- Streaming responses.
-  → [Streaming](https://docs.kaval.ai/tutorials/streamer.html)
-- Fully featured workflow engine using conditional processing and tool calling.
-  → [Workflows tutorial](https://docs.kaval.ai/tutorials/workflow.html),
-  [workflow concepts](https://docs.kaval.ai/guides/workflows.html)
-- Python tools, REST server endpoints (supports basic auth) and MCP support.
-  → [Tools](https://docs.kaval.ai/guides/tools.html),
-  [agent server API](https://docs.kaval.ai/api/server.html)
+- Support for commercial (OpenAI, Google, Anthropic) and open-source LLM
+  providers
+  (see [LLM clients](https://docs.kaval.ai/tutorials/llm_clients.html)).
+- Client-side execution in the browser through WebLLM and Pyodide
+  (see [running in the browser](https://docs.kaval.ai/tutorials/run_in_browser.html)).
+- Retrieval-augmented generation (RAG) over several storage engines
+  (see [RAG](https://docs.kaval.ai/tutorials/rag.html)).
+- Structured inputs, outputs, tool calls and responses expressed with Pydantic
+  semantics
+  (see [typed inputs and outputs](https://docs.kaval.ai/tutorials/agents.html#typed-inputs-and-outputs)).
+- Streaming responses
+  (see [streaming](https://docs.kaval.ai/tutorials/streamer.html)).
+- A complete workflow engine with conditional routing, parallel fan-out and
+  tool calling
+  (see [workflows tutorial](https://docs.kaval.ai/tutorials/workflow.html),
+  [workflow concepts](https://docs.kaval.ai/guides/workflows.html)).
+- Python tools, REST server endpoints (with basic authentication) and MCP
+  support
+  (see [tools](https://docs.kaval.ai/guides/tools.html),
+  [agent server API](https://docs.kaval.ai/api/server.html)).
+- Every session, run, node and model call recorded in a database you own
+  (see [architecture](https://docs.kaval.ai/tutorials/architecture.html),
+  [data model](https://docs.kaval.ai/guides/data_model.html)).
 
-See the [full documentation](https://docs.kaval.ai) for more detailed reference.
+See the [full documentation](https://docs.kaval.ai) for a more detailed
+reference. The design of the library, and the reasoning behind it, is set out
+in [Architecture](https://docs.kaval.ai/tutorials/architecture.html).
 
 ## Install
 
@@ -176,8 +185,7 @@ for hit in hits:
 In prompt engineering, you would then inject these results in the prompt to give LLM
 
 
-```Python
-# 2. Or hand those passages to a model and let it answer.
+```python
 PROMPT = """Answer the question using only the facts below.
 
 Facts:
@@ -189,8 +197,6 @@ Question: {question}
 context = "\n".join(f"- {hit.content}" for hit in hits)
 client = make_client("openai/gpt-5.4-mini")
 print(await client.prompt(PROMPT.format(context=context, question=question)))
-
-
 ```
 
 Response:

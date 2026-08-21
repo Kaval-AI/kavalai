@@ -61,7 +61,9 @@ offline with canned model output:
        def __init__(self, *args, **kwargs):
            super().__init__()
 
-       async def _run_chat_completions(self, chat_history, response_model, streamer):
+       async def _run_chat_completions(
+           self, chat_history, response_model, streamer
+       ):
            value_streamer = streamer.get_value_streamer(
                "response", response_model=response_model
            )

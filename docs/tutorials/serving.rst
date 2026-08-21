@@ -66,12 +66,15 @@ One request, one answer
 The workflow input goes in a ``data`` object. Two optional fields sit beside it:
 ``session_id`` continues an existing conversation, and ``external_id`` keys a
 session by an identifier from your own system — a user, ticket or thread id.
+Both address a row in the ``sessions`` table; see
+:doc:`../guides/data_model`.
 
 .. code-block:: bash
 
    curl -s -X POST localhost:10000/run_agent \
        -H 'Content-Type: application/json' \
-       -d '{"data": {"user_message": "The church bell has been stuck since Tuesday."},
+       -d '{"data":
+              {"user_message": "The church bell has been stuck since Tuesday."},
             "external_id": "villager-42"}'
 
 .. code-block:: json
@@ -79,7 +82,8 @@ session by an identifier from your own system — a user, ticket or thread id.
    {
      "session_id": "496e9b1a-7a69-486c-81be-cf30ec3581d6",
      "data": {
-       "agent_response": "I'm sorry to hear that. If you want, I can help you turn this into a clear report or notice…"
+       "agent_response": "I'm sorry to hear that. If you want, I can help
+                          you turn this into a clear report or notice…"
      }
    }
 
@@ -102,12 +106,14 @@ Streaming a run
 
    curl -N -X POST localhost:10000/stream_agent \
        -H 'Content-Type: application/json' \
-       -d '{"data": {"user_message": "Can I get a refund for the village hall booking?"}}'
+       -d '{"data":
+              {"user_message": "Can I get a refund for the village hall booking?"}}'
 
 .. code-block:: text
 
    event: workflow_started
-   data: {"type":"workflow_started","name":"Support agent","session_id":"79c1636c-…","run_id":"9d8ff6b4-…"}
+   data: {"type":"workflow_started","name":"Support agent",
+          "session_id":"79c1636c-…","run_id":"9d8ff6b4-…"}
 
    event: node_started
    data: {"type":"node_started","name":"classify"}
@@ -121,12 +127,13 @@ Streaming a run
    …
 
    event: workflow_completed
-   data: {"type":"workflow_completed","name":"Support agent","output_data":{…},"token_usage":{…}}
+   data: {"type":"workflow_completed","name":"Support agent",
+          "output_data":{…},"token_usage":{…}}
 
 Lifecycle events always arrive. Token-by-token content only arrives from nodes
 that opted in with ``stream_output`` — see :doc:`../reference/yaml`.
 
-Three things about SSE are worth planning for:
+Three properties of SSE are worth planning for:
 
 **A failed run still returns 200.** A response cannot change its status code
 after the headers are sent, so a failure ends the stream with a
@@ -170,7 +177,7 @@ Calling it from Python
    ):
        print(chunk)
 
-Two conveniences are easy to miss. ``run_agent`` and ``stream_agent`` take an
+Two conveniences are easily overlooked. ``run_agent`` and ``stream_agent`` take an
 **instance of the agent's input model**, not a dict — build it from
 ``client.input_schema``, or pass your own matching model. And the client stores
 the ``session_id`` from each response and sends it with the next call, so a
@@ -213,10 +220,14 @@ side under different prefixes, and you control auth and middleware:
 
    app = FastAPI()
 
-   session_maker = db_manager.get_sessionmaker(uri="postgresql://…/kavalai", schema="agents")
+   session_maker = db_manager.get_sessionmaker(
+       uri="postgresql://…/kavalai", schema="agents"
+   )
    service = AgentService(session_maker)
 
-   support = WorkflowEngine.from_yaml_path("support_agent.yaml", agent_service=service)
+   support = WorkflowEngine.from_yaml_path(
+       "support_agent.yaml", agent_service=service
+   )
    triage = WorkflowEngine.from_yaml_path("triage.yaml", agent_service=service)
 
    app.include_router(

@@ -4,7 +4,8 @@ Quickstart
 Five minutes, three steps: call a model, get structured data back, then wrap it
 in a workflow that remembers the conversation. Every output below is real.
 
-Already know you want the full tour? Start at :doc:`llm_clients`. New to LLMs
+Readers wanting the full tour should start at :doc:`llm_clients`. Readers new
+to language models
 altogether? Read :doc:`../guides/concepts` first.
 
 Install
@@ -30,7 +31,9 @@ finds the matching API key in your environment.
 
    client = make_client("openai/gpt-5.4-mini")
 
-   answer = await client.prompt("What is the capital of Estonia? Answer in one sentence.")
+   answer = await client.prompt(
+       "What is the capital of Estonia? Answer in one sentence."
+   )
    print(answer)
 
 .. code-block:: text
@@ -68,7 +71,8 @@ Pass a Pydantic model and you get a validated object instead of text to parse:
 
    Estonia
    450000
-   Tallinn's UNESCO-listed Old Town is one of the best-preserved medieval city centers in Europe.
+   Tallinn's UNESCO-listed Old Town is one of the best-preserved
+   medieval city centres in Europe.
 
 ``city.population`` is an ``int``. Declare the shape once and every field arrives
 typed — with any provider.
@@ -100,7 +104,8 @@ a one-node graph buys you validation, persistence and a recorded conversation.
 
 
    async def main():
-       await db_manager.init_sqlite()          # in-memory tables; Postgres in production
+       # In-memory tables here; PostgreSQL in production.
+       await db_manager.init_sqlite()
 
        workflow = (
            WorkflowBuilder("Village greeter", llm_model="openai/gpt-5.4-mini")
@@ -110,7 +115,8 @@ a one-node graph buys you validation, persistence and a recorded conversation.
            .llm(
                "reply",
                prompt=(
-                   "You are the greeter of Green Village (104 residents, one pub). "
+                   "You are the greeter of Green Village "
+                   "(104 residents, one pub). "
                    "Reply warmly in one sentence, and suggest up to 3 short "
                    "quick-reply choices the visitor might tap next."
                ),
@@ -124,7 +130,9 @@ a one-node graph buys you validation, persistence and a recorded conversation.
            )
        )
 
-       state = await workflow.run({"user_message": "Hi, I'm visiting from Tallinn!"})
+       state = await workflow.run(
+           {"user_message": "Hi, I'm visiting from Tallinn!"}
+       )
        print(state.output_data["agent_response"])
        print("choices:", state.output_data["choices"])
        print("path   :", " → ".join(state.trace))

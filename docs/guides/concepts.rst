@@ -6,7 +6,7 @@ This page explains the ideas the rest of the documentation assumes. If you have
 built with LLMs before, skim it. If you have not, it is the shortest path to
 reading everything else comfortably.
 
-What a language model actually does
+What a language model does
 -----------------------------------
 
 A **large language model** (LLM) takes text and predicts what text comes next.
@@ -68,7 +68,9 @@ validated before you see it:
        intent: str
        confidence: float
 
-   result = await client.prompt("Classify this message…", response_model=Classification)
+   result = await client.prompt(
+       "Classify this message…", response_model=Classification
+   )
    result.confidence   # a float, not "about 80%"
 
 This is the backbone of the whole library. Workflow ``data_types`` are the same
@@ -113,10 +115,10 @@ Workflows
 ---------
 
 An agent decides its own path. A **workflow** is the opposite: a graph you
-define, where each node does one thing and the edges are explicit. The engine
+define, where each node performs one step and the edges are explicit. The engine
 walks from ``start`` to ``end``, validating every value along the way.
 
-Most real systems want both. A workflow gives you predictability, observability
+Most production systems require both. A workflow provides predictability, observability
 and typed boundaries; an ``agent`` node inside it gives you flexibility exactly
 where flexibility is wanted. See :doc:`workflows`.
 

@@ -93,7 +93,8 @@ through the same browser.
 
 .. code-block:: python
 
-   web_search(query: str, count: int = 10, timeout: float = 60.0) -> WebSearchResponse
+   web_search(query: str, count: int = 10,
+              timeout: float = 60.0) -> WebSearchResponse
 
 Returns ``query``, ``success``, ``error_message`` and ``results`` — a list of
 ``WebSearchResult`` (``title``, ``url``, ``snippet``).
@@ -168,7 +169,8 @@ Google's Custom Search JSON API.
 
 .. code-block:: python
 
-   google_custom_search(query: str, api_key=None, cx=None, num: int = 10) -> CustomSearchResponse
+   google_custom_search(query: str, api_key=None, cx=None,
+                        num: int = 10) -> CustomSearchResponse
 
 Reads ``GOOGLE_CUSTOM_SEARCH_API_KEY`` and ``GOOGLE_CUSTOM_SEARCH_CX`` (the
 search-engine id) when the arguments are omitted. Returns ``items`` and

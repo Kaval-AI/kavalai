@@ -9,7 +9,8 @@ can reload and inspect it later — in code or in the backoffice UI.
 
 This guide covers the *why*; for a hands-on tour of storage — chat history,
 context, sessions, the tables and writing your own backend — see the
-:doc:`../tutorials/observability_storage` tutorial.
+:doc:`../tutorials/observability_storage` tutorial, and for the schema itself,
+table by table and column by column, see :doc:`data_model`.
 
 What a run records
 ------------------
@@ -23,7 +24,8 @@ observability the key fields are:
   ``completion_tokens``, and ``total_tokens``.
 * ``run_id`` / ``session_id`` / ``invocation_id`` — identifiers that tie logs,
   storage, and chat history together. The 8-char ``invocation_id`` prefixes
-  every log line of the run, so logs are easy to grep per run.
+  every log line of the run, so the log for one run can be isolated with a
+  single search.
 
 Persistence and logging
 -----------------------
@@ -66,7 +68,7 @@ finished run's conversation back:
 
 Per-model-call statistics come from the LLM clients themselves: every call
 produces a ``ModelCallStat`` with token usage and timing, delivered through the
-``ModelStatsReceiver`` callback interface (``ModelStatsLogger`` simply logs
+``ModelStatsReceiver`` callback interface (``ModelStatsLogger`` merely logs
 them). See :doc:`../tutorials/llm_clients`.
 
 Attempts that never produced a response are recorded too, with the provider's
@@ -98,7 +100,8 @@ which is exactly what a price table needs to be applied correctly:
 
    for call in await service.get_model_call_stats(call_type="llm", limit=5):
        fresh = (call.prompt_tokens or 0) - (call.cached_prompt_tokens or 0)
-       print(call.model, fresh, call.cached_prompt_tokens, call.completion_tokens)
+       print(call.model, fresh, call.cached_prompt_tokens,
+             call.completion_tokens)
 
 Pricing those numbers is a few lines against a table you control — and it keeps
 the price of a model somewhere you can correct in an afternoon, rather than

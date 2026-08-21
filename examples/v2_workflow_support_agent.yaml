@@ -79,7 +79,9 @@ nodes:
 
   - name: handle_refund
     type: llm
-    prompt: "Acknowledge the refund request empathetically and explain next steps."
+    prompt: >-
+      Acknowledge the refund request empathetically and explain
+      next steps.
     inputs:
       input:
         type: context

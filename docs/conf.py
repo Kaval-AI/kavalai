@@ -47,6 +47,7 @@ extensions = [
     "sphinx_immaterial",
     "kaval_playground",
     "workflow_svgs",
+    "architecture_svg",
 ]
 
 # Napoleon settings

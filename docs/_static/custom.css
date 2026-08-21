@@ -8,3 +8,18 @@
   --md-primary-fg-color--light: #1a4040;
   --md-primary-fg-color--dark: #001a1a;
 }
+
+/* Notebook output blocks wrap rather than scroll.
+
+   Source cells are hand-formatted to fit the column (roughly 80 characters),
+   but an output cell holds whatever the provider actually returned, and
+   rewrapping that text by hand would misrepresent it. Wrapping it in the
+   browser keeps the page free of horizontal scrollbars without editing the
+   recorded output. Applies to executed-notebook outputs only; code blocks keep
+   their exact layout. */
+div.cell_output pre,
+div.cell_output .output pre,
+div.output_area pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

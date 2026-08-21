@@ -19,7 +19,7 @@ field by field, see :doc:`../reference/yaml`.
 The graph model
 ---------------
 
-A workflow is just three things:
+A workflow consists of three elements:
 
 * a **name**,
 * a set of **data_types**, and
@@ -114,7 +114,7 @@ Streaming a run
 
 Every run is a stream. :meth:`~kavalai.WorkflowEngine.run_stream` yields
 :class:`~kavalai.workflow.models.WorkflowStreamEvent` objects as the graph
-executes, and :meth:`~kavalai.WorkflowEngine.run` is simply that stream drained
+executes, and :meth:`~kavalai.WorkflowEngine.run` is that stream drained
 to completion — there is one execution path, so a streamed run and a blocking
 run behave identically:
 
@@ -189,4 +189,5 @@ The state is serialisable via ``state.to_json()`` and
 ``WorkflowState.from_json()``, and the run is recorded through the
 :class:`~kavalai.agent_service.AgentService` — so it can be reloaded and
 inspected later, including runs that ended early because a streaming client
-disconnected. See :doc:`observability` for how this powers the backoffice UI.
+disconnected. See :doc:`observability` for how this powers the backoffice UI,
+and :doc:`data_model` for the ``runs`` and ``tasks`` rows it becomes.

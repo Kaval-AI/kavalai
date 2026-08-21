@@ -114,7 +114,8 @@ stdio, discovers the tools it offers and routes calls to them:
    from kavalai import FunctionKernel, McpServer
 
    kernel.register_mcp_server(McpServer(name=..., command=..., args=[...]))
-   await kernel.connect_mcp_servers()   # start the process(es), list their tools
+   # Starts each server process and lists the tools it offers.
+   await kernel.connect_mcp_servers()
    ...
    await kernel.close()                 # shut them down
 
@@ -125,7 +126,7 @@ middle of a run, before any tokens are spent.
 
 You are not required to. ``get_tool_descriptions()`` connects anything still
 unconnected before it answers, and a tool call connects on demand, so the
-tools are never invisible to a model. Connecting up front just moves the
+tools are never invisible to a model. Connecting in advance moves the
 subprocess spawn off the request path.
 
 The connections belong to the kernel, which usually means they outlive any one

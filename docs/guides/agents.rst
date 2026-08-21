@@ -48,7 +48,7 @@ one it returns a plain string.
 The four-step cycle
 -------------------
 
-Each step of the loop does the same four things:
+Each step of the loop performs the same four operations:
 
 #. **Render** a system prompt from the Jinja2 template, including the task, the
    available tool descriptions, and the history of previous steps.
@@ -73,7 +73,7 @@ Structured output
 -----------------
 
 Because the final answer can be validated against a ``response_model``, an agent
-slots cleanly into a typed pipeline — its output is just another typed value,
+fits cleanly into a typed pipeline — its output is another typed value,
 the same as any other node boundary.
 
 The ``agent`` workflow node

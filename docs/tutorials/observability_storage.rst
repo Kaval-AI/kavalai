@@ -11,6 +11,8 @@ pieces handle it:
 
 This tutorial focuses on storage: how a conversation is recorded, how a workflow
 carries data between steps, what each table holds, and how to swap the backend.
+For the schema itself — every column and its purpose — see
+:doc:`../guides/data_model`.
 For the *why* behind it, read the :doc:`../guides/observability` guide.
 
 Chat history at the client level
@@ -74,7 +76,9 @@ node writes its result under its ``output`` name; later nodes read it back by
        .llm("classify", prompt="Classify the email as billing, support or other.",
             inputs={"email": "input"}, output="analysis", next="reply")
        # reads it back by context path — here inside the prompt
-       .llm("reply", prompt="Write a reply for a {{ context.analysis.category }} email.",
+       .llm("reply",
+            prompt="Write a reply for a "
+                   "{{ context.analysis.category }} email.",
             inputs={"email": "input"}, output="output", next="end")
        .end()
        .build_engine(
@@ -124,14 +128,17 @@ directly — here over in-memory SQLite:
    agent, session, run1 = await service.initialize_workflow_run(
        agent_name="Greeter", external_id="user-42")
    await service.add_chat_message(agent_id=agent.id, session_id=session.id,
-                                  run_id=run1.id, role="user", content="My name is Ada.")
+                                  run_id=run1.id, role="user",
+                                  content="My name is Ada.")
    await service.add_chat_message(agent_id=agent.id, session_id=session.id,
-                                  run_id=run1.id, role="assistant", content="Hi Ada!")
+                                  run_id=run1.id, role="assistant",
+                                  content="Hi Ada!")
 
    agent2, session2, run2 = await service.initialize_workflow_run(
        agent_name="Greeter", external_id="user-42")
    await service.add_chat_message(agent_id=agent2.id, session_id=session2.id,
-                                  run_id=run2.id, role="user", content="What's my name?")
+                                  run_id=run2.id, role="user",
+                                  content="What's my name?")
 
    # Same agent + session across both runs; two different runs.
    print("same agent  :", agent.id == agent2.id)
@@ -225,11 +232,15 @@ The first four are written by ``AgentService``; ``tasks`` and
 hierarchy:
 **agent → sessions → runs → (chat_messages, tasks, model_call_stats)**.
 
+Every column of every table, the reasoning behind the schema, the retrieval
+tables the RAG services provision, and how the schema is created and migrated
+are documented in :doc:`../guides/data_model`.
+
 Custom persistence
 ------------------
 
-Need to send runs or chat history somewhere else — Redis, MongoDB, a managed
-store? Subclass ``AgentService`` and override the methods you want to redirect
+To send runs or chat history elsewhere — to Redis, MongoDB or a managed
+store — subclass ``AgentService`` and override the methods to be redirected
 (``add_chat_message`` / ``get_chat_history`` for the conversation,
 ``initialize_workflow_run`` / ``update_run`` for runs), then pass your instance
 to the engine. The engine only ever talks to the service's public methods, so
@@ -252,6 +263,8 @@ and token metrics along the way. See :doc:`../ui/index`.
 Where to next
 -------------
 
+* :doc:`../guides/data_model` — every table and column, in detail.
 * :doc:`../guides/observability` — the concepts behind observability.
 * :doc:`../ui/index` — browse sessions and interactions in the backoffice.
 * :doc:`workflow` — the workflows whose runs all of this records.
+* :doc:`architecture` — where persistence sits in the design as a whole.

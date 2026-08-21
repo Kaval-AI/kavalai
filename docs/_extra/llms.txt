@@ -1,0 +1,54 @@
+# Kaval.AI
+
+> An opinionated Python library for building production-grade agentic
+> workflows, chatbots and tools. A workflow is a typed graph — written as YAML
+> or built in Python — executed by an engine that validates every boundary with
+> Pydantic and records every session, run, node and model call in a database
+> the operator owns. The same engine runs on a server, in a test suite and in a
+> browser tab through Pyodide and WebLLM.
+
+Install with `pip install "kavalai[common]"`. Provider clients are selected by
+a `provider/model` string (`openai/…`, `gemini/…`, `anthropic/…`, `ollama/…`).
+Source: https://github.com/Kaval-AI/kaval.ai — Apache-2.0.
+
+## Start here
+
+- [Architecture](https://docs.kaval.ai/tutorials/architecture.html): the design, its commitments, the component diagram and the invariants a change must respect. Read this before proposing a structural change.
+- [Installation](https://docs.kaval.ai/tutorials/installation.html): packages, extras and provider configuration.
+- [Quickstart](https://docs.kaval.ai/tutorials/quickstart.html): a working chatbot workflow, in Python and in YAML.
+- [Concepts](https://docs.kaval.ai/guides/concepts.html): the vocabulary of language-model applications.
+
+## Tutorials
+
+- [LLM clients](https://docs.kaval.ai/tutorials/llm_clients.html): one interface over four providers; structured output, streaming, retries, usage statistics.
+- [Agents and tools](https://docs.kaval.ai/tutorials/agents.html): the tool-using agent loop, typed inputs and outputs, restricting tools per node.
+- [Workflows](https://docs.kaval.ai/tutorials/workflow.html): the graph, branching, agent nodes, parallel fan-out, rendered diagrams, testing without a model.
+- [RAG](https://docs.kaval.ai/tutorials/rag.html): indexing and retrieval over pgvector or a portable SQLite file.
+- [Streaming](https://docs.kaval.ai/tutorials/streamer.html): model tokens, per-node run events and Server-Sent Events.
+- [Observability and storage](https://docs.kaval.ai/tutorials/observability_storage.html): sessions, runs, chat history and swapping the backend.
+- [Serving over HTTP](https://docs.kaval.ai/tutorials/serving.html): any workflow behind a typed FastAPI endpoint.
+- [Running in the browser](https://docs.kaval.ai/tutorials/run_in_browser.html): Pyodide and WebLLM, with no server and no API key.
+
+## Guides
+
+- [Workflows](https://docs.kaval.ai/guides/workflows.html): the workflow model in depth.
+- [Tools](https://docs.kaval.ai/guides/tools.html): Python functions, REST endpoints and MCP servers through one kernel.
+- [Agents](https://docs.kaval.ai/guides/agents.html): how the agent loop plans, acts and observes.
+- [Observability](https://docs.kaval.ai/guides/observability.html): what a run records, and why there is no cost column.
+- [The database and data model](https://docs.kaval.ai/guides/data_model.html): every runtime table, what it holds and how the schema is created.
+- [Safety and determinism](https://docs.kaval.ai/guides/safety.html): running a graph with no network and no API key.
+
+## Reference
+
+- [Workflow YAML reference](https://docs.kaval.ai/reference/yaml.html): every key of the workflow document.
+- [Bundled tools](https://docs.kaval.ai/reference/tools.html): the tools shipped with the library.
+- [Configuration](https://docs.kaval.ai/reference/config.html): every environment variable the entry points read.
+- [Python API](https://docs.kaval.ai/api/index.html): generated API documentation.
+- [Cookbook](https://docs.kaval.ai/cookbook/index.html): worked recipes, from retrieval to self-correcting loops.
+
+## Optional
+
+- [How Kaval.AI compares](https://docs.kaval.ai/tutorials/comparison.html): an assessment against LangGraph, CrewAI, LlamaIndex, Pydantic AI, n8n and Dify, including where Kaval.AI is behind.
+- [Backoffice UI](https://docs.kaval.ai/ui/index.html): the interface that browses recorded runs.
+- [Deployment](https://docs.kaval.ai/deploy/index.html): containers, migrations and configuration.
+- [Open questions](https://docs.kaval.ai/todo.html): known gaps and decisions still to be taken.

@@ -1,13 +1,14 @@
 How Kaval.AI compares
 =====================
 
-There is no best agent framework, only trade-offs. This page states Kaval.AI's
-honestly, alongside the tools people most often weigh it against, so you can
-tell quickly whether it fits your problem — or whether something else does.
+There is no best agent framework, only trade-offs. This page states
+Kaval.AI's explicitly, alongside the tools it is most often weighed against, so
+that a reader can determine quickly whether it suits their problem, or whether
+something else does.
 
-Everything here was checked against each project's own documentation and source
-in August 2026. Frameworks move fast; verify anything load-bearing before you
-commit to it.
+Every claim here was checked against each project's own documentation and
+source in August 2026. Frameworks move quickly; anything load-bearing should be
+verified before it is relied upon.
 
 The short version
 -----------------
@@ -18,9 +19,10 @@ value crossing a node boundary is a validated Pydantic model, every run is
 persisted, and a backoffice UI reads those runs back. It also runs in a browser,
 which nothing else here does.
 
-That focus costs breadth. If you need parallel fan-out, durable resume after a
-crash, human-in-the-loop approvals, or a catalogue of hundreds of integrations,
-the frameworks below are ahead today. See `Where Kaval.AI is behind`_.
+That focus costs breadth. Where durable resume after a crash,
+human-in-the-loop approval, multi-agent delegation or a catalogue of hundreds of
+integrations is required, the frameworks below are ahead today. See
+`Where Kaval.AI is behind`_.
 
 The landscape
 -------------
@@ -128,7 +130,7 @@ achievable with enough glue code.
      - via Pydantic Graph
      - yes
    * - Parallel step execution
-     - **no**
+     - yes [#f4]_
      - yes
      - async tasks
      - yes
@@ -218,10 +220,14 @@ achievable with enough glue code.
 .. [#f2] An ``agent`` node runs a full tool-using loop, and a graph can route
    between several of them — but there is no agent-to-agent handoff primitive,
    and no agent can delegate to another agent by itself.
-.. [#f3] Every framework here can call a REST API — by writing a Python function
-   that does, or through an OpenAPI toolkit. The distinction is that Kaval.AI
-   registers the endpoint itself as a tool with its own schemas, so there is no
-   wrapper function to write or maintain.
+.. [#f3] Every framework here can call a REST API, either by writing a Python
+   function that does so or through an OpenAPI toolkit. The distinction is that
+   Kaval.AI registers the endpoint itself as a tool with its own schemas, so
+   there is no wrapper function to write or maintain.
+.. [#f4] A ``parallel`` node fans out across named branches and rejoins them at
+   a single node; tool calls within one ``agent`` node were already concurrent.
+   What Kaval.AI does not yet have is fan-out over a *runtime-sized list* — one
+   subgraph executed once per item. See :doc:`../reference/yaml`.
 
 Where Kaval.AI is ahead
 -----------------------
@@ -238,15 +244,26 @@ tools are all addressed as URIs (``python://``, ``rest://``, ``mcp://``), all
 validated through generated Pydantic models, all restrictable per node with
 ``allowed_tools``. Most frameworks treat REST as "write a Python wrapper".
 
-**Observability without a SaaS account.** Runs, sessions, chat history, per-node
-tasks and per-call token counts land in *your* Postgres, and the backoffice UI
-reads them from there. The comparable experience elsewhere — LangSmith, Logfire,
-CrewAI AMP — is a hosted product. Dify and n8n also self-host their UI, but you
-adopt their whole platform to get it.
+**Observability without a hosted account.** Runs, sessions, chat history,
+per-node tasks and per-call token counts land in *your* PostgreSQL instance,
+and the backoffice interface reads them from there. Attempts that returned no
+completion are recorded with the provider's status code rather than vanishing,
+and where a provider reports them, cached input and reasoning tokens are broken
+out from the totals, which is what makes cost computable downstream. The
+comparable experience elsewhere — LangSmith, Logfire, CrewAI AMP — is a hosted
+product. Dify and n8n also self-host their interface, but adopting it means
+adopting the whole platform. See :doc:`../guides/data_model`.
 
-**Determinism is cheap.** Inject a ``client_factory`` and the graph runs with no
-network at all, so branching logic is testable in CI for free. See
-:doc:`../guides/safety`.
+**Concurrency is declared, not inferred.** A ``parallel`` node names its
+branches, so a reader can tell from the file — and from the rendered diagram —
+which steps run together. The alternative, inferring a dataflow graph from
+``inputs`` and reordering independent steps automatically, was rejected because
+it would silently change the order of side effects the author wrote down. See
+:doc:`architecture`.
+
+**Determinism is inexpensive.** Injecting a ``client_factory`` runs the graph
+with no network at all, so branching logic can be exercised in continuous
+integration at no cost. See :doc:`../guides/safety`.
 
 **It runs in a browser.** Engine, model and embeddings execute client-side over
 WebGPU and Pyodide — no server, no API key, no data leaving the device. Nothing
@@ -255,13 +272,16 @@ else in this comparison does this. See :doc:`run_in_browser`.
 Where Kaval.AI is behind
 ------------------------
 
-Stated plainly, because choosing a framework on marketing is expensive.
+Stated plainly, because choosing a framework on the strength of its marketing
+is expensive.
 
-**No parallel step execution.** The engine walks one node at a time. A fan-out
-over ten documents runs ten times as long as one — LangGraph, LlamaIndex and n8n
-all fan out natively. Tool calls *within* one agent node do run concurrently, and
-you can run several workflows concurrently from your own code (see the
-:doc:`../cookbook/index`), but there is no parallel node in the graph.
+**No fan-out over a list.** A ``parallel`` node runs named branches
+concurrently, which covers work that is known when the workflow is written. It
+does not cover work discovered at run time: there is no node that executes one
+subgraph per item of a list, so summarising forty documents still requires
+either forty declared branches or a sequential loop. LangGraph's ``Send``,
+LlamaIndex's event fan-out and n8n's item-based execution all address this
+directly.
 
 **No durable resume.** A run's row is written when it starts and when it
 finishes; per-node data goes to the task logger as it happens. There is no
@@ -281,41 +301,54 @@ delegation. You get one agent loop per node and a graph to route between them.
 If your mental model is "a team of specialists negotiating", CrewAI or the
 Microsoft Agent Framework fit that shape and Kaval.AI does not.
 
-**No evaluation tooling.** No dataset runner, no scoring, no regression harness
-for prompt changes. You get raw material — every run, task and model call is
-recorded — but the analysis is yours to write.
+**No evaluation tooling.** There is no dataset runner, no scoring and no
+regression harness for prompt changes. The raw material is present — every run,
+task and model call is recorded — but the analysis has to be written.
 
-**A much smaller ecosystem.** Four LLM providers, four embedding providers and
-six bundled tools, against LangChain's thousand-plus integrations and n8n's four
-hundred connectors. Kaval.AI's answer is that a REST endpoint or MCP server is a
-first-class tool without an adapter — real, but not the same as an integration
-someone else already tested.
+**No OpenTelemetry export.** Observability is Kaval.AI's own tables plus
+``loguru``. Pydantic AI, the OpenAI Agents SDK and the Microsoft Agent Framework
+all emit OTel spans, which drop into an existing tracing stack without further
+work.
+
+**No long-term memory.** Memory is the session's chat history and ``history:``
+inputs. There is no semantic or summarising memory that persists across
+sessions.
+
+**A considerably smaller ecosystem.** Four LLM providers, four embedding
+providers and six bundled tools, against LangChain's thousand-plus integrations
+and n8n's four hundred connectors. Kaval.AI's answer is that a REST endpoint or
+an MCP server is a first-class tool requiring no adapter — which is true, but
+not equivalent to an integration someone else has already tested.
 
 **Fewer eyes on it.** These are mature projects with large communities, years of
-production use and a Stack Overflow trail. Kaval.AI is young. Some of what you
-would find by searching, you will find by reading its source.
+production use and an extensive record of questions already answered. Kaval.AI
+is young; some of what would otherwise be found by searching must instead be
+found by reading its source.
 
 Choosing
 --------
 
-Reach for **Kaval.AI** when the workflow should be a reviewable artefact rather
-than code, when typed boundaries and recorded runs matter more than breadth, when
-you want observability you host yourself, or when it has to run in a browser.
+Choose **Kaval.AI** when the workflow should be a reviewable artefact rather
+than code, when typed boundaries and recorded runs matter more than breadth,
+when observability must be self-hosted, or when the application has to run in a
+browser.
 
-Reach for **LangGraph** when runs are long, must survive restarts, or need a
-human in the middle. **CrewAI** when the work splits into roles and you want a
-prototype this afternoon. **LlamaIndex** when retrieval *is* the product.
-**Pydantic AI** when you want typed agents without a graph engine at all.
+Choose **LangGraph** when runs are long, must survive restarts, or require a
+human in the middle. **CrewAI** when the work divides into roles and a prototype
+is wanted the same day. **LlamaIndex** when retrieval *is* the product.
+**Pydantic AI** when typed agents are wanted without a graph engine at all.
 **OpenAI Agents SDK** when the smallest possible surface wins. **Haystack** for
-classic RAG pipelines. **n8n** when the hard part is connecting SaaS tools, and
-**Dify** when non-engineers should build the thing.
+classic RAG pipelines. **n8n** when the difficult part is connecting SaaS tools,
+and **Dify** when non-engineers are to build the application themselves.
 
-These also compose. Kaval.AI exposes a workflow over HTTP
-(:doc:`serving`), and n8n, Dify or another service can call that endpoint — the
-typed graph stays in your repository while the integration sprawl lives where
-integration sprawl belongs.
+These also compose. Kaval.AI exposes a workflow over HTTP (see :doc:`serving`),
+and n8n, Dify or another service can call that endpoint: the typed graph remains
+in the repository while the integration sprawl lives where integration sprawl
+belongs.
 
 .. note::
 
-   Gaps listed here are tracked in :doc:`../todo`. If one of them is blocking
-   you, that page is the place to look before assuming it will never exist.
+   The gaps listed here are tracked in :doc:`../todo`, and the reasoning
+   behind the design that produces them is set out in :doc:`architecture`. A
+   gap that is blocking should be checked against those pages before it is
+   assumed to be permanent.
