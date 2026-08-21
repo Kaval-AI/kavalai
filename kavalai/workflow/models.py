@@ -18,9 +18,12 @@ declarations and the workflow exception) and the v2 workflow graph (nodes and
 :class:`WorkflowGraph`).
 """
 
-from typing import Optional, Literal, Union, Annotated, Any
+import json
+from typing import Optional, Literal, Union, Annotated, Any, ClassVar
 
 from pydantic import BaseModel, Field, model_validator
+
+from kavalai.utils import to_plain
 
 
 class WorkflowException(Exception):
@@ -224,6 +227,17 @@ class AgentNode(BaseNode):
         As on :class:`LLMNode` (including the O(n^2) full-buffer trade-off);
         applies to the ``_instructions`` and ``_step<N>`` streams, not to the
         structured output stream.
+
+    ``allowed_tools`` restricts what this node may call, and means the same
+    here as it does in the Python API:
+
+    .. code-block:: yaml
+
+       allowed_tools: ["*"]                        # every registered tool
+       allowed_tools: ["mcp://github.*"]           # one server's tools
+       allowed_tools: ["python://lookup_resident"] # one tool
+       allowed_tools: []                           # no tools at all
+       # key omitted                               # every registered tool
     """
 
     type: Literal["agent"] = "agent"
@@ -231,7 +245,7 @@ class AgentNode(BaseNode):
     inputs: dict[str, ArgumentInfo] = {}
     output: str
     next: str
-    allowed_tools: list[str] = Field(default_factory=list)
+    allowed_tools: Optional[list[str]] = None
     max_steps: int = 10
     llm_model: Optional[str] = None
     llm_kwargs: dict[str, Any] = Field(default_factory=dict)
@@ -449,6 +463,31 @@ class WorkflowGraph(BaseModel):
     templates: list[TemplateModel] = []
     python_functions: list[PythonFunction] = []
     nodes: list[Node]
+
+    REDACTED: ClassVar[str] = "***"
+
+    def model_dump_public(self) -> dict[str, Any]:
+        """Serialise the graph with secrets removed.
+
+        ``McpServer.env`` is a plain mapping merged into the tool server's
+        process environment, so in practice it is where an API key for a stdio
+        MCP server ends up. Anything that hands a workflow definition to a
+        caller — ``GET /workflow``, a UI rendering the graph — should use this
+        rather than :meth:`model_dump`, and doing the redaction on the model
+        means no such caller can leak by forgetting.
+
+        Keys are kept, values replaced: which variables a server needs is
+        useful to see, what they are set to is not.
+        """
+        data = self.model_dump()
+        for server in data.get("mcp_servers", []):
+            if server.get("env"):
+                server["env"] = {key: self.REDACTED for key in server["env"]}
+        return data
+
+    def model_dump_public_json(self) -> str:
+        """:meth:`model_dump_public`, JSON-encoded."""
+        return json.dumps(to_plain(self.model_dump_public()))
 
     @model_validator(mode="after")
     def validate_graph(self) -> "WorkflowGraph":

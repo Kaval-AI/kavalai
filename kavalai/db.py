@@ -135,7 +135,7 @@ def build_db_uri(
 # to ``PRAGMA user_version``). Bump on any ORM schema change: SQLite stores
 # created with a different version are dropped and recreated on init.
 # 2: rag_index left the shared metadata (RAG backends self-provision).
-SQLITE_SCHEMA_VERSION = 2
+SQLITE_SCHEMA_VERSION = 3
 
 
 def _drop_all_sqlite_tables(connection):
@@ -416,6 +416,13 @@ class AsyncSessionShim:
     Produced by :meth:`DatabaseManager.get_sqlite_compat_sessionmaker` for
     greenlet-less platforms (Pyodide/WASM). The awaitable methods execute
     synchronously on the calling thread.
+
+    The surface has to match what :class:`~kavalai.agent_service.AgentService`
+    and :mod:`kavalai.crud` actually call — a method missing here does not fail
+    at import, it fails in the browser at the moment a user hits that code path
+    (``crud.get_one`` did exactly that). ``tests/test_agent_service.py`` runs
+    the service against this shim as well as the real async session so the two
+    cannot drift apart again.
     """
 
     def __init__(self, session):
@@ -446,6 +453,24 @@ class AsyncSessionShim:
 
     async def refresh(self, obj):
         self._session.refresh(obj)
+
+    async def get(self, entity, ident, **kwargs):
+        return self._session.get(entity, ident, **kwargs)
+
+    async def delete(self, obj):
+        self._session.delete(obj)
+
+    async def merge(self, obj, **kwargs):
+        return self._session.merge(obj, **kwargs)
+
+    async def scalar(self, statement, *args, **kwargs):
+        return self._session.scalar(statement, *args, **kwargs)
+
+    async def scalars(self, statement, *args, **kwargs):
+        return self._session.scalars(statement, *args, **kwargs)
+
+    async def close(self):
+        self._session.close()
 
 
 # Global instance to manage cached engines
@@ -501,8 +526,15 @@ class ModelCallStat(Base):
 
     Each row records one model call (``call_type`` distinguishes e.g. chat
     completion from embedding): the model used, the request/response payloads,
-    prompt/completion/total token counts, batch size, duration and the
-    computed cost. Used to power usage and cost reporting.
+    token counts, batch size and duration.
+
+    Cost is deliberately **not** recorded. Providers do not return it — only
+    tokens — so any figure here would come from a price table the library would
+    have to keep current, and cached input tokens are priced differently enough
+    that a total derived from ``prompt_tokens`` alone would be wrong by a
+    multiple. ``cached_prompt_tokens`` and ``reasoning_tokens`` are stored
+    instead, which is what makes cost computable downstream (e.g. with
+    ``genai-prices``) from a row like this one.
     """
 
     __tablename__ = "model_call_stats"
@@ -519,8 +551,11 @@ class ModelCallStat(Base):
     total_tokens: Mapped[int | None] = mapped_column(Integer)
     batch_size: Mapped[int | None] = mapped_column(Integer)
     duration_seconds: Mapped[float | None] = mapped_column(Numeric(10, 6))
-    cost: Mapped[float | None] = mapped_column(Numeric(10, 6))
-    currency: Mapped[str | None] = mapped_column(TEXT)
+    # Subsets of prompt_tokens / completion_tokens respectively, when the
+    # provider reports them: cached input is billed at a fraction of fresh
+    # input, and reasoning tokens are output tokens the user never sees.
+    cached_prompt_tokens: Mapped[int | None] = mapped_column(Integer)
+    reasoning_tokens: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

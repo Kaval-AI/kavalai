@@ -51,6 +51,8 @@ CREATE TABLE IF NOT EXISTS model_call_stats (
     prompt_tokens INTEGER,
     completion_tokens INTEGER,
     total_tokens INTEGER,
+    cached_prompt_tokens INTEGER,
+    reasoning_tokens INTEGER,
     batch_size INTEGER,
     duration_seconds REAL
 );
@@ -125,8 +127,9 @@ class SqliteTaskLogger(TaskLogger):
         await conn.execute(
             "INSERT INTO model_call_stats (id, call_type, model, agent_id, "
             "request_data, response_data, response_code, prompt_tokens, "
-            "completion_tokens, total_tokens, batch_size, duration_seconds) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "completion_tokens, total_tokens, cached_prompt_tokens, "
+            "reasoning_tokens, batch_size, duration_seconds) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 str(uuid4()),
                 stats.call_type,
@@ -138,11 +141,58 @@ class SqliteTaskLogger(TaskLogger):
                 stats.prompt_tokens,
                 stats.completion_tokens,
                 stats.total_tokens,
+                stats.cached_prompt_tokens,
+                stats.reasoning_tokens,
                 stats.batch_size,
                 stats.duration_seconds,
             ),
         )
         await conn.commit()
+
+    async def get_tasks(self, run_id: Optional[str] = None) -> list[dict]:
+        """Return logged node executions, newest table order, as plain dicts.
+
+        ``inputs``, ``output`` and ``errors`` come back decoded rather than as
+        JSON strings. Reading these used to mean reaching for ``_connect()``
+        and writing SQL by hand, which the observability tutorial had to teach.
+
+        Args:
+            run_id: Restrict to one run. ``None`` returns every logged task.
+        """
+        return await self._select("tasks", run_id, ("inputs", "output", "errors"))
+
+    async def get_model_calls(self, run_id: Optional[str] = None) -> list[dict]:
+        """Return logged model calls as plain dicts.
+
+        Note that ``model_call_stats`` rows carry no ``run_id`` — the stats
+        arrive from the LLM client, which knows the agent but not the run — so
+        ``run_id`` filters by agent only when the tasks table can resolve it.
+        """
+        return await self._select("model_call_stats", None, ())
+
+    async def _select(
+        self, table: str, run_id: Optional[str], json_columns: tuple[str, ...]
+    ) -> list[dict]:
+        # Writes are fire-and-forget background tasks, so a read that does not
+        # flush first races them and intermittently returns a short list.
+        await self.flush()
+        conn = await self._connect()
+        query = f"SELECT * FROM {table}"  # nosec B608 - table name is internal
+        parameters: tuple = ()
+        if run_id is not None:
+            query += " WHERE run_id = ?"
+            parameters = (run_id,)
+        async with conn.execute(query, parameters) as cursor:
+            rows = await cursor.fetchall()
+
+        results = []
+        for row in rows:
+            record = dict(row)
+            for column in json_columns:
+                if record.get(column) is not None:
+                    record[column] = json.loads(record[column])
+            results.append(record)
+        return results
 
     async def close(self) -> None:
         await self.flush()

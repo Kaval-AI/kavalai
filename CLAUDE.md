@@ -47,6 +47,10 @@ uv run --env-file .env pytest
 Avoid `set -a && source .env && set +a` — changing shell option state defeats
 Claude Code's static command analysis and forces a manual permission prompt.
 
+`.env.example` is the committed template and must list every variable the code
+reads, and nothing else — `tests/test_config_drift.py` checks both directions,
+so adding a `getenv` without documenting it fails the suite.
+
 ## Packaging & Extras
 
 `pyproject.toml` keeps the base install small and pyodide-compatible (no
@@ -84,11 +88,11 @@ when the layout changes. Run `uv lock` after editing dependencies.
 ## Key Files
 
 - `kavalai/agent_service.py` — `AgentService`: all runtime persistence (agents, sessions, runs, chat history, tasks, model-call stats) over a plain `async_sessionmaker`; sessions reusable by caller-supplied `external_id`
-- `kavalai/db.py` — ORM models + `DatabaseManager`; `get_sqlite_compat_sessionmaker()` runs `AgentService` over the sync SQLite engine via `AsyncSessionShim` (Pyodide/browser, where greenlet/aiosqlite don't exist)
-- `kavalai/workflow/engine.py` — core workflow engine (`WorkflowEngine.from_yaml_path`, YAML → execution); `run_stream()` yielding `WorkflowStreamEvent`s is the single execution path and `run()` just drains it. Node streaming is opt-in (`stream_output`, `stream_delta`, agent-only `stream_instructions` / `stream_partials`), settable from YAML and `WorkflowBuilder`
+- `kavalai/db.py` — ORM models + `DatabaseManager`; `model_call_stats` records tokens only (`cached_prompt_tokens` / `reasoning_tokens` included) — **no cost column**, deliberately: providers return tokens not money, and cached input is priced differently enough that a derived total would be wrong rather than stale (see `docs/guides/observability.rst`); `get_sqlite_compat_sessionmaker()` runs `AgentService` over the sync SQLite engine via `AsyncSessionShim` (Pyodide/browser, where greenlet/aiosqlite don't exist)
+- `kavalai/workflow/engine.py` — core workflow engine (`WorkflowEngine.from_yaml_path`, YAML → execution); `run_stream()` yielding `WorkflowStreamEvent`s is the single execution path and `run()` just drains it. Node streaming is opt-in (`stream_output`, `stream_delta`, agent-only `stream_instructions` / `stream_partials`), settable from YAML and `WorkflowBuilder`. **One engine serves many concurrent runs**: per-run state (the `TokenAccumulator`) lives on `RunContext` and must be forwarded by `_branch_context`; engine-level state (the `FunctionKernel` and its MCP sessions) is opened by `await engine.connect()` and released by `await engine.aclose()`, never per run
 - `kavalai/workflow/models.py` — Pydantic data models for workflows: shared building blocks (`ArgumentInfo`, `RestServer`, `McpServer`, `PythonFunction`, `TemplateModel`, `WorkflowException`) and the v2 graph (`WorkflowGraph`, nodes); a graph has exactly one `start` node (derived `start`/`output_type` properties, no `start` field) and all `end` nodes must share one output data type
 - `kavalai/agent.py` — modular planning agent (uses the native LLM clients)
-- `kavalai/functionkernel.py` — tool registration and execution (REST, MCP, Python); unified tool URI format `protocol://[name|module].function_name(args: type) -> return_type`; duplicate tool/server names raise `WorkflowException`; `get_tool_descriptions()` takes an `allowed_tools` filter (`None` → all tools, empty list → none, `proto://server.*` allows a whole server). `Agent(allowed_tools=…)` applies it to both the described tools and the tool calls it will execute; `AgentNode.allowed_tools` is what the engine passes in
+- `kavalai/functionkernel.py` — tool registration and execution (REST, MCP, Python); unified tool URI format `protocol://[name|module].function_name(args: type) -> return_type`; duplicate tool/server names raise `WorkflowException`; `get_tool_descriptions()` takes an `allowed_tools` filter (`None` → all tools, `[]` → none, `"*"` → all, `proto://server.*` allows a whole server) and connects any unconnected MCP server first. `Agent(allowed_tools=…)` applies it to both the described tools and the tool calls it will execute; `AgentNode.allowed_tools` is `Optional[list[str]]` and the engine passes it through verbatim, so YAML and Python agree. MCP sessions are opened by `connect_mcp_servers()` and released by `close()` — both are kernel lifetime, never per run. Tool results: a declared Pydantic model is validated, everything else is wrapped as `.result`, and a mismatch raises `FunctionKernelException`
 - `kavalai/run_context.py` — RunContext model and context resolution helpers
 - `kavalai/workflow/render.py` — renders a workflow graph to an SVG diagram (`render_workflow_svg`); used by the docs build (`docs/_ext/workflow_svgs.py`) and the backoffice `POST /workflows/render-svg` endpoint. The frontend `workflow-graph` component displays that backend SVG.
 - `kavalai/migrate_db.py` — Alembic migration runner (`python -m kavalai.migrate_db {app|backoffice}`); only its `main()` reads env vars
@@ -161,7 +165,7 @@ cd frontend && npm test -- --watch=false --code-coverage
 - Alembic, two sets: `kavalai/migrations/agents/` and `kavalai/migrations/backoffice/`; the ORM models (`kavalai/db.py`, `kavalai/backoffice/db.py`) are the single source of truth
 - Models are **schema-less**; the target schema is applied per-engine via `schema_translate_map` (`DatabaseManager.get_sessionmaker(..., schema=...)`). Library code never reads env vars — only entry-point `main()`s do
 - New revision: change the models, then autogenerate against an empty scratch DB with the set's env (`config.attributes["connection"]`/`["schema"]`); parity tests in `tests/test_migrate_db.py` fail if models and revisions diverge
-- Raw SQL bypasses `schema_translate_map` — qualify the schema explicitly (see `_translated_schema_prefix` in the agents initial revision, `SET search_path` in `PostgresRagService`)
+- Raw SQL bypasses `schema_translate_map` — qualify the schema explicitly (see `_translated_schema_prefix` in the agents initial revision, `SET search_path` in `PostgresRagService`). So does **reflection**: `op.batch_alter_table` reflects before altering, so pass the translated schema explicitly (`_target_schema()` in revision 0003) or the ALTER looks for the table in `public`
 - Browser/Pyodide SQLite never runs Alembic: `DatabaseManager.init_sqlite*` uses `create_all` + a `PRAGMA user_version` stamp (`SQLITE_SCHEMA_VERSION`); bump it on schema changes so stale browser DBs are wiped and recreated
 
 ## Workflow Execution
@@ -199,7 +203,7 @@ docker run ... backoffice-migrations
 docker run ... backoffice-server   # needs KAVALAI_BO_DB_URI, KAVALAI_BO_DB_SCHEMA
 
 # Agent server
-docker run ... agent-server        # needs WORKFLOW_YAML_PATH, KAVALAI_DB_URI, KAVALAI_DB_SCHEMA
+docker run ... agent-server        # needs KAVALAI_AGENT_WORKFLOW_PATH, KAVALAI_DB_URI, KAVALAI_DB_SCHEMA
 # optional HTTP basic auth: KAVALAI_AGENT_BASIC_AUTH_USER, KAVALAI_AGENT_BASIC_AUTH_PASSWORD
 
 # Migrations

@@ -22,6 +22,7 @@ from pydantic import BaseModel
 
 from kavalai.idb import is_pyodide
 from kavalai.llm_clients.base_client import (
+    ensure_user_turn,
     BaseLlmClient,
     ChatHistory,
     LlmClientException,
@@ -85,6 +86,8 @@ class BrowserLLMClient(BaseLlmClient):
     Python<->JS boundary free of proxy-conversion surprises.
     """
 
+    provider = "browser"
+
     def __init__(
         self,
         model: str,
@@ -114,7 +117,7 @@ class BrowserLLMClient(BaseLlmClient):
         """Translate the chat history + options into the bridge request dict."""
         messages = [
             {"role": msg.role or "user", "content": msg.content or ""}
-            for msg in chat_history.messages
+            for msg in ensure_user_turn(chat_history.messages)
         ]
         # WebLLM requires the final message to come from the user (or a tool);
         # a conversation that ends on a system message is rejected. ``prompt()``
@@ -178,12 +181,13 @@ class BrowserLLMClient(BaseLlmClient):
         duration = time.perf_counter() - start_time
         stats = ModelCallStat(
             call_type="llm",
-            model=f"browser/{self.model}",
+            model=self.stat_model_name(),
             request_data=json.dumps(request, default=str),
             response_data=content,
             duration_seconds=duration,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
+            response_code=200,
         )
         await self._send_model_call_stats(stats)

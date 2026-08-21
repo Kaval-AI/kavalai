@@ -15,6 +15,7 @@ limitations under the License.
 """
 
 import asyncio
+import time
 from typing import Optional, Type, Literal
 
 from pydantic import BaseModel
@@ -56,6 +57,29 @@ class ChatHistory(BaseModel):
     messages: list[ChatMessage]
 
 
+def ensure_user_turn(messages: list[ChatMessage]) -> list[ChatMessage]:
+    """Guarantee the history contains a turn a model can answer.
+
+    Workflow ``llm`` nodes render their whole prompt into a single ``system``
+    message, and :meth:`BaseLlmClient.prompt` does the same. A chat request
+    with no user turn is unusual and providers disagree about it: Anthropic's
+    Messages API rejects an empty ``messages`` list outright, while small local
+    models answer it literally — ``llama3.2`` prefixes its reply with a literal
+    "assistant" line.
+
+    So the convention is: if nothing but system content is present, that content
+    becomes the user turn. Histories that already contain a user or assistant
+    message are returned untouched.
+    """
+    if any(msg.role not in (None, "system") for msg in messages):
+        return messages
+
+    content = "\n".join(msg.content for msg in messages if msg.content)
+    if not content:
+        return messages
+    return [ChatMessage(role="user", content=content)]
+
+
 class ModelCallStat(BaseModel):
     call_type: Literal["llm", "embedding"]
     model: Optional[str] = None
@@ -65,6 +89,9 @@ class ModelCallStat(BaseModel):
     prompt_tokens: Optional[int] = None
     completion_tokens: Optional[int] = None
     total_tokens: Optional[int] = None
+    # Subsets of the two counts above, when the provider reports them.
+    cached_prompt_tokens: Optional[int] = None
+    reasoning_tokens: Optional[int] = None
     batch_size: Optional[int] = None
     duration_seconds: Optional[float] = None
 
@@ -94,7 +121,26 @@ class ModelStatsLogger(ModelStatsReceiver):
         logger.info(self.format_str.format(**stats.model_dump()))
 
 
+def error_status_code(error: Exception) -> Optional[int]:
+    """Best-effort HTTP status from a provider SDK exception.
+
+    Every provider raises its own error type, but all of them carry the status
+    somewhere: ``status_code`` (OpenAI, Anthropic, Ollama), ``code`` (Gemini),
+    or a nested response object.
+    """
+    for attribute in ("status_code", "code"):
+        value = getattr(error, attribute, None)
+        if isinstance(value, int):
+            return value
+    response = getattr(error, "response", None)
+    status = getattr(response, "status_code", None)
+    return status if isinstance(status, int) else None
+
+
 class BaseLlmClient:
+    #: Provider prefix used when recording model calls (``openai/gpt-4o``).
+    provider: str = ""
+
     def __init__(
         self,
         llm_client_parameters: Optional[LlmClientParameters] = None,
@@ -141,10 +187,15 @@ class BaseLlmClient:
 
         streamer = Streamer(stream_delta=stream_delta, timeout_seconds=timeout)
 
+        started = time.perf_counter()
+
         async def _on_retry(attempt: int, error: Exception):
             # The next attempt re-registers its value streamers and re-sends
             # content from scratch; tell consumers to discard what they have.
             streamer.reset_active()
+            # Each failed attempt gets its own row, so a 429 storm is visible
+            # in the Model Calls table rather than only in the logs.
+            await self._record_failed_call(error, time.perf_counter() - started)
             await streamer.stream_restart(f"attempt {attempt}: {error}")
 
         async def _run():
@@ -157,6 +208,7 @@ class BaseLlmClient:
                     on_retry=_on_retry,
                 )
             except Exception as e:
+                await self._record_failed_call(e, time.perf_counter() - started)
                 await streamer.stream_error(e)
 
         # Start the completion process in the background with retry
@@ -205,6 +257,30 @@ class BaseLlmClient:
         """Subclasses should use this method to report model stats."""
         if self.model_stats_receiver is not None:
             self.model_stats_receiver.receive_model_stats(stats)
+
+    def stat_model_name(self) -> str:
+        """The ``provider/model`` name this client records its calls under."""
+        model = getattr(self, "model", "") or ""
+        return f"{self.provider}/{model}" if self.provider else model
+
+    async def _record_failed_call(self, error: Exception, duration: float) -> None:
+        """Record an attempt that never produced a response.
+
+        Successful calls were the only ones ever written, so the Model Calls
+        table showed a suspiciously healthy service: a provider outage or a
+        rate-limit storm left no trace at all. There are no token counts to
+        report for a failed attempt, so the row carries the status code and the
+        error text.
+        """
+        await self._send_model_call_stats(
+            ModelCallStat(
+                call_type="llm",
+                model=self.stat_model_name(),
+                response_code=error_status_code(error),
+                response_data=str(error),
+                duration_seconds=duration,
+            )
+        )
 
     async def _run_chat_completions(
         self,

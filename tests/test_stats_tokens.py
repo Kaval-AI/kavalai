@@ -21,7 +21,7 @@ async def test_stats_with_tokens_and_models(agents_db: AsyncSession):
             "model": "gpt-4",
             "prompt_tokens": 100,
             "completion_tokens": 50,
-            "cost": 0.01,
+            "cached_prompt_tokens": 40,
         },
     )
 
@@ -34,7 +34,7 @@ async def test_stats_with_tokens_and_models(agents_db: AsyncSession):
             "model": "claude-3",
             "prompt_tokens": 200,
             "completion_tokens": 100,
-            "cost": 0.02,
+            "reasoning_tokens": 30,
         },
     )
 
@@ -49,7 +49,6 @@ async def test_stats_with_tokens_and_models(agents_db: AsyncSession):
             "prompt_tokens": 500,
             "completion_tokens": 0,
             "total_tokens": 500,
-            "cost": 0.001,
         },
     )
 

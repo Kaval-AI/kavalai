@@ -14,6 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
+import asyncio
 import inspect
 import json
 from loguru import logger
@@ -144,36 +145,53 @@ class Validator:
     def cast_result(
         result: Any, target_output_type: Optional[Type], context_info: str = ""
     ) -> Any:
-        """Cast result to target output type if it's a Pydantic model."""
-        if (
+        """Cast a tool's return value to the model that describes it.
+
+        Tools that declare a Pydantic return type are validated against it.
+        Everything else — ``-> str``, ``-> int``, ``-> dict``, an MCP payload —
+        is wrapped in a generated single-field model, so every caller reads the
+        value from ``.result`` regardless of what the tool returned.
+
+        Raises:
+            FunctionKernelException: if the value cannot satisfy the model. It
+                used to be logged and the raw value returned instead, which
+                handed the caller a different type than the tool's own
+                signature promised, quietly.
+        """
+        if not (
             target_output_type
             and inspect.isclass(target_output_type)
             and issubclass(target_output_type, BaseModel)
         ):
-            try:
-                if isinstance(result, dict):
-                    return target_output_type(**result)
-                if isinstance(result, BaseModel):
-                    if isinstance(result, target_output_type):
-                        return result
-                    return target_output_type(**result.model_dump())
+            return result
 
-                fields = target_output_type.model_fields
-                if len(fields) == 1:
-                    field_name = list(fields.keys())[0]
-                    # If result is already of the correct type for the field, or can be cast
-                    return target_output_type(**{field_name: result})
-
-                try:
-                    return target_output_type(result)
-                except Exception:
-                    return result
-            except Exception as e:
-                logger.warning(
-                    f"{context_info} returned incompatible result for {target_output_type}: {e}"
-                )
+        try:
+            if isinstance(result, target_output_type):
                 return result
-        return result
+
+            # A generated wrapper takes the value *as* its field. Checking this
+            # before the dict branch is what stops a `-> dict` tool having its
+            # payload expanded into keyword arguments, which no wrapper can
+            # accept and which used to fail validation silently.
+            if list(target_output_type.model_fields) == ["result"]:
+                return target_output_type(result=result)
+
+            if isinstance(result, dict):
+                return target_output_type(**result)
+            if isinstance(result, BaseModel):
+                return target_output_type(**result.model_dump())
+
+            fields = target_output_type.model_fields
+            if len(fields) == 1:
+                field_name = next(iter(fields))
+                return target_output_type(**{field_name: result})
+
+            return target_output_type(result)
+        except Exception as e:
+            raise FunctionKernelException(
+                f"{context_info} returned a result that does not match "
+                f"{target_output_type.__name__}: {e}"
+            ) from e
 
 
 class FunctionKernel:
@@ -193,6 +211,9 @@ class FunctionKernel:
         # MCP session management
         self.mcp_sessions: Dict[str, "ClientSession"] = {}
         self.mcp_cleanups: List[Any] = []
+        # One lock per server so two concurrent first-calls cannot each spawn a
+        # process and leak one of them.
+        self._mcp_connect_locks: Dict[str, asyncio.Lock] = {}
 
     def register_rest_server(self, server: RestServer):
         if server.name in self.rest_servers:
@@ -415,6 +436,22 @@ class FunctionKernel:
                 result_data, output_type, f"REST tool '{server_name}.{tool}'"
             )
 
+    async def connect_mcp_servers(self) -> None:
+        """Open a session to every registered MCP server and list its tools.
+
+        MCP servers are the only tool backend whose tools are not known from
+        configuration alone — they have to be asked. Until that happens
+        :meth:`get_tool_descriptions` cannot mention them, and an agent handed a
+        freshly-registered server is told it has no tools and answers without
+        them. Connecting up front closes that window, and turns a misconfigured
+        server into an error before any model tokens are spent.
+
+        Idempotent: servers that are already connected are left alone.
+        """
+        for server_name in list(self.mcp_servers):
+            if server_name not in self.mcp_sessions:
+                await self._get_mcp_session(server_name)
+
     async def _get_mcp_session(self, server_name: str) -> "ClientSession":
         if ClientSession is None:
             raise FunctionKernelException(
@@ -428,6 +465,14 @@ class FunctionKernel:
         if server_name not in self.mcp_servers:
             raise FunctionKernelException(f"MCP server '{server_name}' not registered.")
 
+        lock = self._mcp_connect_locks.setdefault(server_name, asyncio.Lock())
+        async with lock:
+            # Another caller may have connected while we waited for the lock.
+            if server_name in self.mcp_sessions:
+                return self.mcp_sessions[server_name]
+            return await self._open_mcp_session(server_name)
+
+    async def _open_mcp_session(self, server_name: str) -> "ClientSession":
         config = self.mcp_servers[server_name]
 
         if config.url or config.url_env:
@@ -501,7 +546,12 @@ class FunctionKernel:
                 )
             self.mcp_tool_definitions[server_name] = definitions
         except Exception as e:
-            logger.warning(f"Could not refresh tools for MCP server {server_name}: {e}")
+            # Swallowing this used to leave the server connected but toolless,
+            # which reaches the model as "you have no tools" — a wrong answer
+            # rather than an error.
+            raise FunctionKernelException(
+                f"Could not list tools for MCP server '{server_name}': {e}"
+            ) from e
 
     async def _call_mcp_tool(
         self,
@@ -658,6 +708,12 @@ class FunctionKernel:
         self, allowed_tools: Optional[List[str]] = None
     ) -> str:
         """Returns a string description of all registered tools as a JSON array for prompts."""
+        # MCP tools are only known once their server has been asked, so connect
+        # anything still unconnected before describing what is available.
+        # Without this an agent is told it has no MCP tools and answers without
+        # them — silently, and plausibly.
+        await self.connect_mcp_servers()
+
         tools_list = []
 
         # Python tools
@@ -740,9 +796,18 @@ def _get_schema(model: Type[BaseModel]) -> Dict[str, Any]:
 
 
 def _is_tool_allowed(name: str, allowed_tools: Optional[List[str]]) -> bool:
-    """Check if a tool name is allowed."""
-    # If allowed_tools is not given, by default we allow calling all tools.
+    """Check whether one tool URI passes an allow-list.
+
+    ``None`` allows everything, ``[]`` allows nothing, and the list itself may
+    hold exact URIs (``python://lookup_resident``), a whole server
+    (``mcp://github.*``) or ``*`` for every tool. The wildcard is worth spelling
+    out even though an absent list means the same: in a review, a permissive
+    default and a deleted line look identical.
+    """
     if allowed_tools is None:
+        return True
+
+    if "*" in allowed_tools:
         return True
 
     if name in allowed_tools:

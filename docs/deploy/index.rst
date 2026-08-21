@@ -89,12 +89,44 @@ The supported entry point reads its configuration from the environment:
 Every variable is listed in :doc:`../reference/config`, and the endpoints in
 :doc:`../tutorials/serving`.
 
+Mounting it in your own app
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``python -m kavalai.server`` is a convenience, not the only way in. If you
+already have a FastAPI application, mount the router wherever you like and keep
+your own middleware, auth and lifespan:
+
+.. code-block:: python
+
+   from kavalai.server import create_agent_router
+   from kavalai.workflow import WorkflowEngine
+
+   engine = WorkflowEngine.from_yaml_path("support_agent.yaml")
+   app.include_router(create_agent_router(engine), prefix="/agents/support")
+
+If you do, connect the engine's tool servers at startup and release them at
+shutdown — ``create_agent_app`` does this for you, a bare router does not:
+
+.. code-block:: python
+
+   @asynccontextmanager
+   async def lifespan(app):
+       await engine.connect()      # starts MCP servers, discovers their tools
+       yield
+       await engine.aclose()
+
+One engine serves every request. That is the intended shape: it parses the
+workflow once, keeps one set of tool-server connections, and each run does its
+own token accounting.
+
 .. warning::
 
-   The ``agent-server`` command in ``dockerfiles/agent.entrypoint.sh`` is
-   currently **out of date** — it invokes a module path that no longer exists
-   and reads different variable names. Use ``python -m kavalai.server`` as your
-   container command until that is fixed; see :doc:`../todo`.
+   Authentication is **off** unless ``KAVALAI_AGENT_BASIC_AUTH_USER`` and
+   ``KAVALAI_AGENT_BASIC_AUTH_PASSWORD`` are both set, and the server logs a
+   warning at startup saying so. With it off, every endpoint is public —
+   including ``GET /workflow``, which returns the workflow definition, prompts
+   included. MCP server environment values are redacted from that response, but
+   nothing else is.
 
 A minimal image
 ^^^^^^^^^^^^^^^

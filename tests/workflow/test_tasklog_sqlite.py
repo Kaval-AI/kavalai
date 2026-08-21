@@ -156,3 +156,66 @@ async def test_background_exception_is_swallowed(task_logger, caplog):
     task_logger._connect = Boom._connect.__get__(task_logger)
     task_logger.log_model_call(ModelCallStat(call_type="llm"))
     await task_logger.flush()  # should not raise
+
+
+@pytest.mark.asyncio
+async def test_logged_rows_can_be_read_back_without_sql():
+    """Reading the log used to mean `_connect()` and hand-written SQL."""
+    logger = SqliteTaskLogger()
+    try:
+        logger.log_node(
+            run_id="run-1",
+            session_id="s",
+            agent_id="a",
+            node_name="classify",
+            node_type="llm",
+            inputs={"user_message": "hei"},
+            output={"intent": "greeting"},
+            prompt="classify this",
+            duration=0.5,
+            errors=None,
+        )
+        logger.log_node(
+            run_id="run-2",
+            session_id="s",
+            agent_id="a",
+            node_name="answer",
+            node_type="llm",
+            inputs=None,
+            output="tere",
+            prompt=None,
+            duration=0.1,
+            errors=["nope"],
+        )
+        logger.log_model_call(
+            ModelCallStat(
+                call_type="llm",
+                model="openai/gpt-4o-mini",
+                prompt_tokens=10,
+                completion_tokens=4,
+                total_tokens=14,
+                cached_prompt_tokens=8,
+                response_code=200,
+            ),
+            agent_id="a",
+        )
+
+        # No explicit flush: the reader awaits the pending background writes,
+        # otherwise it races them and returns a short list now and then.
+        tasks = await logger.get_tasks()
+        assert {task["name"] for task in tasks} == {"classify", "answer"}
+
+        (one,) = await logger.get_tasks(run_id="run-1")
+        assert one["inputs"] == {"user_message": "hei"}
+        assert one["output"] == {"intent": "greeting"}
+        assert one["errors"] is None
+
+        (failed,) = await logger.get_tasks(run_id="run-2")
+        assert failed["errors"] == ["nope"]
+
+        (call,) = await logger.get_model_calls()
+        assert call["model"] == "openai/gpt-4o-mini"
+        assert call["cached_prompt_tokens"] == 8
+        assert call["response_code"] == 200
+    finally:
+        await logger.close()

@@ -122,7 +122,7 @@ async def test_agent_model_call_stats(agents_db: AsyncSession):
             "model": "gpt-4",
             "agent_id": agent.id,
             "response_code": 200,
-            "cost": 0.000123,
+            "cached_prompt_tokens": 12,
         },
     )
     assert stat.agent_id == agent.id

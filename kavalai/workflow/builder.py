@@ -228,7 +228,7 @@ class WorkflowBuilder:
                 output=output,
                 next=next,
                 inputs=_coerce_inputs(inputs),
-                allowed_tools=allowed_tools or [],
+                allowed_tools=allowed_tools,
                 max_steps=max_steps,
                 llm_model=llm_model,
                 llm_kwargs=llm_kwargs or {},

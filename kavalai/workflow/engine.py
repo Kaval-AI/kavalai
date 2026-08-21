@@ -132,8 +132,6 @@ class WorkflowEngine:
         self.task_logger = task_logger
         self.client_factory = client_factory or client_factory_module.make_client
         self.max_node_visits = max_node_visits
-        # Per-run token aggregator; recreated for each run() so totals don't leak.
-        self._token_stats = TokenAccumulator(task_logger)
 
         # Data types are usually JSON-schema fragments compiled to Pydantic models
         # by the SchemaParser. ``data_models`` lets callers (e.g. the
@@ -187,6 +185,44 @@ class WorkflowEngine:
             raise WorkflowException(f"Workflow validation failed: {e}") from e
         return cls(graph, **kwargs)
 
+    # ----------------------------------------------------------------- lifecycle
+    async def connect(self) -> "WorkflowEngine":
+        """Open the connections the workflow's tool servers need.
+
+        Only MCP servers need this: they are separate processes (or HTTP
+        endpoints) whose tool lists are discovered on connect. Calling it up
+        front means a misconfigured server fails before any tokens are spent,
+        and — more importantly — that an agent node is told about the MCP tools
+        it has, instead of being handed an empty list because nothing has called
+        one yet.
+
+        Safe to call more than once; already-connected servers are skipped. The
+        engine still connects lazily on first use if you never call this, so it
+        is an optimisation and a fail-fast check rather than a requirement.
+
+        Returns:
+            The engine, so it can be used as ``engine = await
+            WorkflowEngine.from_yaml_path(...).connect()``.
+        """
+        await self.kernel.connect_mcp_servers()
+        return self
+
+    async def aclose(self) -> None:
+        """Release the tool servers this engine owns.
+
+        Call once when the engine is discarded — from a FastAPI lifespan, or at
+        the end of a script. Runs must not do this: the kernel is engine state,
+        shared by every run, so closing it mid-flight would tear down MCP
+        sessions other runs are still using.
+        """
+        await self.kernel.close()
+
+    async def __aenter__(self) -> "WorkflowEngine":
+        return await self.connect()
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        await self.aclose()
+
     # ------------------------------------------------------------------- helpers
     def get_data_type(self, name: Optional[str]):
         if not name:
@@ -207,16 +243,17 @@ class WorkflowEngine:
         return model
 
     def _make_llm_client(
-        self, node_model: Optional[str], llm_kwargs: dict, agent_id: Optional[str]
+        self, node_model: Optional[str], llm_kwargs: dict, run_context: RunContext
     ) -> BaseLlmClient:
         model = self._resolve_model(node_model)
         merged = dict(self.graph.llm_kwargs)
         merged.update(llm_kwargs or {})
         parameters = client_factory_module.build_parameters(merged)
-        # The accumulator tallies tokens for the whole run and forwards each call
-        # to the task logger (when configured).
-        self._token_stats.agent_id = agent_id
-        return self.client_factory(model, parameters, self._token_stats)
+        # The accumulator belongs to the run, not the engine: one engine serves
+        # many concurrent runs (see ``kavalai.server``), and a shared counter
+        # would report each run's tokens against whichever run finished next.
+        # It tallies the whole run and forwards each call to the task logger.
+        return self.client_factory(model, parameters, run_context.token_stats)
 
     # --------------------------------------------------------------------- nodes
     def _scoped_event(self, node: Node, chunk: StreamContent) -> WorkflowStreamEvent:
@@ -260,8 +297,7 @@ class WorkflowEngine:
             for msg in history:
                 messages.append(ChatMessage(role=msg.role, content=msg.content))
 
-        agent_id = str(run_context.agent_id) if run_context.agent_id else None
-        client = self._make_llm_client(node.llm_model, node.llm_kwargs, agent_id)
+        client = self._make_llm_client(node.llm_model, node.llm_kwargs, run_context)
         output_type = self.get_data_type(node.output)
 
         start = time.perf_counter()
@@ -308,17 +344,16 @@ class WorkflowEngine:
     ) -> AsyncGenerator[WorkflowStreamEvent, None]:
         input_data = await run_context.prepare_tool_inputs(node)
         rendered_prompt = await run_context.render_prompt(node.prompt)
-        agent_id = str(run_context.agent_id) if run_context.agent_id else None
-        client = self._make_llm_client(node.llm_model, node.llm_kwargs, agent_id)
+        client = self._make_llm_client(node.llm_model, node.llm_kwargs, run_context)
         output_type = self.get_data_type(node.output)
 
         agent = Agent(
             llm_client=client,
             kernel=self.kernel,
             run_context=run_context,
-            # An empty list on the node means "no restriction"; the agent
-            # distinguishes that from an explicit empty allow-list.
-            allowed_tools=node.allowed_tools or None,
+            # Passed through verbatim: absent means every tool, ``[]`` means
+            # none, exactly as in the Python API.
+            allowed_tools=node.allowed_tools,
         )
         start = time.perf_counter()
         result_value: Optional[str] = None
@@ -457,6 +492,9 @@ class WorkflowEngine:
             data=dict(parent.data),
             templates=parent.templates,
             agent_service=parent.agent_service,
+            # Shared on purpose: branches are part of one run, so their model
+            # calls belong in the same total.
+            token_stats=parent.token_stats,
         )
 
     @staticmethod
@@ -609,11 +647,13 @@ class WorkflowEngine:
                 draining the stream.
         """
         invocation_id = uuid4().hex[:8]
-        # Fresh token aggregator so totals never leak between runs.
-        self._token_stats = TokenAccumulator(self.task_logger)
+        # One aggregator per run, carried on the run context, so concurrent runs
+        # on the same engine never see each other's tokens.
+        token_stats = TokenAccumulator(self.task_logger)
 
         parsed_input = self.get_data_type("input")(**input_data)
         run_context = RunContext()
+        run_context.token_stats = token_stats
         run_context.data["input"] = parsed_input
         run_context.templates = {t.name: t.value for t in self.graph.templates}
 
@@ -641,6 +681,9 @@ class WorkflowEngine:
                     input_data=to_plain(input_data),
                 )
                 run_context.agent_id = agent.id
+                # Model calls are logged against the agent; the accumulator is
+                # not shared with any other run, so setting this once is safe.
+                token_stats.agent_id = str(agent.id)
                 run_context.session_id = session.id
                 run_context.run_id = run.id
                 # Lets ``history:`` inputs resolve values from previous runs.
@@ -667,7 +710,7 @@ class WorkflowEngine:
                 )
                 async for event in self._walk(run_context, state):
                     yield event
-                state.token_usage = self._token_stats.summary()
+                state.token_usage = token_stats.summary()
                 yield WorkflowStreamEvent(
                     type="workflow_completed",
                     name=self.graph.name,
@@ -711,16 +754,17 @@ class WorkflowEngine:
                 )
                 raise WorkflowException(e) from e
             finally:
-                await self.kernel.close()
+                # The kernel is engine state — tool servers outlive the run and
+                # are released by :meth:`aclose`. Closing it here would tear
+                # down MCP sessions that other runs are still using.
                 # Record and report token usage regardless of success or failure.
-                state.token_usage = self._token_stats.summary()
+                state.token_usage = token_stats.summary()
                 if self.task_logger:
                     await self.task_logger.flush()
-                self._log_token_usage(invocation_id)
+                self._log_token_usage(invocation_id, token_stats)
 
-    def _log_token_usage(self, invocation_id: str) -> None:
+    def _log_token_usage(self, invocation_id: str, s: TokenAccumulator) -> None:
         """Log the aggregate model token usage for the run."""
-        s = self._token_stats
         logger.info(
             f"[{invocation_id}] Workflow '{self.graph.name}' token usage: "
             f"{s.model_calls} model call(s), {s.total_tokens} tokens "

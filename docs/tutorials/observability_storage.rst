@@ -213,9 +213,12 @@ identical tables — so a run looks identical wherever it lives:
      - Per-node debug data: each node's inputs and output, for drilling into what a
        step actually did.
    * - ``model_call_stats``
-     - One row per LLM or embedding call: model, token counts and duration.
-       (The table has a ``cost`` column, but the runtime does not compute one —
-       see :doc:`../todo`.)
+     - One row per LLM or embedding call: model, token counts, duration and the
+       provider's status code. Failed attempts are recorded too, so a rate-limit
+       storm shows up here rather than only in the logs. Where the provider
+       reports them, ``cached_prompt_tokens`` and ``reasoning_tokens`` break out
+       the parts of the totals that are billed differently. There is no ``cost``
+       column: see :doc:`../guides/observability`.
 
 The first four are written by ``AgentService``; ``tasks`` and
 ``model_call_stats`` come from ``TaskLogger``. The relationship is a simple

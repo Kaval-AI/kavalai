@@ -415,3 +415,33 @@ def test_run_agent_server_serves_the_configured_app(env_configured_agent, monkey
     assert served["host"] == "127.0.0.1"
     assert served["port"] == 1234
     assert served["app"].state.engine.graph.name == "srv"
+
+
+def test_get_workflow_redacts_mcp_server_secrets():
+    """`env` is where an API key for a stdio MCP server ends up.
+
+    The endpoint sits behind the same authentication as everything else, which
+    means public when none is configured — so the values must not be in the
+    payload at all. The keys stay: which variables a server needs is useful,
+    what they are set to is not.
+    """
+    yaml_with_secret = YAML.replace(
+        "nodes:",
+        """mcp_servers:
+  - name: github
+    command: mcp-github
+    env:
+      GITHUB_TOKEN: ghp_supersecret
+nodes:""",
+        1,
+    )
+    engine = WorkflowEngine.from_yaml(yaml_with_secret, client_factory=_factory)
+    client = TestClient(create_agent_app(engine=engine, auth_dependency=lambda: None))
+
+    resp = client.get("/workflow")
+    assert resp.status_code == 200
+    assert "ghp_supersecret" not in resp.text
+
+    (server,) = resp.json()["mcp_servers"]
+    assert server["env"] == {"GITHUB_TOKEN": "***"}
+    assert server["command"] == "mcp-github"

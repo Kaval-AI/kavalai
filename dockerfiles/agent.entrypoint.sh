@@ -10,12 +10,14 @@ run_agent_migrations() {
 # Function to run agent server
 run_agent_server() {
     echo "Starting agent server..."
-    if [ -z "$WORKFLOW_YAML_PATH" ]; then
-        echo "Error: WORKFLOW_YAML_PATH environment variable is required to run agent server."
+    if [ -z "$KAVALAI_AGENT_WORKFLOW_PATH" ]; then
+        echo "Error: KAVALAI_AGENT_WORKFLOW_PATH environment variable is required to run agent server."
         exit 1
     fi
-    # Use environment variables for DB connection in kavalai.agents.server
-    exec python -m kavalai.agents.server "$WORKFLOW_YAML_PATH" --port "${AGENT_PORT:-8001}" --host "${AGENT_HOST:-0.0.0.0}"
+    # The entry point takes no arguments: it reads KAVALAI_AGENT_WORKFLOW_PATH,
+    # KAVALAI_AGENT_HOST and KAVALAI_AGENT_PORT (plus the KAVALAI_DB_* settings)
+    # from the environment itself.
+    exec python -m kavalai.server
 }
 
 case "$1" in

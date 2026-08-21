@@ -239,9 +239,7 @@ class FastEmbedClient(BaseEmbeddingClient):
             duration_sections=duration,
             batch_size=len(texts),
             total_tokens=None,  # FastEmbed does not expose token counts.
-            cost=0.0,
         )
-        stats.currency = "USD"
         return embeddings, stats
 
 

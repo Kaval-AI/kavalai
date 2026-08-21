@@ -151,7 +151,6 @@ async def test_fastembed_embeddings(monkeypatch):
     assert vectors == [[0.9, 0.1]]
     assert stats.call_type == "embedding"
     assert stats.model == "fastembed/bge-small-en-v1.5"
-    assert stats.currency == "USD"
 
 
 def test_fastembed_get_model_lazy(monkeypatch):

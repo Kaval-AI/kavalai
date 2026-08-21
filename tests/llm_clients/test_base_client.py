@@ -247,3 +247,104 @@ def test_model_stats_logger():
         logger_instance = ModelStatsLogger(format_str="Custom: {total_tokens}")
         logger_instance.receive_model_stats(stats)
         mock_logger.info.assert_called_with("Custom: 100")
+
+
+# ------------------------------------------------------------- user-turn rule
+def test_ensure_user_turn_promotes_a_system_only_history():
+    """Workflow `llm` nodes render everything into one system message.
+
+    Providers disagree about a request with no user turn — Anthropic rejects an
+    empty message list, and llama3.2 answers with a literal `assistant\\n\\n`
+    prefix — so the system content becomes the user turn.
+    """
+    from kavalai.llm_clients.base_client import ChatMessage, ensure_user_turn
+
+    result = ensure_user_turn(
+        [
+            ChatMessage(role="system", content="You are terse."),
+            ChatMessage(role="system", content="Answer in Estonian."),
+        ]
+    )
+
+    assert [(m.role, m.content) for m in result] == [
+        ("user", "You are terse.\nAnswer in Estonian.")
+    ]
+
+
+def test_ensure_user_turn_leaves_a_real_conversation_alone():
+    from kavalai.llm_clients.base_client import ChatMessage, ensure_user_turn
+
+    messages = [
+        ChatMessage(role="system", content="You are terse."),
+        ChatMessage(role="user", content="Hello?"),
+    ]
+
+    assert ensure_user_turn(messages) is messages
+
+
+# --------------------------------------------------------- failed-call records
+def test_error_status_code_reads_each_provider_shape():
+    from kavalai.llm_clients.base_client import error_status_code
+
+    class WithStatus(Exception):
+        status_code = 429
+
+    class WithCode(Exception):
+        code = 503
+
+    class WithResponse(Exception):
+        def __init__(self):
+            self.response = type("R", (), {"status_code": 500})()
+
+    assert error_status_code(WithStatus()) == 429
+    assert error_status_code(WithCode()) == 503
+    assert error_status_code(WithResponse()) == 500
+    assert error_status_code(ValueError("no status here")) is None
+
+
+@pytest.mark.asyncio
+async def test_failed_calls_are_recorded_with_their_status_code():
+    """A provider outage must leave a trace, not just a healthy-looking table."""
+    from kavalai.llm_clients.base_client import (
+        BaseLlmClient,
+        ChatHistory,
+        ChatMessage,
+        ModelStatsReceiver,
+    )
+
+    class Collector(ModelStatsReceiver):
+        def __init__(self):
+            self.stats = []
+
+        def receive_model_stats(self, stats):
+            self.stats.append(stats)
+
+    class RateLimited(Exception):
+        status_code = 429
+
+    class AlwaysFailing(BaseLlmClient):
+        provider = "fake"
+
+        def __init__(self, receiver):
+            super().__init__(None, receiver)
+            self.model = "m"
+
+        async def _run_chat_completions(self, chat_history, response_model, streamer):
+            raise RateLimited("slow down")
+
+    collector = Collector()
+    client = AlwaysFailing(collector)
+
+    streamer = await client.stream_chat_completions(
+        chat_history=ChatHistory(messages=[ChatMessage(role="user", content="hi")])
+    )
+    with pytest.raises(RuntimeError):
+        async for _ in streamer:
+            pass
+
+    assert collector.stats, "a failed call must still be recorded"
+    stat = collector.stats[-1]
+    assert stat.response_code == 429
+    assert stat.model == "fake/m"
+    assert stat.total_tokens is None
+    assert "slow down" in stat.response_data

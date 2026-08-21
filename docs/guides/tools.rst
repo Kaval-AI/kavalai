@@ -46,6 +46,25 @@ the kernel validates and coerces the arguments; after a call it coerces the
 return value (so a tool that yields ``"50"`` becomes ``50``). This is the same
 typed-I/O guarantee that node boundaries enjoy — see :doc:`safety`.
 
+There are only two shapes to remember:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 34 66
+
+   * - The tool returns
+     - You get back
+   * - A Pydantic model
+     - That model, validated.
+   * - Anything else — ``str``, ``int``, ``dict``, a list, an MCP payload
+     - A generated single-field model. The value is ``result.result``, whole
+       and unmodified.
+
+A return value that cannot satisfy the model raises
+``FunctionKernelException``. It used to be logged as a warning and the raw
+value handed back instead, which meant a caller could silently receive
+something other than what the tool's own signature promised.
+
 Python tools
 ------------
 
@@ -95,17 +114,23 @@ stdio, discovers the tools it offers and routes calls to them:
    from kavalai import FunctionKernel, McpServer
 
    kernel.register_mcp_server(McpServer(name=..., command=..., args=[...]))
+   await kernel.connect_mcp_servers()   # start the process(es), list their tools
    ...
-   await kernel.close()   # shut the process(es) down
+   await kernel.close()                 # shut them down
 
-.. warning::
+Registration only records the configuration. ``connect_mcp_servers()`` is what
+starts each process and asks it what it offers, and it is worth calling
+explicitly: a misconfigured server then fails at startup rather than in the
+middle of a run, before any tokens are spent.
 
-   Discovery happens when the server's session opens, and the session opens on
-   the **first call** to that server — not at registration. Until then
-   ``get_tool_descriptions()`` does not list its tools, so an agent handed a
-   freshly-registered MCP server is told it has none and will answer without
-   them. Make one call first (or address the tool from a ``function`` node) to
-   warm it up. See :doc:`../todo`.
+You are not required to. ``get_tool_descriptions()`` connects anything still
+unconnected before it answers, and a tool call connects on demand, so the
+tools are never invisible to a model. Connecting up front just moves the
+subprocess spawn off the request path.
+
+The connections belong to the kernel, which usually means they outlive any one
+run. ``WorkflowEngine`` wraps both ends of this as ``await engine.connect()``
+and ``await engine.aclose()``, or use it as an async context manager.
 
 Both :class:`~kavalai.RestServer` and :class:`~kavalai.McpServer` are importable
 from the top-level :mod:`kavalai` package.

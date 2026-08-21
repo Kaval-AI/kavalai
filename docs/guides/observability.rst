@@ -69,8 +69,40 @@ produces a ``ModelCallStat`` with token usage and timing, delivered through the
 ``ModelStatsReceiver`` callback interface (``ModelStatsLogger`` simply logs
 them). See :doc:`../tutorials/llm_clients`.
 
-The runtime records **usage**, not spend: multiply the token counts by your
-provider's published prices to get money.
+Attempts that never produced a response are recorded too, with the provider's
+status code and the error text in place of token counts — so a rate-limit storm
+or an outage leaves a trace instead of a suspiciously healthy-looking table.
+
+Why there is no cost column
+---------------------------
+
+The runtime records **usage**, not spend, and that is a deliberate choice
+rather than a gap.
+
+Providers do not return a price. OpenAI, Anthropic and Gemini return token
+counts; only aggregators like OpenRouter put a cost on the response. So any
+framework that reports money carries a price table, and prices change often
+enough that every project which takes this seriously keeps that table outside
+the library — LiteLLM ships a JSON file it re-fetches at runtime, Langfuse and
+LangSmith price at ingestion, Pydantic AI defers to the separate
+``genai-prices`` database.
+
+There is a second reason, and it is the stronger one: **cached input tokens are
+billed at a fraction of fresh ones**, so a cost derived from an
+undifferentiated ``prompt_tokens`` is not merely stale, it is wrong by a
+multiple. Kaval.AI therefore records ``cached_prompt_tokens`` and
+``reasoning_tokens`` alongside the totals, wherever the provider reports them,
+which is exactly what a price table needs to be applied correctly:
+
+.. code-block:: python
+
+   for call in await service.get_model_call_stats(call_type="llm", limit=5):
+       fresh = (call.prompt_tokens or 0) - (call.cached_prompt_tokens or 0)
+       print(call.model, fresh, call.cached_prompt_tokens, call.completion_tokens)
+
+Pricing those numbers is a few lines against a table you control — and it keeps
+the price of a model somewhere you can correct in an afternoon, rather than
+inside a library release.
 
 TaskLogger and fire-and-forget
 ------------------------------

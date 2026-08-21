@@ -232,11 +232,19 @@ Takes every ``llm`` key above except ``use_history``, plus:
      - Maximum reasoning/tool-calling iterations. Default ``10``. This is the
        bound that stops a runaway loop.
    * - ``allowed_tools``
-     - Tool URIs this node may use; ``proto://server.*`` allows a whole server.
-       Tools outside the list are neither described to the model nor callable.
-       Omitting the key — or giving an empty list — allows **every** registered
-       tool. (In the Python :class:`~kavalai.Agent` API an empty list means the
-       opposite: no tools at all.)
+     - Tool URIs this node may use. Tools outside the list are neither
+       described to the model nor callable. ``proto://server.*`` allows one
+       whole server and ``"*"`` allows every registered tool; omitting the key
+       means the same as ``"*"``, and ``[]`` means no tools at all. The values
+       mean exactly what they do in the Python
+       :class:`~kavalai.Agent` API.
+
+       .. code-block:: yaml
+
+          allowed_tools: ["*"]                         # every tool
+          allowed_tools: ["mcp://github.*"]            # one server
+          allowed_tools: ["python://lookup_resident"]  # one tool
+          allowed_tools: []                            # none
    * - ``stream_instructions``
      - Stream each step's "thinking out loud" line as ``<node>_instructions``.
    * - ``stream_partials``
@@ -415,10 +423,16 @@ workflow file, which is usually committed to source control.
 
 .. warning::
 
-   An MCP server's tools are discovered when its session opens, and the session
-   opens on the **first call** to that server. A freshly-registered MCP server
-   is therefore not yet visible to an ``agent`` node. Address it once from a
-   ``function`` node first, or see :doc:`../todo`.
+   ``mcp_servers[].env`` is the exception — it takes literal values, not
+   variable names, so an API key written there sits in the workflow file. Those
+   values are redacted from ``GET /workflow`` on the agent server, but the file
+   itself is not protected. Prefer ``command_env`` and a wrapper script when a
+   stdio server needs a credential.
+
+MCP servers are started and asked for their tools when the engine connects, so
+an ``agent`` node sees them on the first run. Call ``await engine.connect()``
+at startup if you want a misconfigured server to fail there rather than
+mid-run — see :doc:`../guides/tools`.
 
 REST tools themselves are declared in code with
 :meth:`~kavalai.FunctionKernel.register_rest_tool` (they need input and output

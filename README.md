@@ -28,11 +28,15 @@ See the [full documentation](https://docs.kaval.ai) for more detailed reference.
 ## Install
 
 ```
-pip install kavalai[common]
+pip install "kavalai[common]"
 ```
 
-See [Installation](https://docs.kaval.ai/tutorials/installation.html) for the
-optional extras (`gemini`, `rag`, `server`, …) and provider configuration.
+`common` is the normal install: the provider SDKs, RAG and embeddings, the
+Postgres drivers, MCP and the REST/SSE servers. The bare `kavalai` package stays
+small and Pyodide-compatible, and `kavalai[common_web]` is its browser
+counterpart. See
+[Installation](https://docs.kaval.ai/tutorials/installation.html) for the full
+table and provider configuration.
 
 ## Getting started
 

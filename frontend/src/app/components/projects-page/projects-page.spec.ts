@@ -44,7 +44,7 @@ describe('ProjectsPage', () => {
 
     projectServiceSpy.getAll.and.returnValue(of([]));
     projectServiceSpy.getMembers.and.returnValue(of([]));
-    agentServiceSpy.getSummaryStats.and.returnValue(of({ total_cost: null, llm_cost: null, embedding_cost: null, total_sessions: 0 }));
+    agentServiceSpy.getSummaryStats.and.returnValue(of({ total_sessions: 0 }));
     agentServiceSpy.getDailyStats.and.returnValue(of({
       sessions: [],
       messages: [],

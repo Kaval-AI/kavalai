@@ -23,6 +23,7 @@ import ollama
 from pydantic import BaseModel
 
 from kavalai.llm_clients.base_client import (
+    ensure_user_turn,
     BaseLlmClient,
     ChatHistory,
     LlmClientParameters,
@@ -36,6 +37,8 @@ class OllamaClient(BaseLlmClient):
     """
     Ollama LLM client implementation using the Streamer.
     """
+
+    provider = "ollama"
 
     def __init__(
         self,
@@ -78,7 +81,7 @@ class OllamaClient(BaseLlmClient):
         )
 
         messages = []
-        for msg in chat_history.messages:
+        for msg in ensure_user_turn(chat_history.messages):
             message_dict = {"role": msg.role, "content": msg.content}
             messages.append(message_dict)
 
@@ -97,8 +100,10 @@ class OllamaClient(BaseLlmClient):
         }
 
         if response_model:
-            # Ollama supports 'format': 'json'
-            call_kwargs["format"] = "json"
+            # Ollama takes a full JSON Schema here (since v0.5). The older
+            # `format="json"` only asks for *some* valid JSON, which small
+            # models happily satisfy with an object of the wrong shape.
+            call_kwargs["format"] = response_model.model_json_schema()
 
         prompt_tokens = 0
         completion_tokens = 0
@@ -121,12 +126,13 @@ class OllamaClient(BaseLlmClient):
         duration = time.perf_counter() - start_time
         stats = ModelCallStat(
             call_type="llm",
-            model=f"ollama/{self.model}",
+            model=self.stat_model_name(),
             request_data=json.dumps(call_kwargs, default=str),
             response_data=full_response,
             duration_seconds=duration,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=prompt_tokens + completion_tokens,
+            response_code=200,
         )
         await self._send_model_call_stats(stats)

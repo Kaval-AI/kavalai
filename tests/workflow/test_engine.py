@@ -411,10 +411,11 @@ async def test_agent_node_forwards_allowed_tools():
     assert allowed == ["python://web.crawl"]
 
 
-async def test_agent_node_without_allowed_tools_allows_all():
-    """An unset (empty) ``allowed_tools`` leaves every kernel tool available."""
+async def test_agent_node_allowed_tools_reach_the_agent_unchanged():
+    """Omitted means every tool; ``[]`` means none — the same as in Python."""
     assert await _run_and_capture_allowed_tools(_agent_node_graph()) is None
-    assert await _run_and_capture_allowed_tools(_agent_node_graph([])) is None
+    assert await _run_and_capture_allowed_tools(_agent_node_graph([])) == []
+    assert await _run_and_capture_allowed_tools(_agent_node_graph(["*"])) == ["*"]
 
 
 async def test_invocation_id_is_unique_per_run_and_tokens_aggregate():
@@ -1043,3 +1044,126 @@ async def test_run_matches_run_stream_result():
     assert state.status == "completed"
     assert state.output_data == {"agent_response": "r"}
     assert state.trace == ["s", "answer", "e"]
+
+
+# ------------------------------------------------------- concurrency / lifecycle
+async def test_concurrent_runs_report_their_own_token_usage():
+    """One engine, four overlapping runs: each reports only its own model call.
+
+    The accumulator used to live on the engine and be reset per run, so runs
+    that overlapped shared a counter and each reported whatever total happened
+    to be there when it finished. ``kavalai.server`` serves one engine to every
+    request, so this was the normal case under load, not an edge case.
+    """
+    import asyncio
+
+    engine = WorkflowEngine.from_dict(
+        graph_dict(STREAM_NODES), client_factory=make_factory({"agent_response": "r"})
+    )
+    states = await asyncio.gather(
+        *(engine.run({"user_message": f"m{i}"}) for i in range(4))
+    )
+
+    assert [s.status for s in states] == ["completed"] * 4
+    for state in states:
+        assert state.token_usage["model_calls"] == 1
+        assert state.token_usage["total_tokens"] == 1
+
+
+async def test_parallel_branches_share_one_run_total():
+    """Branches of a parallel node are one run, so their calls land in one total."""
+    nodes = [
+        {"name": "s", "type": "start", "next": "fan"},
+        {
+            "name": "fan",
+            "type": "parallel",
+            "branches": ["a", "b"],
+            "next": "e",
+        },
+        {
+            "name": "a",
+            "type": "llm",
+            "prompt": "a",
+            "output": "classification",
+            "next": "e",
+        },
+        {
+            "name": "b",
+            "type": "llm",
+            "prompt": "b",
+            "output": "output",
+            "next": "e",
+        },
+        {"name": "e", "type": "end", "output": "output"},
+    ]
+    engine = WorkflowEngine.from_dict(
+        graph_dict(nodes), client_factory=make_factory({"agent_response": "r"})
+    )
+    state = await engine.run({"user_message": "x"})
+
+    assert state.status == "completed"
+    assert state.token_usage["model_calls"] == 2
+
+
+async def test_kernel_survives_a_run_and_closes_with_the_engine():
+    """Tool servers belong to the engine: a finished run must not close them."""
+    engine = WorkflowEngine.from_dict(
+        graph_dict(STREAM_NODES), client_factory=make_factory({"agent_response": "r"})
+    )
+    closed = []
+
+    async def record_close():
+        closed.append(True)
+
+    engine.kernel.close = record_close
+
+    await engine.run({"user_message": "x"})
+    assert closed == []
+
+    await engine.aclose()
+    assert closed == [True]
+
+
+async def test_engine_connect_opens_mcp_servers():
+    """``connect()`` reaches the kernel so tools are known before the first run."""
+    engine = WorkflowEngine.from_dict(
+        graph_dict(STREAM_NODES), client_factory=make_factory({"agent_response": "r"})
+    )
+    connected = []
+
+    async def record_connect():
+        connected.append(True)
+
+    engine.kernel.connect_mcp_servers = record_connect
+
+    async with engine:
+        assert connected == [True]
+
+
+# ------------------------------------------------------------- allowed_tools
+async def test_agent_node_allowed_tools_are_passed_through_verbatim():
+    """`[]` means no tools in YAML too — it used to mean "all of them".
+
+    The node default was an empty list and the engine turned a falsy value into
+    ``None``, so a YAML author had no way to say "this node gets no tools" and
+    the same value meant opposite things in YAML and Python.
+    """
+    from kavalai.workflow.models import AgentNode
+
+    node_default = AgentNode(name="a", prompt="p", output="output", next="e")
+    assert node_default.allowed_tools is None
+
+    node_none = AgentNode(
+        name="a", prompt="p", output="output", next="e", allowed_tools=[]
+    )
+    assert node_none.allowed_tools == []
+
+
+def test_tool_allow_list_understands_the_wildcard():
+    from kavalai.functionkernel import _is_tool_allowed
+
+    assert _is_tool_allowed("python://anything", ["*"])
+    assert _is_tool_allowed("mcp://github.create_issue", ["mcp://github.*"])
+    assert _is_tool_allowed("python://exact", ["python://exact"])
+    assert not _is_tool_allowed("python://anything", [])
+    assert _is_tool_allowed("python://anything", None)

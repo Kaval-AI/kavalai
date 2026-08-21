@@ -314,9 +314,15 @@ def create_agent_router(
     async def get_workflow(
         _auth: Annotated[None, Depends(auth_dependency)],
     ):
-        """Retrieve the workflow configuration."""
+        """Retrieve the workflow configuration.
+
+        Behind the same authentication as every other endpoint — which means
+        public when none is configured, so the response is redacted: MCP server
+        environment values are secrets in practice (that is where an API key
+        for a stdio server ends up) and never leave the process.
+        """
         return Response(
-            content=engine.graph.model_dump_json(),
+            content=engine.graph.model_dump_public_json(),
             media_type="application/json",
         )
 
@@ -365,10 +371,27 @@ def create_agent_app(
     Returns:
         A FastAPI application instance.
     """
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
+        """Own the engine's tool servers for the lifetime of the process.
+
+        MCP servers are connected once here rather than per request: their
+        tool lists are what an agent node is told it can call, and starting a
+        subprocess on the request path would be a poor trade. Connection
+        failures surface at startup, before any request is served.
+        """
+        await engine.connect()
+        try:
+            yield
+        finally:
+            await engine.aclose()
+
     app = FastAPI(
         title=engine.graph.name,
         description=engine.graph.description,
         version=engine.graph.version,
+        lifespan=lifespan,
     )
     app.state.engine = engine
 
@@ -482,7 +505,13 @@ def create_app_from_env_conf(
         if auth_password:
             logger.info("Basic Auth password: ***")
     else:
-        logger.warning("Basic Auth is NOT configured. Server is public.")
+        logger.warning(
+            "Basic Auth is NOT configured: every endpoint on this server is "
+            "public, including GET /workflow, which returns the full workflow "
+            "definition (prompts, tool servers and their configuration). Set "
+            "KAVALAI_AGENT_BASIC_AUTH_USER and KAVALAI_AGENT_BASIC_AUTH_PASSWORD "
+            "before exposing this to a network you do not control."
+        )
 
     # Specify the connection to the KavalAI agent server.
     session_provider = db_manager.get_sessionmaker(

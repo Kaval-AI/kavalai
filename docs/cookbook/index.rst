@@ -570,12 +570,13 @@ workflows at once. This is how you fan out today.
    async def main():
        await db_manager.init_sqlite()
        service = AgentService(db_manager.get_sqlite_sessionmaker())
+       engine = build(service)           # one engine, shared by every run
 
        async def classify(note: str):
-           engine = build(service)       # one engine per concurrent run — see below
            return await engine.run({"user_message": note})
 
-       for note, state in zip(NOTES, await asyncio.gather(*map(classify, NOTES))):
+       states = await asyncio.gather(*map(classify, NOTES))
+       for note, state in zip(NOTES, states):
            out = state.output_data
            print(f"{out['topic']:<7} urgent={out['urgent']!s:<5} {note}")
 
@@ -589,19 +590,28 @@ workflows at once. This is how you fan out today.
    repair  urgent=True  The pub sign fell down and nearly hit someone.
    other   urgent=False When does the library open?
 
-Two things make this work:
+**``use_history=False``** is what makes it work. Classification is not a
+conversation: left on, each run would replay the session's earlier turns into
+the prompt — more tokens, and one note's wording nudging the next one's label.
 
-**``use_history=False``.** Classification is not a conversation. Left on, each
-run would replay the session's earlier turns into the prompt — more tokens, and
-one note's wording nudging the next one's label.
+One engine serves all four runs. Each run keeps its own token accounting, so
+the figures stay per-run no matter how much they overlap:
 
-.. important::
+.. code-block:: python
 
-   **Build one engine per concurrent run**, as above. An engine keeps a single
-   token accumulator that it resets at the start of each run, so overlapping
-   runs on one engine report each other's token counts. The outputs are correct;
-   ``token_usage`` is not. Sharing one ``AgentService`` across those engines is
-   fine. See :doc:`../todo`.
+   for state in states:
+       print(state.token_usage)
+
+.. code-block:: text
+
+   {'model_calls': 1, 'prompt_tokens': 119, 'completion_tokens': 29, 'total_tokens': 148}
+   {'model_calls': 1, 'prompt_tokens': 122, 'completion_tokens': 37, 'total_tokens': 159}
+   {'model_calls': 1, 'prompt_tokens': 120, 'completion_tokens': 34, 'total_tokens': 154}
+   {'model_calls': 1, 'prompt_tokens': 116, 'completion_tokens': 30, 'total_tokens': 146}
+
+Sharing the engine is in fact the better shape: it parses the workflow once and
+keeps one set of tool-server connections, which matters when the workflow
+declares MCP servers, since those are subprocesses.
 
 Pausing for a human
 -------------------
@@ -634,7 +644,7 @@ mid-graph — the second run starts at ``start`` again. For approval steps in th
 *middle* of a long graph, LangGraph or n8n do this natively; see
 :doc:`../tutorials/comparison`.
 
-Watching what a run cost
+Watching what a run used
 ------------------------
 
 Token usage is aggregated per run, and every individual call is recorded.
@@ -649,5 +659,7 @@ Token usage is aggregated per run, and every individual call is recorded.
    for call in await service.get_model_call_stats(call_type="llm", limit=5):
        print(call.model, call.total_tokens, f"{call.duration_seconds:.2f}s")
 
-Multiply by your provider's published prices to turn tokens into money — the
-runtime records usage, not cost. See :doc:`../guides/observability`.
+Multiply by your provider's published prices to turn tokens into money — and
+subtract ``cached_prompt_tokens`` from ``prompt_tokens`` first, because cached
+input is billed at a fraction of the rest. :doc:`../guides/observability`
+explains why the runtime records usage rather than cost.

@@ -25,6 +25,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from kavalai.llm_clients.base_client import (
+    ensure_user_turn,
     BaseLlmClient,
     LlmClientException,
     ChatHistory,
@@ -39,6 +40,8 @@ class GeminiClient(BaseLlmClient):
     """
     Gemini LLM client implementation using the Streamer.
     """
+
+    provider = "gemini"
 
     def __init__(
         self,
@@ -81,7 +84,7 @@ class GeminiClient(BaseLlmClient):
         )
 
         system_instruction, contents = convert_messages(
-            [msg.model_dump() for msg in chat_history.messages]
+            [msg.model_dump() for msg in ensure_user_turn(chat_history.messages)]
         )
 
         config_kwargs = {}
@@ -125,6 +128,8 @@ class GeminiClient(BaseLlmClient):
 
         prompt_tokens = 0
         completion_tokens = 0
+        cached_prompt_tokens = None
+        reasoning_tokens = None
         full_response = ""
 
         try:
@@ -144,8 +149,14 @@ class GeminiClient(BaseLlmClient):
                                 full_response += part.text
                                 await value_streamer.stream_partial(part.text)
                 if chunk.usage_metadata:
-                    prompt_tokens = chunk.usage_metadata.prompt_token_count
-                    completion_tokens = chunk.usage_metadata.candidates_token_count
+                    usage = chunk.usage_metadata
+                    prompt_tokens = usage.prompt_token_count
+                    completion_tokens = usage.candidates_token_count
+                    # Context cache hits and "thinking" tokens, when reported.
+                    cached_prompt_tokens = getattr(
+                        usage, "cached_content_token_count", None
+                    )
+                    reasoning_tokens = getattr(usage, "thoughts_token_count", None)
         except Exception as e:
             logger.error(f"Gemini Stream Error: {e}")
             raise
@@ -162,13 +173,16 @@ class GeminiClient(BaseLlmClient):
         }
         stats = ModelCallStat(
             call_type="llm",
-            model=f"gemini/{self.model}",
+            model=self.stat_model_name(),
             request_data=json.dumps(request_data, default=str),
             response_data=full_response,
             duration_seconds=duration,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=prompt_tokens + completion_tokens,
+            cached_prompt_tokens=cached_prompt_tokens,
+            reasoning_tokens=reasoning_tokens,
+            response_code=200,
         )
         await self._send_model_call_stats(stats)
 

@@ -274,11 +274,10 @@ async def test_register_and_call_python_tool():
     assert isinstance(result, OneField)
     assert result.val == 50
 
-    # Incompatible output type (mapping failure)
-    result = await kernel._call_python_tool(
-        "primitive", {"val": 5}, output_type=SimpleModel
-    )
-    assert result == 50  # Should return original result on failure
+    # Incompatible output type: the mismatch is an error, not a silent
+    # downgrade to the raw value.
+    with pytest.raises(FunctionKernelException, match="does not match SimpleModel"):
+        await kernel._call_python_tool("primitive", {"val": 5}, output_type=SimpleModel)
 
     # List output
     kernel.register_python_tool("list_tool", list_output)
@@ -297,9 +296,9 @@ async def test_register_and_call_python_tool():
         x: int
         y: int
 
-    # Mapping {"a": 1} to MultiField should fail and return original dict
-    result = await kernel._call_python_tool("dict", {}, output_type=MultiField)
-    assert result == {"a": 1}
+    # Mapping {"a": 1} onto a model needing x and y cannot work.
+    with pytest.raises(FunctionKernelException, match="does not match MultiField"):
+        await kernel._call_python_tool("dict", {}, output_type=MultiField)
 
 
 @pytest.mark.asyncio
@@ -389,14 +388,15 @@ async def test_python_tool_output_mapping_details():
     assert isinstance(result, SimpleModel)
     assert result.name == "nested"
 
-    # Non-dict, non-BaseModel output with multi-field model should return original
+    # A list cannot populate a two-field model, and saying so beats handing
+    # the caller a list where a SimpleModel was promised.
     @pythontool
     def list_tool() -> list:
         return [1, 2]
 
     kernel.register_python_tool("list_tool_2", list_tool)
-    result = await kernel._call_python_tool("list_tool_2", {}, output_type=SimpleModel)
-    assert result == [1, 2]
+    with pytest.raises(FunctionKernelException, match="does not match SimpleModel"):
+        await kernel._call_python_tool("list_tool_2", {}, output_type=SimpleModel)
 
     # BaseModel to different BaseModel mapping
     class OtherModel(BaseModel):
@@ -583,6 +583,9 @@ async def test_mcp_tool_errors():
             mock_session = mock_session_cls.return_value
             mock_session.initialize = AsyncMock()
             mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+            # Tool discovery runs on connect and its failures are fatal, so a
+            # session mock has to answer list_tools.
+            mock_session.list_tools = AsyncMock(return_value=MagicMock(tools=[]))
 
             # 1. Test isError=True in response (line 422)
             mock_response = MagicMock()
@@ -674,9 +677,11 @@ async def test_mcp_tool_stdio():
         assert result.name == "mcp_test"
         assert result.value == 200
 
-        # Second call should reuse session
+        # Second call should reuse session. With no output_type the payload is
+        # wrapped whole, the same as any other tool that does not declare a
+        # model — it is not expanded into fields.
         result2 = await kernel._call_mcp_tool("mcp_stdio", "test_tool", {"arg": "val"})
-        assert result2.result == "ok"
+        assert result2.result == {"name": "mcp_test", "value": 200, "result": "ok"}
 
     finally:
         # Cleanup
@@ -741,8 +746,9 @@ async def test_mcp_tool_sse(rest_server):
             kernel.register_mcp_server(server)
 
             result = await kernel._call_mcp_tool("mcp_sse", "hello", {})
-            # It should be a model because _refresh_mcp_tool_definitions creates one
-            assert result.result == "ok"
+            # A model, because _refresh_mcp_tool_definitions creates one; the
+            # payload lands in `result` rather than being expanded into fields.
+            assert result.result == {"result": "ok"}
 
             # Cleanup
             await kernel.close()
@@ -904,7 +910,7 @@ async def test_call_tool_unified():
             mock_session.call_tool = AsyncMock(return_value=mock_response)
 
             result = await kernel.call_tool("mcp://test_mcp.test_tool", {"arg": 1})
-            assert result.result == {"mcp": "works"}
+            assert result.result == {"result": {"mcp": "works"}}
             mock_session.call_tool.assert_called_with("test_tool", arguments={"arg": 1})
 
 
@@ -1176,3 +1182,53 @@ async def test_get_tool_descriptions_applies_the_allowed_tools_filter():
     )
 
     assert [tool["name"] for tool in described] == ["python://math.add"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_tools_are_described_without_a_prior_call():
+    """An agent must see MCP tools before anything has called one.
+
+    Discovery used to happen on the first tool call, so a freshly-registered
+    server contributed nothing to ``get_tool_descriptions()`` — the model was
+    told it had no tools and answered without them.
+    """
+    kernel = FunctionKernel()
+    helper_path = os.path.join(
+        os.path.dirname(__file__), "helpers", "mcp_server_stdio.py"
+    )
+    try:
+        kernel.register_mcp_server(
+            McpServer(name="mcp_stdio", command="python", args=[helper_path])
+        )
+
+        descriptions = await kernel.get_tool_descriptions()
+        assert "mcp://mcp_stdio.test_tool" in descriptions
+
+        # Connecting twice reuses the session rather than spawning a second one.
+        session = kernel.mcp_sessions["mcp_stdio"]
+        await kernel.connect_mcp_servers()
+        assert kernel.mcp_sessions["mcp_stdio"] is session
+    finally:
+        await kernel.close()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_first_calls_open_one_mcp_session():
+    """Two callers racing to use a server must not spawn two processes."""
+    kernel = FunctionKernel()
+    helper_path = os.path.join(
+        os.path.dirname(__file__), "helpers", "mcp_server_stdio.py"
+    )
+    try:
+        kernel.register_mcp_server(
+            McpServer(name="mcp_stdio", command="python", args=[helper_path])
+        )
+
+        sessions = await asyncio.gather(
+            kernel._get_mcp_session("mcp_stdio"),
+            kernel._get_mcp_session("mcp_stdio"),
+        )
+        assert sessions[0] is sessions[1]
+        assert len(kernel.mcp_sessions) == 1
+    finally:
+        await kernel.close()

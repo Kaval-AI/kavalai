@@ -23,11 +23,11 @@ export interface LLMCallStat {
   prompt_tokens: number | null;
   completion_tokens: number | null;
   total_tokens: number | null;
+  cached_prompt_tokens: number | null;
+  reasoning_tokens: number | null;
   duration_seconds: number | null;
   request_data: any | null;
   response_data: any | null;
-  cost: number | null;
-  currency: string | null;
   created_at: string;
   updated_at: string;
 }

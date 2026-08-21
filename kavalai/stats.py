@@ -30,29 +30,6 @@ async def get_summary_stats(session: AsyncSession, agent_id: str | None = None):
     end_date = datetime.now(timezone.utc)
     start_date = end_date - timedelta(days=30)
 
-    # Get LLM cost
-    stmt_llm_cost = (
-        select(func.sum(ModelCallStat.cost))
-        .select_from(ModelCallStat)
-        .where(ModelCallStat.call_type == "llm", ModelCallStat.created_at >= start_date)
-    )
-    if agent_id:
-        stmt_llm_cost = stmt_llm_cost.where(ModelCallStat.agent_id == agent_id)
-
-    # Get Embedding cost
-    stmt_embedding_cost = (
-        select(func.sum(ModelCallStat.cost))
-        .select_from(ModelCallStat)
-        .where(
-            ModelCallStat.call_type == "embedding",
-            ModelCallStat.created_at >= start_date,
-        )
-    )
-    if agent_id:
-        stmt_embedding_cost = stmt_embedding_cost.where(
-            ModelCallStat.agent_id == agent_id
-        )
-
     # Get total sessions
     stmt_sessions = (
         select(func.count(Session.id))
@@ -122,8 +99,6 @@ async def get_summary_stats(session: AsyncSession, agent_id: str | None = None):
     if agent_id:
         stmt_messages = stmt_messages.where(ChatMessage.agent_id == agent_id)
 
-    res_llm_cost = await session.execute(stmt_llm_cost)
-    res_embedding_cost = await session.execute(stmt_embedding_cost)
     res_sessions = await session.execute(stmt_sessions)
     res_tokens = await session.execute(stmt_tokens)
     res_embedding_tokens = await session.execute(stmt_embedding_tokens)
@@ -131,14 +106,9 @@ async def get_summary_stats(session: AsyncSession, agent_id: str | None = None):
     res_messages = await session.execute(stmt_messages)
     res_runs = await session.execute(stmt_runs)
 
-    llm_cost = float(res_llm_cost.scalar() or 0)
-    embedding_cost = float(res_embedding_cost.scalar() or 0)
     tokens_row = res_tokens.one()
 
     return {
-        "total_cost": llm_cost + embedding_cost,
-        "llm_cost": llm_cost,
-        "embedding_cost": embedding_cost,
         "total_sessions": int(res_sessions.scalar() or 0),
         "total_prompt_tokens": int(tokens_row[0] or 0),
         "total_completion_tokens": int(tokens_row[1] or 0),
@@ -232,11 +202,12 @@ async def get_daily_stats(
             model_name_col,
             date_col,
             func.count(ModelCallStat.id).label("count"),
-            func.sum(ModelCallStat.cost).label("cost"),
             func.sum(ModelCallStat.duration_seconds).label("duration_seconds"),
             func.sum(ModelCallStat.prompt_tokens).label("prompt_tokens"),
             func.sum(ModelCallStat.completion_tokens).label("completion_tokens"),
             func.sum(ModelCallStat.total_tokens).label("total_tokens"),
+            func.sum(ModelCallStat.cached_prompt_tokens).label("cached_prompt_tokens"),
+            func.sum(ModelCallStat.reasoning_tokens).label("reasoning_tokens"),
             func.sum(ModelCallStat.batch_size).label("batch_size"),
         ).where(
             ModelCallStat.call_type == call_type, ModelCallStat.created_at >= start_date
@@ -253,11 +224,12 @@ async def get_daily_stats(
                 stats_by_model[row.model_name] = {}
             stats_by_model[row.model_name][row.date] = {
                 "count": row.count,
-                "cost": float(row.cost or 0),
                 "duration_seconds": float(row.duration_seconds or 0),
                 "prompt_tokens": int(row.prompt_tokens or 0),
                 "completion_tokens": int(row.completion_tokens or 0),
                 "total_tokens": int(row.total_tokens or 0),
+                "cached_prompt_tokens": int(row.cached_prompt_tokens or 0),
+                "reasoning_tokens": int(row.reasoning_tokens or 0),
                 "batch_size": int(row.batch_size or 0),
             }
         return stats_by_model
@@ -294,11 +266,12 @@ async def get_daily_stats(
                 d,
                 {
                     "count": 0,
-                    "cost": 0.0,
                     "duration_seconds": 0.0,
                     "prompt_tokens": 0,
                     "completion_tokens": 0,
                     "total_tokens": 0,
+                    "cached_prompt_tokens": 0,
+                    "reasoning_tokens": 0,
                     "batch_size": 0,
                 },
             )

@@ -137,7 +137,12 @@ async def test_unset_parameters_send_no_options():
 
 
 @pytest.mark.asyncio
-async def test_response_model_requests_json_format():
+async def test_response_model_requests_the_json_schema():
+    """The response model's schema is sent, not the legacy `format="json"`.
+
+    Plain JSON mode only constrains the output to *valid* JSON, so a small
+    model can satisfy it with an object of an entirely different shape.
+    """
     payload = '{"answer": "Paris"}'
     client = make_client(
         chunks=[{"message": {"content": payload}}, {"done": True}],
@@ -147,7 +152,7 @@ async def test_response_model_requests_json_format():
         chat_history=USER_HISTORY, response_model=SimpleResponse
     )
 
-    assert client.client.call_kwargs["format"] == "json"
+    assert client.client.call_kwargs["format"] == SimpleResponse.model_json_schema()
     assert result == SimpleResponse(answer="Paris")
 
 
@@ -225,3 +230,20 @@ async def test_ollama_structured_output(ollama_client):
     assert contents[-1].type == "complete"
     data = json.loads(contents[-1].value)
     assert "Paris" in data["answer"]
+
+
+@pytest.mark.asyncio
+async def test_system_only_history_is_sent_as_a_user_turn():
+    """Ollama passes roles through, so the normalisation has to happen first."""
+    client = make_client(chunks=[{"message": {"content": "hi"}}, {"done": True}])
+
+    streamer = await client.stream_chat_completions(
+        chat_history=ChatHistory(
+            messages=[ChatMessage(role="system", content="Say 'Hello'")]
+        )
+    )
+    [_ async for _ in streamer]
+
+    assert client.client.call_kwargs["messages"] == [
+        {"role": "user", "content": "Say 'Hello'"}
+    ]

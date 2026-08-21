@@ -29,6 +29,7 @@ from openai.types.responses import (
 from pydantic import BaseModel
 
 from kavalai.llm_clients.base_client import (
+    ensure_user_turn,
     BaseLlmClient,
     ChatHistory,
     LlmClientParameters,
@@ -43,6 +44,8 @@ class OpenAIClient(BaseLlmClient):
     """
     OpenAI LLM client implementation using the Responses API and Streamer.
     """
+
+    provider = "openai"
 
     def __init__(
         self,
@@ -90,7 +93,7 @@ class OpenAIClient(BaseLlmClient):
         )
 
         messages = []
-        for msg in chat_history.messages:
+        for msg in ensure_user_turn(chat_history.messages):
             message_dict = {"role": msg.role, "content": msg.content}
             messages.append(message_dict)
 
@@ -120,6 +123,8 @@ class OpenAIClient(BaseLlmClient):
 
         prompt_tokens = 0
         completion_tokens = 0
+        cached_prompt_tokens = None
+        reasoning_tokens = None
         full_response = ""
 
         async with self.client.responses.stream(**call_kwargs) as stream:
@@ -138,18 +143,28 @@ class OpenAIClient(BaseLlmClient):
                     usage = event.response.usage
                     prompt_tokens = usage.input_tokens
                     completion_tokens = usage.output_tokens
+                    # Cached input is billed at a fraction of fresh input, and
+                    # reasoning tokens are output the caller never sees — both
+                    # are subsets of the counts above.
+                    input_details = getattr(usage, "input_tokens_details", None)
+                    cached_prompt_tokens = getattr(input_details, "cached_tokens", None)
+                    output_details = getattr(usage, "output_tokens_details", None)
+                    reasoning_tokens = getattr(output_details, "reasoning_tokens", None)
 
         await value_streamer.stream_complete()
 
         duration = time.perf_counter() - start_time
         stats = ModelCallStat(
             call_type="llm",
-            model=f"openai/{self.model}",
+            model=self.stat_model_name(),
             request_data=json.dumps(call_kwargs, default=str),
             response_data=full_response,
             duration_seconds=duration,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=prompt_tokens + completion_tokens,
+            cached_prompt_tokens=cached_prompt_tokens,
+            reasoning_tokens=reasoning_tokens,
+            response_code=200,
         )
         await self._send_model_call_stats(stats)

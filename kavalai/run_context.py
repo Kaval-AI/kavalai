@@ -36,6 +36,11 @@ class RunContext(BaseModel):
     data: dict = {}
     templates: Dict[str, str] = {}
     agent_service: Optional[Any] = None
+    # The run's TokenAccumulator. Typed loosely for the same reason as
+    # ``agent_service``: importing it here would close an import cycle. Every
+    # LLM client built during the run reports into this one object, and parallel
+    # branches share the parent's, so the totals cover the whole run.
+    token_stats: Optional[Any] = None
 
     def resolve_context_value(self, path: str):
         """Resolve a dotted path like 'input.user_message' from context data."""

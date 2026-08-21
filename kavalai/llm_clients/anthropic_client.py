@@ -24,6 +24,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from kavalai.llm_clients.base_client import (
+    ensure_user_turn,
     BaseLlmClient,
     ChatHistory,
     LlmClientException,
@@ -44,6 +45,8 @@ class AnthropicClient(BaseLlmClient):
     Anthropic (Claude) LLM client implementation using the Messages API and
     Streamer.
     """
+
+    provider = "anthropic"
 
     def __init__(
         self,
@@ -91,7 +94,7 @@ class AnthropicClient(BaseLlmClient):
         )
 
         system_prompt, messages = convert_messages(
-            [msg.model_dump() for msg in chat_history.messages]
+            [msg.model_dump() for msg in ensure_user_turn(chat_history.messages)]
         )
 
         call_kwargs: Dict[str, Any] = {
@@ -145,22 +148,31 @@ class AnthropicClient(BaseLlmClient):
             raise LlmClientException(
                 f"Anthropic model '{self.model}' refused to generate a response."
             )
+        cached_prompt_tokens = None
         if final_message.usage:
-            prompt_tokens = final_message.usage.input_tokens
-            completion_tokens = final_message.usage.output_tokens
+            usage = final_message.usage
+            prompt_tokens = usage.input_tokens
+            completion_tokens = usage.output_tokens
+            # Cache reads are billed at a fraction of fresh input; cache writes
+            # cost a premium. Both are input tokens, so record them together.
+            cached_prompt_tokens = (
+                getattr(usage, "cache_read_input_tokens", 0) or 0
+            ) + (getattr(usage, "cache_creation_input_tokens", 0) or 0) or None
 
         await value_streamer.stream_complete()
 
         duration = time.perf_counter() - start_time
         stats = ModelCallStat(
             call_type="llm",
-            model=f"anthropic/{self.model}",
+            model=self.stat_model_name(),
             request_data=json.dumps(call_kwargs, default=str),
             response_data=full_response,
             duration_seconds=duration,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=prompt_tokens + completion_tokens,
+            cached_prompt_tokens=cached_prompt_tokens,
+            response_code=200,
         )
         await self._send_model_call_stats(stats)
 

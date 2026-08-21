@@ -42,10 +42,12 @@
             <label>Tokens</label>
             <span>{{ stat.total_tokens }} ({{ stat.prompt_tokens }} in / {{ stat.completion_tokens }} out)</span>
           </div>
-          <div class="stat-item">
-            <label>Cost</label>
-            <span>{{ stat.cost | currency:(stat.currency || 'USD') }}</span>
-          </div>
+          @if (stat.cached_prompt_tokens || stat.reasoning_tokens) {
+            <div class="stat-item">
+              <label>Of which</label>
+              <span>{{ stat.cached_prompt_tokens || 0 }} cached in / {{ stat.reasoning_tokens || 0 }} reasoning out</span>
+            </div>
+          }
         </div>
 
         <div class="stat-details">

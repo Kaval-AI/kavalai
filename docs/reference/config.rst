@@ -124,6 +124,11 @@ Backoffice
        any agent database.
    * - ``KAVALAI_BO_DB_SCHEMA``
      - Schema for the backoffice tables.
+   * - ``KAVALAI_BO_HOST``
+     - Interface ``python -m kavalai.backoffice.server`` binds to. Default
+       ``127.0.0.1``.
+   * - ``KAVALAI_BO_PORT``
+     - Port for the backoffice server. Default ``8000``.
    * - ``GOOGLE_OAUTH_CLIENT_ID``
      - Google OAuth client id for sign-in.
    * - ``GOOGLE_OAUTH_CLIENT_SECRET``

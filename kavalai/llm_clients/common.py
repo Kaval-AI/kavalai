@@ -151,7 +151,6 @@ def create_model_call_stat(
     batch_size: Optional[int] = None,
     response_code: int = 200,
     response_data: Any = None,
-    cost: Optional[float] = None,
 ) -> ModelCallStat:
     """
     Helper function to create a ModelCallStat record for database logging.
@@ -169,7 +168,6 @@ def create_model_call_stat(
         batch_size: Number of items in a batch call, if applicable.
         response_code: HTTP response status code.
         response_data: Raw response data from the provider.
-        cost: Calculated cost of the call.
 
     Returns:
         A populated ModelCallStat object.
@@ -190,6 +188,5 @@ def create_model_call_stat(
         total_tokens=total_tokens,
         batch_size=batch_size,
         duration_seconds=duration_sections,
-        cost=cost,
         response_data=to_plain(response_data),
     )
