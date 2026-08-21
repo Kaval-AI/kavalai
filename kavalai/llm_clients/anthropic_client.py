@@ -20,6 +20,7 @@ import json
 from typing import Any, Dict, List, Optional, Tuple, Type
 
 from anthropic import AsyncAnthropic
+from loguru import logger
 from pydantic import BaseModel
 
 from kavalai.llm_clients.base_client import (
@@ -106,7 +107,16 @@ class AnthropicClient(BaseLlmClient):
             if self.parameters.temperature is not None:
                 call_kwargs["temperature"] = self.parameters.temperature
             if self.parameters.top_p is not None:
-                call_kwargs["top_p"] = self.parameters.top_p
+                # The Messages API rejects a request carrying both sampling
+                # parameters, so send only temperature when both are set.
+                if "temperature" in call_kwargs:
+                    logger.warning(
+                        f"Anthropic model '{self.model}' accepts only one of "
+                        "temperature and top_p; sending temperature and "
+                        "ignoring top_p."
+                    )
+                else:
+                    call_kwargs["top_p"] = self.parameters.top_p
             if self.parameters.service_tier is not None:
                 call_kwargs["service_tier"] = self.parameters.service_tier
             if self.parameters.reasoning_effort is not None:
