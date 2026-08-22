@@ -60,6 +60,40 @@ services:
       - kavalai
 
 
+  # The agent server, serving one workflow over POST /run_agent and
+  # /stream_agent. Behind a profile so `docker compose up` does not start it:
+  #
+  #   docker compose --profile agent up agent-server
+  #
+  # KAVALAI_AGENT_SETUP_MODULE is imported before the workflow is loaded, which
+  # is what registers the python:// tools and named RAG services it refers to.
+  # Point an evaluation suite at it to grade the artefact you are about to
+  # promote, with its real tools and secrets:
+  #
+  #   kavalai-eval examples/green_village/eval/suite.yaml \
+  #       --target rest --base-url http://localhost:10000 \
+  #       --skip-trajectory-evaluators
+  agent-server:
+    profiles: ["agent"]
+    build:
+      context: .
+      dockerfile: dockerfiles/agent.Dockerfile
+    command: agent-server
+    env_file: .env
+    environment:
+      - KAVALAI_DB_URI=postgresql://kavalai_dev:kavalai_dev@postgres_db:5432/kavalai_dev
+      - KAVALAI_DB_SCHEMA=agents
+      - KAVALAI_AGENT_WORKFLOW_PATH=examples/green_village/chatbot.yaml
+      - KAVALAI_AGENT_SETUP_MODULE=examples/green_village/eval_setup.py
+    ports:
+      - "10000:10000"
+    depends_on:
+      - postgres_db
+      - agent-migrations
+    networks:
+      - kavalai
+
+
   ollama:
     image: ollama/ollama:latest
     container_name: ollama

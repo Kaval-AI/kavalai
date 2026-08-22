@@ -9,5 +9,6 @@ objects themselves.
    :maxdepth: 2
 
    yaml
+   eval_yaml
    tools
    config

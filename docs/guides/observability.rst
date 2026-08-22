@@ -107,6 +107,122 @@ Pricing those numbers is a few lines against a table you control — and it keep
 the price of a model somewhere you can correct in an afternoon, rather than
 inside a library release.
 
+The trajectory: what the run actually did
+-----------------------------------------
+
+Every node visit writes exactly one ``tasks`` row, and **ordering by ``seq``
+reconstructs the executed path** — including the interleaving of concurrent
+``parallel`` branches, which ``created_at`` cannot (it is approximate, and ties
+are unordered). Three columns carry that structure:
+
+``seq``
+   Position in the run's execution order.
+
+``parent_task_name``
+   The node that produced this row, set on the tool-call rows an agent node
+   emits. A name rather than an id: nothing has to be allocated up front, and
+   the readable column is the one that survives an export to a warehouse.
+
+``tool_uri``
+   The tool this row executed, set by both function nodes *and* agent tool
+   calls — so one predicate finds every call to a tool regardless of whether a
+   human wired it into the YAML or an agent chose it at step three.
+
+That last point is what closed a real gap. An agent node used to produce one
+row holding its final answer, and everything the agent actually *did* was built
+during the run and then discarded — which made an agent failure
+un-debuggable after the fact. Now:
+
+.. code-block:: text
+
+   seq  name              node_type   parent_task_name  tool_uri
+   0    begin             start
+   1    search            function                      python://web_search
+   2    research          agent
+   3    crawl_url         tool_call   research           python://crawl_url
+   4    route             switch
+   5    summarize         llm
+   6    finish            end
+
+Branch nodes record the decision they made, and the *value* they made it on:
+
+.. code-block:: text
+
+   name    = "route"
+   inputs  = {"expr": "parsed.intent", "value": "refund"}
+   output  = {"taken": "handle_refund", "matched": true}
+
+The value is the diagnostic. Nine times in ten a mis-route is not a routing bug:
+it is the upstream classifier emitting ``"Refund"`` or ``"refund "`` or
+``"refunds"``. ``matched: false`` on a ``switch`` is the same signal
+pre-computed — the model returned a label outside the enum and the run silently
+took ``default``, which the engine also warns about in the log.
+
+The backoffice renders all of this: tool calls indented under the node that made
+them, and a branch as *expr = value → target*.
+
+.. note::
+
+   ``tasks`` is the biggest table you will own, and tool payloads are exactly
+   where personal data lives. It grows without bound by design — the assumption
+   is that you export it to a warehouse and do not retain it indefinitely, so
+   schedule a ``DELETE FROM tasks WHERE created_at < …`` job on day one rather
+   than discovering the need later.
+
+   ``max_payload_bytes`` on the task logger (256 KiB by default) replaces an
+   oversized payload with a marker carrying its real size and a preview. It is
+   there so one four-megabyte crawl result does not break the writer, the row
+   and the backoffice task list — an operational limit, not a compliance
+   control.
+
+
+Reading a trajectory without a database
+---------------------------------------
+
+:class:`~kavalai.workflow.tasklog.MemoryTaskLogger` records the same rows into a
+list. Pass one per run to see exactly what a call did, from a notebook or a
+test, with no database at all:
+
+.. code-block:: python
+
+   from kavalai.workflow.tasklog import MemoryTaskLogger
+
+   tasklog = MemoryTaskLogger()
+   state = await engine.run({"user_message": "hi"}, task_logger=tasklog)
+
+   for row in tasklog.records:
+       print(row.seq, row.name, row.node_type, row.tool_uri or "")
+
+It overrides the engine's logger for that run only, so one engine can serve many
+concurrent runs that each want their own trace. This is what the evaluation
+runner uses, and it is why trajectory assertions need no database — see
+:doc:`evaluation`.
+
+
+.. _observability-external-id:
+
+Marking non-production traffic
+------------------------------
+
+``Session.external_id`` is a caller-supplied key: pass your own user, ticket or
+thread id and the engine reuses that conversation. Evaluation runs use a
+structured prefix, which is a convention worth respecting:
+
+.. code-block:: text
+
+   eval:{suite}:{tag}:{case}:{repeat}
+   eval:bakery-acceptance:pr-412:vague_quantity:0
+
+``LIKE 'eval:%'`` then separates test traffic from real traffic in one
+predicate, and the backoffice's **External ID** filter turns a failing case in a
+result file into the conversation that produced it.
+
+.. warning::
+
+   Do not use the ``eval:`` prefix for production session ids, or you will not
+   be able to tell them apart.
+
+
 TaskLogger and fire-and-forget
 ------------------------------
 

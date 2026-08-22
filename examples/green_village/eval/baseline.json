@@ -1,0 +1,5775 @@
+{
+  "suite": "green-village-acceptance",
+  "tag": "ci",
+  "started_at": "2026-08-21T19:42:55.719545Z",
+  "target": {
+    "kind": "engine",
+    "workflow": "/home/timo/projects/kaval.ai/examples/green_village/eval/../chatbot.yaml"
+  },
+  "models": {
+    "judges": [
+      "gemini/gemini-3.6-flash"
+    ]
+  },
+  "judge_prompt_sha": "edb5b9e66c2a",
+  "totals": {
+    "cases": 64,
+    "passed": 64,
+    "failed": 0,
+    "errors": 0,
+    "flaky": 0,
+    "pass_rate": 1.0,
+    "total_tokens": 0,
+    "duration_seconds": 30.174165727061336
+  },
+  "slices": [
+    {
+      "name": "adversarial",
+      "cases": 5,
+      "passed": 5,
+      "pass_rate": 1.0,
+      "min_pass_rate": 0.9,
+      "ok": true
+    },
+    {
+      "name": "direct",
+      "cases": 17,
+      "passed": 17,
+      "pass_rate": 1.0,
+      "min_pass_rate": 1.0,
+      "ok": true
+    },
+    {
+      "name": "multi_hop",
+      "cases": 3,
+      "passed": 3,
+      "pass_rate": 1.0,
+      "min_pass_rate": 0.8,
+      "ok": true
+    },
+    {
+      "name": "paraphrase",
+      "cases": 34,
+      "passed": 34,
+      "pass_rate": 1.0,
+      "min_pass_rate": 0.9,
+      "ok": true
+    },
+    {
+      "name": "unanswerable",
+      "cases": 5,
+      "passed": 5,
+      "pass_rate": 1.0,
+      "min_pass_rate": 1.0,
+      "ok": true
+    }
+  ],
+  "verdicts": [
+    {
+      "case": "adversarial_fact-01",
+      "slice": "adversarial",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "adversarial_fact-01",
+          "repeat": 0,
+          "slice": "adversarial",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-01",
+                  "fact-10",
+                  "fact-04",
+                  "fact-15",
+                  "fact-13",
+                  "fact-02",
+                  "fact-06",
+                  "fact-00"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-01"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.6840172429947415,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "No — Green Village has 104 residents.",
+            "grounded": true,
+            "used_ids": [
+              "fact-01"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.6840172429947415,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "adversarial_fact-05",
+      "slice": "adversarial",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "adversarial_fact-05",
+          "repeat": 0,
+          "slice": "adversarial",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-05",
+                  "fact-13",
+                  "fact-00",
+                  "fact-02",
+                  "fact-07",
+                  "fact-01",
+                  "fact-03",
+                  "fact-11"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-05"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.5135804530000314,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "No — the retrieved fact says the bakery sells exactly 340 loaves every week, not 34.",
+            "grounded": true,
+            "used_ids": [
+              "fact-05"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.5135804530000314,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "adversarial_fact-09",
+      "slice": "adversarial",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "adversarial_fact-09",
+          "repeat": 0,
+          "slice": "adversarial",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-09",
+                  "fact-04",
+                  "fact-01",
+                  "fact-11",
+                  "fact-03",
+                  "fact-13",
+                  "fact-15",
+                  "fact-00"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-09"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.1675660879991483,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "No — it’s 1.2 metres deep at its deepest point.",
+            "grounded": true,
+            "used_ids": [
+              "fact-09"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.1675660879991483,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "adversarial_fact-12",
+      "slice": "adversarial",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "adversarial_fact-12",
+          "repeat": 0,
+          "slice": "adversarial",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-12",
+                  "fact-03",
+                  "fact-01",
+                  "fact-15",
+                  "fact-00",
+                  "fact-13",
+                  "fact-10",
+                  "fact-09"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-12"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.33503377900342457,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "No — it weighs 412 kilograms, not 4 tonnes.",
+            "grounded": true,
+            "used_ids": [
+              "fact-12"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.33503377900342457,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "adversarial_fact-16",
+      "slice": "adversarial",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "adversarial_fact-16",
+          "repeat": 0,
+          "slice": "adversarial",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-16",
+                  "fact-02",
+                  "fact-12",
+                  "fact-00",
+                  "fact-03",
+                  "fact-01",
+                  "fact-10",
+                  "fact-07"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-16"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.17076266100048088,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "No. It has been operating since 1923.",
+            "grounded": true,
+            "used_ids": [
+              "fact-16"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.17076266100048088,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "direct_fact-00",
+      "slice": "direct",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "direct_fact-00",
+          "repeat": 0,
+          "slice": "direct",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-00",
+                  "fact-02",
+                  "fact-01",
+                  "fact-10",
+                  "fact-04",
+                  "fact-06",
+                  "fact-03",
+                  "fact-13"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-00"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 1.2326699999975972,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "Thomas Cook is the president of Green Village.",
+            "grounded": true,
+            "used_ids": [
+              "fact-00"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 1.2326699999975972,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "direct_fact-01",
+      "slice": "direct",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "direct_fact-01",
+          "repeat": 0,
+          "slice": "direct",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-01",
+                  "fact-10",
+                  "fact-02",
+                  "fact-06",
+                  "fact-04",
+                  "fact-13",
+                  "fact-00",
+                  "fact-15"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-01"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.591084943007445,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "Green Village has 104 residents.",
+            "grounded": true,
+            "used_ids": [
+              "fact-01"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.591084943007445,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "direct_fact-02",
+      "slice": "direct",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "direct_fact-02",
+          "repeat": 0,
+          "slice": "direct",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-02",
+                  "fact-01",
+                  "fact-10",
+                  "fact-00",
+                  "fact-04",
+                  "fact-06",
+                  "fact-03",
+                  "fact-13"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-02"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.3944604089920176,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "Green Village was founded on 03.09.1887.",
+            "grounded": true,
+            "used_ids": [
+              "fact-02"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.3944604089920176,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "direct_fact-03",
+      "slice": "direct",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "direct_fact-03",
+          "repeat": 0,
+          "slice": "direct",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-03",
+                  "fact-12",
+                  "fact-09",
+                  "fact-10",
+                  "fact-00",
+                  "fact-11",
+                  "fact-01",
+                  "fact-02"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-03"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.18454941299569327,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "The Old Grain Tower is 23 metres tall.",
+            "grounded": true,
+            "used_ids": [
+              "fact-03"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.18454941299569327,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "direct_fact-04",
+      "slice": "direct",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "direct_fact-04",
+          "repeat": 0,
+          "slice": "direct",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-04",
+                  "fact-01",
+                  "fact-02",
+                  "fact-10",
+                  "fact-13",
+                  "fact-00",
+                  "fact-03",
+                  "fact-06"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-04"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.7400861880014418,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "Green Village's official flower is the marsh marigold.",
+            "grounded": true,
+            "used_ids": [
+              "fact-04"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.7400861880014418,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "direct_fact-05",
+      "slice": "direct",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "direct_fact-05",
+          "repeat": 0,
+          "slice": "direct",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-05",
+                  "fact-13",
+                  "fact-14",
+                  "fact-11",
+                  "fact-01",
+                  "fact-00",
+                  "fact-04",
+                  "fact-07"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-05"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.5555306479946012,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "340 loaves each week.",
+            "grounded": true,
+            "used_ids": [
+              "fact-05"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.5555306479946012,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "direct_fact-06",
+      "slice": "direct",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "direct_fact-06",
+          "repeat": 0,
+          "slice": "direct",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-06",
+                  "fact-01",
+                  "fact-14",
+                  "fact-10",
+                  "fact-00",
+                  "fact-11",
+                  "fact-13",
+                  "fact-04"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-06"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.37145322700962424,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "There are 14 pupils.",
+            "grounded": true,
+            "used_ids": [
+              "fact-06"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.37145322700962424,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "direct_fact-07",
+      "slice": "direct",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "direct_fact-07",
+          "repeat": 0,
+          "slice": "direct",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-07",
+                  "fact-00",
+                  "fact-01",
+                  "fact-02",
+                  "fact-04",
+                  "fact-10",
+                  "fact-03",
+                  "fact-09"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-07"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.18774710300203878,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "It is held every year on the third Saturday of October.",
+            "grounded": true,
+            "used_ids": [
+              "fact-07"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.18774710300203878,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "direct_fact-08",
+      "slice": "direct",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "direct_fact-08",
+          "repeat": 0,
+          "slice": "direct",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-08",
+                  "fact-01",
+                  "fact-06",
+                  "fact-00",
+                  "fact-13",
+                  "fact-14",
+                  "fact-02",
+                  "fact-10"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-08"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.6951007390016457,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "7 volunteers.",
+            "grounded": true,
+            "used_ids": [
+              "fact-08"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.6951007390016457,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "direct_fact-09",
+      "slice": "direct",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "direct_fact-09",
+          "repeat": 0,
+          "slice": "direct",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-09",
+                  "fact-03",
+                  "fact-00",
+                  "fact-01",
+                  "fact-05",
+                  "fact-11",
+                  "fact-04",
+                  "fact-15"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-09"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.5190507560037076,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "Lake Miller is 1.2 metres deep at its deepest point.",
+            "grounded": true,
+            "used_ids": [
+              "fact-09"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.5190507560037076,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "direct_fact-10",
+      "slice": "direct",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "direct_fact-10",
+          "repeat": 0,
+          "slice": "direct",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-10",
+                  "fact-01",
+                  "fact-02",
+                  "fact-00",
+                  "fact-04",
+                  "fact-06",
+                  "fact-03",
+                  "fact-16"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-10"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.3392723639990436,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "Agnes Whitlow is the oldest resident of Green Village.",
+            "grounded": true,
+            "used_ids": [
+              "fact-10"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.3392723639990436,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "direct_fact-11",
+      "slice": "direct",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "direct_fact-11",
+          "repeat": 0,
+          "slice": "direct",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-01",
+                  "fact-02",
+                  "fact-15",
+                  "fact-13",
+                  "fact-06",
+                  "fact-10",
+                  "fact-04",
+                  "fact-11"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-11"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.1746099489973858,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "Green Village has 3 streets.",
+            "grounded": true,
+            "used_ids": [
+              "fact-11"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.1746099489973858,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "direct_fact-12",
+      "slice": "direct",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "direct_fact-12",
+          "repeat": 0,
+          "slice": "direct",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-12",
+                  "fact-03",
+                  "fact-00",
+                  "fact-15",
+                  "fact-10",
+                  "fact-09",
+                  "fact-01",
+                  "fact-02"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-12"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.7479841919994215,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "The church bell weighs 412 kilograms.",
+            "grounded": true,
+            "used_ids": [
+              "fact-12"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.7479841919994215,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "direct_fact-13",
+      "slice": "direct",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "direct_fact-13",
+          "repeat": 0,
+          "slice": "direct",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-13",
+                  "fact-01",
+                  "fact-04",
+                  "fact-06",
+                  "fact-02",
+                  "fact-10",
+                  "fact-00",
+                  "fact-15"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-13"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.5743453710019821,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "Green Village has 26 beehives.",
+            "grounded": true,
+            "used_ids": [
+              "fact-13"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.5743453710019821,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "direct_fact-14",
+      "slice": "direct",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "direct_fact-14",
+          "repeat": 0,
+          "slice": "direct",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-14",
+                  "fact-11",
+                  "fact-01",
+                  "fact-13",
+                  "fact-06",
+                  "fact-05",
+                  "fact-00",
+                  "fact-10"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-14"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.3791016409959411,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "The village library owns 1,847 books.",
+            "grounded": true,
+            "used_ids": [
+              "fact-14"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.3791016409959411,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "direct_fact-15",
+      "slice": "direct",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "direct_fact-15",
+          "repeat": 0,
+          "slice": "direct",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-15",
+                  "fact-01",
+                  "fact-03",
+                  "fact-10",
+                  "fact-02",
+                  "fact-04",
+                  "fact-06",
+                  "fact-00"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-15"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.18843159900279716,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "The speed limit in Green Village is 30 km/h.",
+            "grounded": true,
+            "used_ids": [
+              "fact-15"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.18843159900279716,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "direct_fact-16",
+      "slice": "direct",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "direct_fact-16",
+          "repeat": 0,
+          "slice": "direct",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-16",
+                  "fact-02",
+                  "fact-09",
+                  "fact-12",
+                  "fact-00",
+                  "fact-03",
+                  "fact-10",
+                  "fact-11"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-16"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.7598308380111121,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "The Rusty Anchor has been open since 1923.",
+            "grounded": true,
+            "used_ids": [
+              "fact-16"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.7598308380111121,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "multi_hop_00",
+      "slice": "multi_hop",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "multi_hop_00",
+          "repeat": 0,
+          "slice": "multi_hop",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-16",
+                  "fact-05",
+                  "fact-00",
+                  "fact-02",
+                  "fact-10",
+                  "fact-14",
+                  "fact-11",
+                  "fact-04"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-16"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.1695557859929977,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "The pub is older; it has been operating since 1923, and no founding date is given for the bakery owner's business.",
+            "grounded": true,
+            "used_ids": [
+              "fact-16"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.1695557859929977,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "multi_hop_01",
+      "slice": "multi_hop",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "multi_hop_01",
+          "repeat": 0,
+          "slice": "multi_hop",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-06",
+                  "fact-01",
+                  "fact-10",
+                  "fact-02",
+                  "fact-00",
+                  "fact-04",
+                  "fact-08",
+                  "fact-03"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-06",
+                  "fact-01"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.7165362730011111,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "14 out of 104 residents, which is about 13.5%.",
+            "grounded": true,
+            "used_ids": [
+              "fact-06",
+              "fact-01"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.7165362730011111,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "multi_hop_02",
+      "slice": "multi_hop",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "multi_hop_02",
+          "repeat": 0,
+          "slice": "multi_hop",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-13",
+                  "fact-01",
+                  "fact-04",
+                  "fact-14",
+                  "fact-02",
+                  "fact-06",
+                  "fact-10",
+                  "fact-11"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-13",
+                  "fact-14"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.5454452510020928,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "Green Village has more library books than beehives.",
+            "grounded": true,
+            "used_ids": [
+              "fact-13",
+              "fact-14"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.5454452510020928,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "paraphrase_fact-00_0",
+      "slice": "paraphrase",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "paraphrase_fact-00_0",
+          "repeat": 0,
+          "slice": "paraphrase",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-00",
+                  "fact-01",
+                  "fact-10",
+                  "fact-02",
+                  "fact-04",
+                  "fact-06",
+                  "fact-03",
+                  "fact-13"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-00"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.5740148699987913,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "Thomas Cook is the President of Green Village.",
+            "grounded": true,
+            "used_ids": [
+              "fact-00"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.5740148699987913,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "paraphrase_fact-00_1",
+      "slice": "paraphrase",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "paraphrase_fact-00_1",
+          "repeat": 0,
+          "slice": "paraphrase",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-00",
+                  "fact-02",
+                  "fact-01",
+                  "fact-10",
+                  "fact-04",
+                  "fact-06",
+                  "fact-03",
+                  "fact-13"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-00"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.3859405749972211,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "Yes — the president of Green Village is Thomas Cook.",
+            "grounded": true,
+            "used_ids": [
+              "fact-00"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.3859405749972211,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "paraphrase_fact-01_0",
+      "slice": "paraphrase",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "paraphrase_fact-01_0",
+          "repeat": 0,
+          "slice": "paraphrase",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-01",
+                  "fact-10",
+                  "fact-02",
+                  "fact-06",
+                  "fact-04",
+                  "fact-00",
+                  "fact-15",
+                  "fact-13"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-01"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.1971519399958197,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "Green Village has 104 residents.",
+            "grounded": true,
+            "used_ids": [
+              "fact-01"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.1971519399958197,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "paraphrase_fact-01_1",
+      "slice": "paraphrase",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "paraphrase_fact-01_1",
+          "repeat": 0,
+          "slice": "paraphrase",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-01",
+                  "fact-10",
+                  "fact-02",
+                  "fact-06",
+                  "fact-13",
+                  "fact-04",
+                  "fact-00",
+                  "fact-15"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-01"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.7439216530037811,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "Green Village has 104 residents.",
+            "grounded": true,
+            "used_ids": [
+              "fact-01"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.7439216530037811,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "paraphrase_fact-02_0",
+      "slice": "paraphrase",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "paraphrase_fact-02_0",
+          "repeat": 0,
+          "slice": "paraphrase",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-02",
+                  "fact-01",
+                  "fact-10",
+                  "fact-00",
+                  "fact-04",
+                  "fact-06",
+                  "fact-13",
+                  "fact-03"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-02"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.5525899390049744,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "Yes — Green Village was founded in 1887 (on 03.09.1887).",
+            "grounded": true,
+            "used_ids": [
+              "fact-02"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.5525899390049744,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "paraphrase_fact-02_1",
+      "slice": "paraphrase",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "paraphrase_fact-02_1",
+          "repeat": 0,
+          "slice": "paraphrase",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-02",
+                  "fact-01",
+                  "fact-10",
+                  "fact-00",
+                  "fact-04",
+                  "fact-06",
+                  "fact-03",
+                  "fact-13"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-02"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.3690186510066269,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "03.09.1887.",
+            "grounded": true,
+            "used_ids": [
+              "fact-02"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.3690186510066269,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "paraphrase_fact-03_0",
+      "slice": "paraphrase",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "paraphrase_fact-03_0",
+          "repeat": 0,
+          "slice": "paraphrase",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-03",
+                  "fact-12",
+                  "fact-09",
+                  "fact-10",
+                  "fact-00",
+                  "fact-01",
+                  "fact-11",
+                  "fact-02"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-03"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.18504228100937326,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "The Old Grain Tower is 23 metres tall.",
+            "grounded": true,
+            "used_ids": [
+              "fact-03"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.18504228100937326,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "paraphrase_fact-03_1",
+      "slice": "paraphrase",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "paraphrase_fact-03_1",
+          "repeat": 0,
+          "slice": "paraphrase",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-03",
+                  "fact-12",
+                  "fact-09",
+                  "fact-01",
+                  "fact-00",
+                  "fact-10",
+                  "fact-11",
+                  "fact-15"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-03"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.9557802409981377,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "The Old Grain Tower is 23 metres high.",
+            "grounded": true,
+            "used_ids": [
+              "fact-03"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.9557802409981377,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "paraphrase_fact-04_0",
+      "slice": "paraphrase",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "paraphrase_fact-04_0",
+          "repeat": 0,
+          "slice": "paraphrase",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-04",
+                  "fact-01",
+                  "fact-02",
+                  "fact-10",
+                  "fact-13",
+                  "fact-00",
+                  "fact-06",
+                  "fact-03"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-04"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.7668688769917935,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "Yes. Green Village’s official flower is the marsh marigold.",
+            "grounded": true,
+            "used_ids": [
+              "fact-04"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.7668688769917935,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "paraphrase_fact-04_1",
+      "slice": "paraphrase",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "paraphrase_fact-04_1",
+          "repeat": 0,
+          "slice": "paraphrase",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-04",
+                  "fact-01",
+                  "fact-02",
+                  "fact-10",
+                  "fact-13",
+                  "fact-00",
+                  "fact-03",
+                  "fact-06"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-04"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.5804927029967075,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "The marsh marigold.",
+            "grounded": true,
+            "used_ids": [
+              "fact-04"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.5804927029967075,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "paraphrase_fact-05_0",
+      "slice": "paraphrase",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "paraphrase_fact-05_0",
+          "repeat": 0,
+          "slice": "paraphrase",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-05",
+                  "fact-13",
+                  "fact-00",
+                  "fact-11",
+                  "fact-03",
+                  "fact-01",
+                  "fact-07",
+                  "fact-04"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-05"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.3206184320006287,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "Greta’s bakery sells exactly 340 loaves per week.",
+            "grounded": true,
+            "used_ids": [
+              "fact-05"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.3206184320006287,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "paraphrase_fact-05_1",
+      "slice": "paraphrase",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "paraphrase_fact-05_1",
+          "repeat": 0,
+          "slice": "paraphrase",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-05",
+                  "fact-13",
+                  "fact-00",
+                  "fact-11",
+                  "fact-01",
+                  "fact-07",
+                  "fact-03",
+                  "fact-10"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-05"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.9617428040073719,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "Greta Lindqvist sells 340 loaves of bread a week.",
+            "grounded": true,
+            "used_ids": [
+              "fact-05"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.9617428040073719,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "paraphrase_fact-06_0",
+      "slice": "paraphrase",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "paraphrase_fact-06_0",
+          "repeat": 0,
+          "slice": "paraphrase",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-06",
+                  "fact-01",
+                  "fact-00",
+                  "fact-02",
+                  "fact-13",
+                  "fact-04",
+                  "fact-10",
+                  "fact-15"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-06"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.6011936319991946,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "Yes — the school has 14 pupils.",
+            "grounded": true,
+            "used_ids": [
+              "fact-06"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.6011936319991946,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "paraphrase_fact-06_1",
+      "slice": "paraphrase",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "paraphrase_fact-06_1",
+          "repeat": 0,
+          "slice": "paraphrase",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-06",
+                  "fact-01",
+                  "fact-14",
+                  "fact-11",
+                  "fact-00",
+                  "fact-13",
+                  "fact-10",
+                  "fact-04"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-06"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.37420162300986703,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "14 students.",
+            "grounded": true,
+            "used_ids": [
+              "fact-06"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.37420162300986703,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "paraphrase_fact-07_0",
+      "slice": "paraphrase",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "paraphrase_fact-07_0",
+          "repeat": 0,
+          "slice": "paraphrase",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-07",
+                  "fact-04",
+                  "fact-01",
+                  "fact-02",
+                  "fact-10",
+                  "fact-00",
+                  "fact-15",
+                  "fact-13"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-07"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.1868274470034521,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "The Turnip Festival usually falls on the third Saturday of October.",
+            "grounded": true,
+            "used_ids": [
+              "fact-07"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.1868274470034521,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "paraphrase_fact-07_1",
+      "slice": "paraphrase",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "paraphrase_fact-07_1",
+          "repeat": 0,
+          "slice": "paraphrase",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-07",
+                  "fact-00",
+                  "fact-04",
+                  "fact-01",
+                  "fact-02",
+                  "fact-10",
+                  "fact-03",
+                  "fact-13"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-07"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.7268207290035207,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "The Turnip Festival takes place every year on the third Saturday of October.",
+            "grounded": true,
+            "used_ids": [
+              "fact-07"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.7268207290035207,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "paraphrase_fact-08_0",
+      "slice": "paraphrase",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "paraphrase_fact-08_0",
+          "repeat": 0,
+          "slice": "paraphrase",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-01",
+                  "fact-08",
+                  "fact-00",
+                  "fact-02",
+                  "fact-06",
+                  "fact-10",
+                  "fact-04",
+                  "fact-13"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-08"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.5402188440057216,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "Green Village has 7 volunteer firefighters.",
+            "grounded": true,
+            "used_ids": [
+              "fact-08"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.5402188440057216,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "paraphrase_fact-08_1",
+      "slice": "paraphrase",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "paraphrase_fact-08_1",
+          "repeat": 0,
+          "slice": "paraphrase",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-08",
+                  "fact-01",
+                  "fact-06",
+                  "fact-00",
+                  "fact-13",
+                  "fact-02",
+                  "fact-14",
+                  "fact-10"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-08"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.35148403799394146,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "7 people volunteer at the local fire brigade.",
+            "grounded": true,
+            "used_ids": [
+              "fact-08"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.35148403799394146,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "paraphrase_fact-09_0",
+      "slice": "paraphrase",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "paraphrase_fact-09_0",
+          "repeat": 0,
+          "slice": "paraphrase",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-09",
+                  "fact-04",
+                  "fact-01",
+                  "fact-13",
+                  "fact-11",
+                  "fact-03",
+                  "fact-14",
+                  "fact-00"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-09"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.17087437500595115,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "Yes — the village pond gets 1.2 metres deep at its deepest point.",
+            "grounded": true,
+            "used_ids": [
+              "fact-09"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.17087437500595115,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "paraphrase_fact-09_1",
+      "slice": "paraphrase",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "paraphrase_fact-09_1",
+          "repeat": 0,
+          "slice": "paraphrase",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-09",
+                  "fact-03",
+                  "fact-01",
+                  "fact-15",
+                  "fact-11",
+                  "fact-00",
+                  "fact-05",
+                  "fact-13"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-09"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.6640628050081432,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "Lake Miller is 1.2 metres deep at its deepest point.",
+            "grounded": true,
+            "used_ids": [
+              "fact-09"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.6640628050081432,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "paraphrase_fact-10_0",
+      "slice": "paraphrase",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "paraphrase_fact-10_0",
+          "repeat": 0,
+          "slice": "paraphrase",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-10",
+                  "fact-01",
+                  "fact-02",
+                  "fact-00",
+                  "fact-04",
+                  "fact-06",
+                  "fact-03",
+                  "fact-16"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-10"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.497977588995127,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "Yes — Green Village's oldest resident is Agnes Whitlow.",
+            "grounded": true,
+            "used_ids": [
+              "fact-10"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.497977588995127,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "paraphrase_fact-10_1",
+      "slice": "paraphrase",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "paraphrase_fact-10_1",
+          "repeat": 0,
+          "slice": "paraphrase",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-10",
+                  "fact-01",
+                  "fact-00",
+                  "fact-02",
+                  "fact-04",
+                  "fact-06",
+                  "fact-03",
+                  "fact-15"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-10"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.3325028609979199,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "Agnes Whitlow is the most senior resident in Green Village.",
+            "grounded": true,
+            "used_ids": [
+              "fact-10"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.3325028609979199,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "paraphrase_fact-11_0",
+      "slice": "paraphrase",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "paraphrase_fact-11_0",
+          "repeat": 0,
+          "slice": "paraphrase",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-01",
+                  "fact-15",
+                  "fact-02",
+                  "fact-13",
+                  "fact-04",
+                  "fact-06",
+                  "fact-10",
+                  "fact-11"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-11"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.16541673699975945,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "There are 3 roads altogether.",
+            "grounded": true,
+            "used_ids": [
+              "fact-11"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.16541673699975945,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "paraphrase_fact-11_1",
+      "slice": "paraphrase",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "paraphrase_fact-11_1",
+          "repeat": 0,
+          "slice": "paraphrase",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-01",
+                  "fact-15",
+                  "fact-02",
+                  "fact-11",
+                  "fact-13",
+                  "fact-10",
+                  "fact-06",
+                  "fact-04"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-11"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.6704535009921528,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "Green Village has 3 streets.",
+            "grounded": true,
+            "used_ids": [
+              "fact-11"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.6704535009921528,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "paraphrase_fact-12_0",
+      "slice": "paraphrase",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "paraphrase_fact-12_0",
+          "repeat": 0,
+          "slice": "paraphrase",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-12",
+                  "fact-03",
+                  "fact-10",
+                  "fact-09",
+                  "fact-00",
+                  "fact-15",
+                  "fact-01",
+                  "fact-02"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-12"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.5012742770049954,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "Yes — the local church bell weighs 412 kilograms.",
+            "grounded": true,
+            "used_ids": [
+              "fact-12"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.5012742770049954,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "paraphrase_fact-12_1",
+      "slice": "paraphrase",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "paraphrase_fact-12_1",
+          "repeat": 0,
+          "slice": "paraphrase",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-12",
+                  "fact-03",
+                  "fact-00",
+                  "fact-09",
+                  "fact-10",
+                  "fact-01",
+                  "fact-15",
+                  "fact-02"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-12"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.3349680410028668,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "The church bell weighs 412 kilograms.",
+            "grounded": true,
+            "used_ids": [
+              "fact-12"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.3349680410028668,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "paraphrase_fact-13_0",
+      "slice": "paraphrase",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "paraphrase_fact-13_0",
+          "repeat": 0,
+          "slice": "paraphrase",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-13",
+                  "fact-01",
+                  "fact-04",
+                  "fact-06",
+                  "fact-10",
+                  "fact-02",
+                  "fact-00",
+                  "fact-15"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-13"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.1679205240070587,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "Yes — Green Village maintains 26 beehives.",
+            "grounded": true,
+            "used_ids": [
+              "fact-13"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.1679205240070587,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "paraphrase_fact-13_1",
+      "slice": "paraphrase",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "paraphrase_fact-13_1",
+          "repeat": 0,
+          "slice": "paraphrase",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-13",
+                  "fact-01",
+                  "fact-04",
+                  "fact-10",
+                  "fact-06",
+                  "fact-02",
+                  "fact-15",
+                  "fact-00"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-13"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.6886928199965041,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "Green Village has 26 beehives altogether.",
+            "grounded": true,
+            "used_ids": [
+              "fact-13"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.6886928199965041,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "paraphrase_fact-14_0",
+      "slice": "paraphrase",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "paraphrase_fact-14_0",
+          "repeat": 0,
+          "slice": "paraphrase",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-14",
+                  "fact-01",
+                  "fact-11",
+                  "fact-06",
+                  "fact-13",
+                  "fact-05",
+                  "fact-00",
+                  "fact-10"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-14"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.5218620829982683,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "They have 1,847 books in the village library’s collection.",
+            "grounded": true,
+            "used_ids": [
+              "fact-14"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.5218620829982683,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "paraphrase_fact-14_1",
+      "slice": "paraphrase",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "paraphrase_fact-14_1",
+          "repeat": 0,
+          "slice": "paraphrase",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-14",
+                  "fact-01",
+                  "fact-05",
+                  "fact-06",
+                  "fact-11",
+                  "fact-13",
+                  "fact-15",
+                  "fact-03"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-14"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.35656011900573503,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "The local library has 1,847 books.",
+            "grounded": true,
+            "used_ids": [
+              "fact-14"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.35656011900573503,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "paraphrase_fact-15_0",
+      "slice": "paraphrase",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "paraphrase_fact-15_0",
+          "repeat": 0,
+          "slice": "paraphrase",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-15",
+                  "fact-01",
+                  "fact-04",
+                  "fact-10",
+                  "fact-13",
+                  "fact-03",
+                  "fact-02",
+                  "fact-11"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-15"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.18623555300291628,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "The speed limit everywhere in Green Village is 30 km/h.",
+            "grounded": true,
+            "used_ids": [
+              "fact-15"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.18623555300291628,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "paraphrase_fact-15_1",
+      "slice": "paraphrase",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "paraphrase_fact-15_1",
+          "repeat": 0,
+          "slice": "paraphrase",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-15",
+                  "fact-01",
+                  "fact-03",
+                  "fact-10",
+                  "fact-06",
+                  "fact-02",
+                  "fact-04",
+                  "fact-13"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-15"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.6601781909994315,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "30 km/h.",
+            "grounded": true,
+            "used_ids": [
+              "fact-15"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.6601781909994315,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "paraphrase_fact-16_0",
+      "slice": "paraphrase",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "paraphrase_fact-16_0",
+          "repeat": 0,
+          "slice": "paraphrase",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-16",
+                  "fact-10",
+                  "fact-02",
+                  "fact-03",
+                  "fact-01",
+                  "fact-00",
+                  "fact-12",
+                  "fact-11"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-16"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.49659505899762735,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "It has been operating since 1923.",
+            "grounded": true,
+            "used_ids": [
+              "fact-16"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.49659505899762735,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "paraphrase_fact-16_1",
+      "slice": "paraphrase",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "paraphrase_fact-16_1",
+          "repeat": 0,
+          "slice": "paraphrase",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "retrieved": [
+                  "fact-16",
+                  "fact-02",
+                  "fact-12",
+                  "fact-10",
+                  "fact-00",
+                  "fact-09",
+                  "fact-03",
+                  "fact-01"
+                ]
+              }
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": [
+                  "fact-16"
+                ]
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.3328812330000801,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "answers_with_fact",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "1923.",
+            "grounded": true,
+            "used_ids": [
+              "fact-16"
+            ]
+          },
+          "error": null,
+          "duration_seconds": 0.3328812330000801,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "unanswerable_00",
+      "slice": "unanswerable",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "unanswerable_00",
+          "repeat": 0,
+          "slice": "unanswerable",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 0.0,
+              "passed": null,
+              "reason": "no expected source for this case",
+              "meta": {}
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": []
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.3753189060080331,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "I don’t have information about Green Village’s annual budget.",
+            "grounded": false,
+            "used_ids": []
+          },
+          "error": null,
+          "duration_seconds": 0.3753189060080331,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "unanswerable_01",
+      "slice": "unanswerable",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "unanswerable_01",
+          "repeat": 0,
+          "slice": "unanswerable",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 0.0,
+              "passed": null,
+              "reason": "no expected source for this case",
+              "meta": {}
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": []
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.20641301199793816,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "I don’t have any facts about how many cars are registered in Green Village.",
+            "grounded": false,
+            "used_ids": []
+          },
+          "error": null,
+          "duration_seconds": 0.20641301199793816,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "unanswerable_02",
+      "slice": "unanswerable",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "unanswerable_02",
+          "repeat": 0,
+          "slice": "unanswerable",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 0.0,
+              "passed": null,
+              "reason": "no expected source for this case",
+              "meta": {}
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": []
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.6953098259982653,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "I couldn’t find any fact about who won the Turnip Festival in 2019.",
+            "grounded": false,
+            "used_ids": []
+          },
+          "error": null,
+          "duration_seconds": 0.6953098259982653,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "unanswerable_03",
+      "slice": "unanswerable",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "unanswerable_03",
+          "repeat": 0,
+          "slice": "unanswerable",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 0.0,
+              "passed": null,
+              "reason": "no expected source for this case",
+              "meta": {}
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": []
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.5065193850023206,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "I don’t have any fact about the average house price in Green Village.",
+            "grounded": false,
+            "used_ids": []
+          },
+          "error": null,
+          "duration_seconds": 0.5065193850023206,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "unanswerable_04",
+      "slice": "unanswerable",
+      "status": "passed",
+      "passes": 1,
+      "total": 1,
+      "results": [
+        {
+          "case": "unanswerable_04",
+          "repeat": 0,
+          "slice": "unanswerable",
+          "status": "passed",
+          "scores": [
+            {
+              "name": "no_error",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "retrieval_hit_at_k",
+              "value": 0.0,
+              "passed": null,
+              "reason": "no expected source for this case",
+              "meta": {}
+            },
+            {
+              "name": "groundedness",
+              "value": 1.0,
+              "passed": true,
+              "reason": null,
+              "meta": {
+                "cited": []
+              }
+            },
+            {
+              "name": "latency_under",
+              "value": 0.33041263700579293,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            },
+            {
+              "name": "tokens_under",
+              "value": 0.0,
+              "passed": true,
+              "reason": null,
+              "meta": {}
+            }
+          ],
+          "output": {
+            "agent_response": "The retrieved facts do not say how many dogs live in Green Village.",
+            "grounded": false,
+            "used_ids": []
+          },
+          "error": null,
+          "duration_seconds": 0.33041263700579293,
+          "total_tokens": 0,
+          "external_id": null,
+          "trace": [
+            "begin",
+            "retrieve",
+            "answer",
+            "finish"
+          ]
+        }
+      ]
+    }
+  ],
+  "gate": {
+    "passed": true,
+    "reasons": [],
+    "regressions": [],
+    "fixes": []
+  },
+  "notes": [
+    "Model-backed evaluators were skipped: llm_judge, refuses. Those assertions did not run, so this result is not a full pass."
+  ]
+}

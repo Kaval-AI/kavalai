@@ -1,0 +1,16 @@
+name: estonian
+# One question, not two: the chatbot answers each message independently, so a
+# two-part goal can only ever be half met and the persona rightly says so.
+goal: Uurida, kui palju inimesi Green Village'is elab.
+traits: {temperament: neutral, verbosity: normal, expertise: low, language: et}
+knowledge: |
+  Eestikeelne külastaja, kes ei räägi inglise keelt. Kirjutab ainult eesti
+  keeles ja ootab vastust eesti keeles. Küsib lihtsaid asju küla kohta.
+opening: "Tere! Kui palju inimesi Green Village'is elab?"
+stop_when: assistent on öelnud elanike arvu
+max_turns: 3
+evaluators:
+  - goal_achieved
+  # The corpus is English; the answer should not be. This is the slice that
+  # catches a workflow that quietly switches language on the user.
+  - {type: llm_judge, rubric: "The assistant replied in Estonian, the language the user wrote in, and gave the figures from its sources."}

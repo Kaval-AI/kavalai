@@ -28,6 +28,54 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: uv run --extra test pytest
 
+  # Tier zero of the acceptance gate: both example suites, run from committed
+  # model responses. No API key, no database, a couple of seconds — which is
+  # what makes "run it on every pull request" a policy people keep rather than
+  # an aspiration. See docs/guides/evaluation.rst.
+  #
+  # `pytest` already covers these through tests/test_examples_eval.py; this job
+  # exercises the product path instead — the CLI, the JUnit output and the exit
+  # code an operator actually depends on.
+  acceptance-gate:
+    name: Acceptance gate (no keys)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --extra test
+
+      - name: Green Village chatbot
+        run: |
+          uv run kavalai-eval examples/green_village/eval/suite.yaml \
+            --tag "ci-${{ github.run_number }}" --fixtures \
+            --comment green_village_comment.md
+
+      - name: Bakery email assistant
+        run: |
+          uv run kavalai-eval examples/bakery/eval/suite.yaml \
+            --tag "ci-${{ github.run_number }}" --fixtures \
+            --comment bakery_comment.md
+
+      # Uploaded whatever the gate said, so a failure is readable in the run
+      # summary rather than only in the log.
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-results
+          path: |
+            examples/*/eval/results/*.json
+            examples/*/eval/results/*.junit.xml
+            *_comment.md
+
   frontend-tests:
     name: Frontend unit tests
     runs-on: ubuntu-latest

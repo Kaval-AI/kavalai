@@ -213,8 +213,9 @@ async def test_run_is_recorded_for_every_company(demo_env):
     assert await _count(maker, Agent) == 1
     assert await _count(maker, Session) == 2
     assert await _count(maker, Run) == 2
-    # One task per executed node: search, research, summarize.
-    assert await _count(maker, Task) == 6
+    # One row per node visit — start, search, research, summarize, end — plus
+    # one per tool call the research agent made. Six per run.
+    assert await _count(maker, Task) == 12
     # A user and an assistant message per run.
     assert await _count(maker, ChatMessage) == 4
     # Two agent steps plus the summary call per run.
@@ -253,17 +254,32 @@ async def test_run_records_the_profile_tasks_and_tokens(demo_env):
     assert run.output_data["name"] == "Kaval.AI"
     assert run.output_data["summary"].startswith("Kaval.AI builds")
 
-    # Task rows are written fire-and-forget, so compare by name rather than
-    # by insertion order.
+    # Every node visit wrote a row and ``seq`` is the executed path, including
+    # the tool the research agent chose for itself.
+    by_seq = sorted(tasks, key=lambda t: t.seq)
+    assert [(t.name, t.node_type) for t in by_seq] == [
+        ("start", "start"),
+        ("search", "function"),
+        ("research", "agent"),
+        ("webtools.crawl_url", "tool_call"),
+        ("summarize", "llm"),
+        ("end", "end"),
+    ]
+    assert [t.seq for t in by_seq] == [0, 1, 2, 3, 4, 5]
+
     by_name = {t.name: t for t in tasks}
-    assert {n: t.node_type for n, t in by_name.items()} == {
-        "search": "function",
-        "research": "agent",
-        "summarize": "llm",
-    }
     # The search node's results are what the research agent works from.
     assert by_name["search"].output["results"][0]["url"] == "https://example.com"
     assert all(t.duration_seconds is not None for t in tasks)
+
+    # A function node and an agent's own tool call are both findable by URI,
+    # which is what lets one assertion cover "was this tool ever called".
+    assert by_name["search"].tool_uri == f"python://{demo.SEARCH_TOOL}"
+    crawl = by_name["webtools.crawl_url"]
+    assert crawl.tool_uri == f"python://{demo.CRAWL_TOOL}"
+    # The agent step is a field on the row, not a level of nesting.
+    assert crawl.parent_task_name == "research"
+    assert crawl.inputs["step"] == 0
 
     # The conversation reads as a request and its answer.
     assert [m.role for m in messages] == ["user", "assistant"]

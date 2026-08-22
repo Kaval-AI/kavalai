@@ -207,7 +207,7 @@ achievable with enough glue code.
      - AG-UI adapter
      - yes
    * - Evaluation tooling
-     - **no**
+     - yes
      - yes
      - yes
      - yes
@@ -280,6 +280,17 @@ it would silently change the order of side effects the author wrote down. See
 with no network at all, so branching logic can be exercised in continuous
 integration at no cost. See :doc:`../guides/safety`.
 
+**Evaluation asserts on what the run did, not only on what it said.** Because
+the runtime owns the run, a case can assert that a tool was *not* called, which
+arm a branch took and on what value, or that the retrieved fact was the right
+one — and it can do that against a stubbed world, so a suite grading a workflow
+with side effects checks the database rows and the sent mail rather than the
+prose about them. LangSmith and agentevals offer trajectory evaluation but need
+their SDK inside your process and their service outside it; pydantic-evals and
+promptfoo grade inputs and outputs. Datasets, personas and the accepted
+baseline are files in your repository, so a behaviour change is a diff in code
+review rather than a number in a dashboard. See :doc:`../guides/evaluation`.
+
 **It runs in a browser.** Engine, model and embeddings execute client-side over
 WebGPU and Pyodide — no server, no API key, no data leaving the device. Nothing
 else in this comparison does this. See :doc:`run_in_browser`.
@@ -315,10 +326,6 @@ and n8n (wait nodes) all support this directly.
 delegation. You get one agent loop per node and a graph to route between them.
 If your mental model is "a team of specialists negotiating", CrewAI or the
 Microsoft Agent Framework fit that shape and Kaval.AI does not.
-
-**No evaluation tooling.** There is no dataset runner, no scoring and no
-regression harness for prompt changes. The raw material is present — every run,
-task and model call is recorded — but the analysis has to be written.
 
 **No OpenTelemetry export.** Observability is Kaval.AI's own tables plus
 ``loguru``. Pydantic AI, the OpenAI Agents SDK and the Microsoft Agent Framework

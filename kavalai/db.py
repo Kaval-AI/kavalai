@@ -135,7 +135,7 @@ def build_db_uri(
 # to ``PRAGMA user_version``). Bump on any ORM schema change: SQLite stores
 # created with a different version are dropped and recreated on init.
 # 2: rag_index left the shared metadata (RAG backends self-provision).
-SQLITE_SCHEMA_VERSION = 3
+SQLITE_SCHEMA_VERSION = 4
 
 
 def _drop_all_sqlite_tables(connection):
@@ -665,6 +665,17 @@ class Task(Base):
     prompt: Mapped[str | None] = mapped_column(TEXT)
     errors: Mapped[list[str] | None] = mapped_column(json_column())
     duration_seconds: Mapped[float | None] = mapped_column(Numeric)
+    # Trajectory columns. ``seq`` is the per-run execution order and is what
+    # actually carries the structure: ordering by it reconstructs the executed
+    # path exactly, including the interleaving under a ``parallel`` node.
+    # ``parent_task_name`` names the node that produced this row (set on the
+    # tool-call rows an agent node emits) and is the readable join key that
+    # survives an export to a warehouse. ``tool_uri`` is set by both function
+    # nodes and agent tool calls, so one predicate finds every call to a tool
+    # regardless of whether a human wired it into the YAML or an agent chose it.
+    seq: Mapped[int | None] = mapped_column(Integer)
+    parent_task_name: Mapped[str | None] = mapped_column(TEXT, index=True)
+    tool_uri: Mapped[str | None] = mapped_column(TEXT, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

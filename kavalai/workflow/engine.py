@@ -16,9 +16,11 @@ limitations under the License.
 
 import asyncio
 import importlib
+import itertools
 import json
 import os
 import time
+from dataclasses import dataclass
 from typing import Any, AsyncGenerator, Callable, Optional, Type, Union
 from uuid import UUID, uuid4
 
@@ -41,6 +43,7 @@ from kavalai.workflow.models import (
     Node,
     ParallelNode,
     RagQueryNode,
+    StartNode,
     SwitchNode,
     WorkflowException,
     WorkflowGraph,
@@ -64,6 +67,34 @@ DEFAULT_RAG_SERVICE = "default"
 DEFAULT_MAX_NODE_VISITS = 1000
 
 
+@dataclass(frozen=True)
+class BranchDecision:
+    """Why an ``if`` or ``switch`` node routed where it did.
+
+    Returned by :meth:`WorkflowEngine._next_node` so the routing itself stays a
+    pure function and the recording happens at its single call site.
+    """
+
+    #: The condition or expression verbatim, as written in the YAML. Kept as
+    #: text so an old recorded run stays interpretable after the graph changes.
+    expr: str
+    #: What it evaluated to — a bool for ``if``, the switched value for
+    #: ``switch``. This is the diagnostic: a mis-route is usually an upstream
+    #: classifier emitting ``"Refund"`` where the graph expects ``"refund"``.
+    value: Any
+    #: Node routed to, or ``None`` when nothing matched.
+    taken: Optional[str]
+    #: For a ``switch``, whether an explicit case matched. ``False`` means the
+    #: value fell through to ``default`` — almost always an upstream bug.
+    matched: bool
+
+    def as_inputs(self) -> dict:
+        return {"expr": self.expr, "value": to_plain(self.value)}
+
+    def as_output(self) -> dict:
+        return {"taken": self.taken, "matched": self.matched}
+
+
 class _VisitBudget:
     """Shared node-visit counter for one run.
 
@@ -85,6 +116,12 @@ class _VisitBudget:
                 f"Exceeded max node visits ({self.limit}); "
                 "the workflow may contain an infinite loop."
             )
+
+
+def _tool_short_name(tool_uri: str) -> str:
+    """``python://mail.send`` -> ``mail.send``; the readable half of a URI."""
+    _, _, rest = tool_uri.partition("://")
+    return rest or tool_uri
 
 
 def make_prompt(prompt: str, input_data: dict) -> str:
@@ -427,6 +464,11 @@ class WorkflowEngine:
             # Passed through verbatim: absent means every tool, ``[]`` means
             # none, exactly as in the Python API.
             allowed_tools=node.allowed_tools,
+            # Turns the agent's internal tool calls into task rows. An observer
+            # rather than a stream event on purpose: chunks this node does not
+            # recognise are forwarded to SSE consumers, so a new event type
+            # would leak agent internals onto the public streaming contract.
+            on_step=self._make_step_logger(node, run_context),
         )
         start = time.perf_counter()
         result_value: Optional[str] = None
@@ -459,6 +501,39 @@ class WorkflowEngine:
             duration=duration,
         )
 
+    def _make_step_logger(
+        self, node: AgentNode, run_context: RunContext
+    ) -> Optional[Callable[[dict], None]]:
+        """Build the ``on_step`` observer that records an agent's tool calls.
+
+        One ``tool_call`` row per call the agent made, naming the node that
+        made it. The agent step is a field on the row rather than a level of
+        nesting: it is only ever read as a number, and keeping the tree one
+        level deep is what lets ``parent_task_name`` be the join key.
+        """
+        if not (run_context.task_logger or self.task_logger):
+            return None
+
+        def log_step(step_record: dict) -> None:
+            for call in step_record.get("tool_calls") or []:
+                self._log_task(
+                    run_context,
+                    name=_tool_short_name(call.get("name") or ""),
+                    node_type="tool_call",
+                    inputs={
+                        "args": call.get("args"),
+                        "step": step_record.get("index"),
+                        "call_id": call.get("call_id"),
+                    },
+                    output=call.get("output"),
+                    duration=call.get("duration_seconds") or 0.0,
+                    seq=run_context.next_seq(),
+                    parent_task_name=node.name,
+                    tool_uri=call.get("name"),
+                )
+
+        return log_step
+
     async def _run_function_node(
         self, node: FunctionNode, run_context: RunContext
     ) -> None:
@@ -479,12 +554,16 @@ class WorkflowEngine:
         duration = time.perf_counter() - start
 
         run_context.data[node.output] = result
+        # ``tool_uri`` on a function node's own row is what makes one predicate
+        # find every call to a tool, whether a human wired it into the YAML or
+        # an agent chose it at step 3.
         self._log_node(
             run_context,
             node,
             inputs=inputs,
             output=result,
             duration=duration,
+            tool_uri=node.tool,
         )
 
     async def _run_rag_query_node(
@@ -526,6 +605,47 @@ class WorkflowEngine:
             duration=duration,
         )
 
+    def _log_task(
+        self,
+        run_context: RunContext,
+        *,
+        name: str,
+        node_type: str,
+        inputs: Optional[dict],
+        output: Any,
+        prompt: Optional[str] = None,
+        duration: float,
+        errors: Optional[list[str]] = None,
+        seq: Optional[int] = None,
+        parent_task_name: Optional[str] = None,
+        tool_uri: Optional[str] = None,
+    ) -> None:
+        """Write one task row.
+
+        ``seq`` defaults to the sequence number the walk loop reserved for the
+        node currently executing in this context. Child rows (an agent's tool
+        calls) pass their own, drawn from the run counter as they happen, so
+        they sort after their parent and before the next node.
+        """
+        logger_for_run = run_context.task_logger or self.task_logger
+        if not logger_for_run:
+            return
+        logger_for_run.log_node(
+            run_id=str(run_context.run_id) if run_context.run_id else None,
+            session_id=str(run_context.session_id) if run_context.session_id else None,
+            agent_id=str(run_context.agent_id) if run_context.agent_id else None,
+            node_name=name,
+            node_type=node_type,
+            inputs=to_plain(inputs) if inputs else inputs,
+            output=to_plain(output) if output is not None else None,
+            prompt=prompt,
+            duration=duration,
+            errors=errors,
+            seq=run_context.current_seq if seq is None else seq,
+            parent_task_name=parent_task_name,
+            tool_uri=tool_uri,
+        )
+
     def _log_node(
         self,
         run_context: RunContext,
@@ -534,36 +654,61 @@ class WorkflowEngine:
         inputs: Optional[dict],
         output: Any,
         prompt: Optional[str] = None,
-        duration: float,
+        duration: float = 0.0,
+        tool_uri: Optional[str] = None,
     ) -> None:
-        if not self.task_logger:
-            return
-        self.task_logger.log_node(
-            run_id=str(run_context.run_id) if run_context.run_id else None,
-            session_id=str(run_context.session_id) if run_context.session_id else None,
-            agent_id=str(run_context.agent_id) if run_context.agent_id else None,
-            node_name=node.name,
+        """Write the task row for one visit to ``node``."""
+        self._log_task(
+            run_context,
+            name=node.name,
             node_type=node.type,
-            inputs=to_plain(inputs) if inputs else inputs,
-            output=to_plain(output) if output is not None else None,
+            inputs=inputs,
+            output=output,
             prompt=prompt,
             duration=duration,
+            tool_uri=tool_uri,
         )
 
-    def _next_node(self, node: Node, run_context: RunContext) -> Optional[str]:
-        """Return the name of the next node to execute, or None at an end node."""
-        if isinstance(node, EndNode):
-            return None
-        if isinstance(node, IfNode):
-            return (
-                node.then
-                if evaluate_bool(node.condition, run_context.data)
-                else node.else_
+    def _log_branch(
+        self, run_context: RunContext, node: Node, decision: BranchDecision
+    ) -> None:
+        """Record which arm a branch node took, and on what value."""
+        if not decision.matched:
+            logger.warning(
+                f"Switch node '{node.name}' found no case for "
+                f"{decision.expr}={decision.value!r}; falling back to "
+                f"'{decision.taken}'."
             )
+        self._log_task(
+            run_context,
+            name=node.name,
+            node_type=node.type,
+            inputs=decision.as_inputs(),
+            output=decision.as_output(),
+            duration=0.0,
+        )
+
+    def _next_node(
+        self, node: Node, run_context: RunContext
+    ) -> tuple[Optional[str], Optional[BranchDecision]]:
+        """Return the next node's name and, for a branch node, why.
+
+        Pure: the decision is returned as data and recorded by the caller, so
+        this stays testable without a logger, a database or an event loop.
+        """
+        if isinstance(node, EndNode):
+            return None, None
+        if isinstance(node, IfNode):
+            value = evaluate_bool(node.condition, run_context.data)
+            taken = node.then if value else node.else_
+            return taken, BranchDecision(node.condition, value, taken, matched=True)
         if isinstance(node, SwitchNode):
             value = evaluate_value(node.expr, run_context.data)
-            return node.cases.get(value, node.default)
-        return node.next
+            taken = node.cases.get(value, node.default)
+            return taken, BranchDecision(
+                node.expr, value, taken, matched=value in node.cases
+            )
+        return node.next, None
 
     async def _execute_node(
         self,
@@ -588,7 +733,12 @@ class WorkflowEngine:
                 node, run_context, state, budget
             ):
                 yield event
-        # start / if / switch / end nodes have no side effects here.
+        elif isinstance(node, (StartNode, EndNode)):
+            # No side effect, but a row all the same: the invariant is that one
+            # visit writes one row, so ``ORDER BY seq`` is the executed path
+            # rather than the subset of it that happened to do something.
+            self._log_node(run_context, node, inputs=None, output=None)
+        # if / switch nodes are recorded from their decision, in the walk loop.
 
     # ------------------------------------------------------------------ parallel
     @staticmethod
@@ -607,8 +757,11 @@ class WorkflowEngine:
             templates=parent.templates,
             agent_service=parent.agent_service,
             # Shared on purpose: branches are part of one run, so their model
-            # calls belong in the same total.
+            # calls belong in the same total, and their task rows draw from one
+            # sequence — which is what makes the interleaving readable.
             token_stats=parent.token_stats,
+            seq_counter=parent.seq_counter,
+            task_logger=parent.task_logger,
         )
 
     @staticmethod
@@ -679,6 +832,11 @@ class WorkflowEngine:
             asyncio.create_task(walk_branch(i, entry), name=f"{node.name}:{entry}")
             for i, entry in enumerate(node.branches)
         ]
+        # Recorded before the fan-out so the row sorts ahead of everything the
+        # branches write, which is what makes an interleaved sequence readable.
+        self._log_node(
+            run_context, node, inputs=None, output={"branches": list(node.branches)}
+        )
         logger.debug(
             f"Parallel node '{node.name}' fanning out to {len(tasks)} branch(es): "
             f"{', '.join(node.branches)}"
@@ -720,14 +878,27 @@ class WorkflowEngine:
         *,
         session_id: Optional[str] = None,
         external_id: Optional[str] = None,
+        task_logger: Optional[TaskLogger] = None,
     ) -> WorkflowState:
         """Execute the workflow for ``input_data`` and return the final state.
 
         Drains :meth:`run_stream` — the single execution path.
+
+        Args:
+            task_logger: Records this run only, instead of the engine's own
+                logger. Pass a
+                :class:`~kavalai.workflow.tasklog.MemoryTaskLogger` to get the
+                run's trajectory back without a database — this is what the
+                evaluation runner does, and what makes one engine safe to share
+                across concurrent runs that each want their own trace.
         """
         state = WorkflowState(workflow_name=self.graph.name)
         async for _ in self.run_stream(
-            input_data, session_id=session_id, external_id=external_id, state=state
+            input_data,
+            session_id=session_id,
+            external_id=external_id,
+            state=state,
+            task_logger=task_logger,
         ):
             pass
         return state
@@ -739,6 +910,7 @@ class WorkflowEngine:
         session_id: Optional[str] = None,
         external_id: Optional[str] = None,
         state: Optional[WorkflowState] = None,
+        task_logger: Optional[TaskLogger] = None,
     ) -> AsyncGenerator[WorkflowStreamEvent, None]:
         """Execute the workflow, yielding :class:`WorkflowStreamEvent` events.
 
@@ -759,15 +931,22 @@ class WorkflowEngine:
             state: Optional :class:`WorkflowState` instance populated in
                 place, so blocking callers can read the final state after
                 draining the stream.
+            task_logger: Records this run only, instead of the engine's own
+                logger. See :meth:`run`.
         """
         invocation_id = uuid4().hex[:8]
+        run_logger = task_logger or self.task_logger
         # One aggregator per run, carried on the run context, so concurrent runs
         # on the same engine never see each other's tokens.
-        token_stats = TokenAccumulator(self.task_logger)
+        token_stats = TokenAccumulator(run_logger)
 
         parsed_input = self.get_data_type("input")(**input_data)
         run_context = RunContext()
         run_context.token_stats = token_stats
+        # One sequence per run, shared with every parallel branch. The event
+        # loop is single-threaded, so allocation order is execution order.
+        run_context.seq_counter = itertools.count()
+        run_context.task_logger = run_logger
         run_context.data["input"] = parsed_input
         run_context.templates = {t.name: t.value for t in self.graph.templates}
 
@@ -873,8 +1052,8 @@ class WorkflowEngine:
                 # down MCP sessions that other runs are still using.
                 # Record and report token usage regardless of success or failure.
                 state.token_usage = token_stats.summary()
-                if self.task_logger:
-                    await self.task_logger.flush()
+                if run_logger:
+                    await run_logger.flush()
                 self._log_token_usage(invocation_id, token_stats)
 
     def _log_token_usage(self, invocation_id: str, s: TokenAccumulator) -> None:
@@ -933,6 +1112,10 @@ class WorkflowEngine:
                 return
             node = self.node_map[current]
             budget.spend()
+            # Reserved before the node runs, so a node that logs on completion
+            # (an agent, an llm) still sorts ahead of the rows it produced
+            # while running.
+            run_context.current_seq = run_context.next_seq()
 
             if record_state:
                 state.current_node = node.name
@@ -955,7 +1138,9 @@ class WorkflowEngine:
                 await self._finish(node, run_context, state)
                 return
 
-            current = self._next_node(node, run_context)
+            current, decision = self._next_node(node, run_context)
+            if decision is not None:
+                self._log_branch(run_context, node, decision)
 
         # A non-end node with no outgoing transition (switch with no default match).
         raise WorkflowException(

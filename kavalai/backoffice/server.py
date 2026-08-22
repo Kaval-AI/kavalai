@@ -443,12 +443,19 @@ async def agents_get_sessions(
     request: Request,
     agent_id: UUID | None = None,
     search: str | None = None,
+    external_id: str | None = None,
     start_date: datetime | None = None,
     end_date: datetime | None = None,
     limit: int = 50,
     offset: int = 0,
 ):
-    """Fetch session summaries for a specific project."""
+    """Fetch session summaries for a specific project.
+
+    ``external_id`` matches the session's caller-supplied key as a prefix.
+    Evaluation runs tag their sessions ``eval:{suite}:{tag}:{case}:{repeat}``,
+    so this is the click-through from a failing case in a result file to the
+    conversation that produced it.
+    """
     assert_logged_in(request)
     project = await get_project_and_assert_access(request, project_id)
 
@@ -457,6 +464,7 @@ async def agents_get_sessions(
             session,
             agent_id=agent_id,
             search=search,
+            external_id=external_id,
             start_date=start_date,
             end_date=end_date,
             limit=limit,

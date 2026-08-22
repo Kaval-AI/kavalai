@@ -95,6 +95,14 @@ docs = [
     "ipywidgets",
 ]
 
+# The evaluation runner. `kavalai-eval <suite.yaml>` runs an acceptance suite;
+# `kavalai-persona <persona.yaml>` plays one simulated user against an agent
+# and prints the conversation. Both are thin wrappers over `kavalai.eval`,
+# which needs no dependency the core install does not already have.
+[project.scripts]
+kavalai-eval = "kavalai.eval.cli:main"
+kavalai-persona = "kavalai.eval.cli:persona_main"
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["kavalai*"]

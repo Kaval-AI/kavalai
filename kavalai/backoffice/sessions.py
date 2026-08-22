@@ -33,6 +33,11 @@ class SessionSummary(BaseModel):
     session_id: UUID
     agent_id: UUID
     agent_name: str
+    #: The caller-supplied key for this conversation. Evaluation runs use a
+    #: structured ``eval:{suite}:{tag}:{case}:{repeat}`` prefix, so pasting one
+    #: into the filter lands on exactly the conversation a failing case
+    #: produced.
+    external_id: str | None = None
     runs_count: int
     tasks_count: int
     messages_count: int
@@ -57,9 +62,17 @@ class TaskSummary(BaseModel):
     inputs: Any | None
     output: Any | None
     name: str | None = None
+    node_type: str | None = None
     prompt: str | None = None
     errors: list[str] | None = None
     duration_seconds: float | None = None
+    #: Trajectory columns. ``seq`` is the run's execution order — order by it
+    #: and you have the path the run actually took. ``parent_task_name`` is set
+    #: on the tool calls an agent node made, so they render indented under it,
+    #: and ``tool_uri`` names the tool that ran.
+    seq: int | None = None
+    parent_task_name: str | None = None
+    tool_uri: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -121,11 +134,20 @@ async def get_sessions_summary(
     session: AsyncSession,
     agent_id: UUID | None = None,
     search: str | None = None,
+    external_id: str | None = None,
     start_date: datetime | None = None,
     end_date: datetime | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> SessionsResponse:
+    """List sessions, newest first, with their run/task/message counts.
+
+    ``search`` matches message content; ``external_id`` matches the session's
+    caller-supplied key as a prefix. The two are separate because they answer
+    different questions — "what did someone ask about" versus "show me this
+    exact conversation". Pasting ``eval:bakery-acceptance:pr-412:`` into the
+    latter shows every conversation that experiment produced.
+    """
     # Get total count first
     # We need to apply filters to count as well
 
@@ -139,6 +161,10 @@ async def get_sessions_summary(
         )
     if end_date:
         session_filter_stmt = session_filter_stmt.where(Session.created_at <= end_date)
+    if external_id:
+        session_filter_stmt = session_filter_stmt.where(
+            Session.external_id.ilike(f"{external_id}%")
+        )
 
     if search:
         # Search in ChatMessage content
@@ -202,6 +228,7 @@ async def get_sessions_summary(
             Session.id.label("session_id"),
             Session.agent_id,
             Agent.name.label("agent_name"),
+            Session.external_id,
             func.coalesce(runs_count_sub.c.count, 0).label("runs_count"),
             func.coalesce(tasks_count_sub.c.count, 0).label("tasks_count"),
             func.coalesce(messages_count_sub.c.count, 0).label("messages_count"),
@@ -222,6 +249,8 @@ async def get_sessions_summary(
         stmt = stmt.where(Session.created_at >= start_date)
     if end_date:
         stmt = stmt.where(Session.created_at <= end_date)
+    if external_id:
+        stmt = stmt.where(Session.external_id.ilike(f"{external_id}%"))
     if search:
         # We already have search_subq defined earlier
         stmt = stmt.where(Session.id.in_(select(search_subq.c.session_id)))
@@ -258,6 +287,7 @@ async def get_sessions_summary(
                 session_id=row.session_id,
                 agent_id=row.agent_id,
                 agent_name=row.agent_name,
+                external_id=row.external_id,
                 runs_count=row.runs_count,
                 tasks_count=row.tasks_count,
                 messages_count=row.messages_count,
@@ -314,9 +344,13 @@ async def get_session_details(
     run_result = await session.execute(run_stmt)
     runs = [RunSummary.model_validate(r) for r in run_result.all()]
 
-    # Fetch tasks
+    # Fetch tasks. Ordered by run and then by ``seq``, which is the run's
+    # actual execution order — ``created_at`` is approximate, and ties are
+    # unordered once a `parallel` node has several branches writing at once.
     task_stmt = (
-        select(Task).where(Task.session_id == session_id).order_by(asc(Task.created_at))
+        select(Task)
+        .where(Task.session_id == session_id)
+        .order_by(asc(Task.run_id), asc(Task.seq), asc(Task.created_at))
     )
     task_result = await session.execute(task_stmt)
     tasks = [TaskSummary.model_validate(t) for t in task_result.scalars().all()]

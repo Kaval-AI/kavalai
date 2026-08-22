@@ -88,7 +88,7 @@ class AgentService:
         self,
         agent_id: UUID,
         session_id: Optional[UUID] = None,
-        external_id: Optional[UUID] = None,
+        external_id: Optional[str] = None,
     ) -> Optional[Session]:
         async with self.session_maker() as session:
             if session_id:
@@ -329,8 +329,16 @@ class AgentService:
         errors: Optional[list[str]] = None,
         duration_seconds: Optional[float] = None,
         node_type: Optional[str] = None,
+        seq: Optional[int] = None,
+        parent_task_name: Optional[str] = None,
+        tool_uri: Optional[str] = None,
     ) -> Task:
-        """Records a specific unit of work (Task) performed within a run."""
+        """Records a specific unit of work (Task) performed within a run.
+
+        ``seq`` is the run's execution order, ``parent_task_name`` names the
+        node a tool-call row belongs to, and ``tool_uri`` identifies the tool
+        that ran. See :class:`kavalai.db.Task` for what they are for.
+        """
         async with self.session_maker() as session:
             task = Task(
                 agent_id=agent_id,
@@ -343,6 +351,9 @@ class AgentService:
                 prompt=clean_text(prompt),
                 errors=to_plain(errors),
                 duration_seconds=duration_seconds,
+                seq=seq,
+                parent_task_name=clean_text(parent_task_name),
+                tool_uri=clean_text(tool_uri),
             )
             session.add(task)
             await session.commit()

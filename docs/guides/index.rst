@@ -17,5 +17,6 @@ Readers new to building with language models should begin with
    tools
    agents
    observability
+   evaluation
    data_model
    safety

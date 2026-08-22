@@ -18,6 +18,7 @@ limitations under the License.
 from loguru import logger
 import asyncio
 import secrets
+from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Annotated, AsyncGenerator, AsyncIterable, Callable
 from typing import Optional, Union
@@ -478,6 +479,9 @@ def create_app_from_env_conf(
     The following environment variables are used:
 
     - KAVALAI_AGENT_WORKFLOW_PATH: Path to the workflow YAML file.
+    - KAVALAI_AGENT_SETUP_MODULE: Optional module imported before the workflow
+      is loaded, as a dotted name or a ``.py`` path. Registers the Python
+      tools and named RAG services the workflow refers to.
     - KAVALAI_DB_URI: Database connection string.
     - KAVALAI_DB_SCHEMA: Database schema name.
     - KAVALAI_DB_POOL_SIZE: Database connection pool size (optional, default: 0).
@@ -565,6 +569,15 @@ def create_app_from_env_conf(
     agent_service = AgentService(session_provider)
     task_logger = PostgresTaskLogger(agent_service)
 
+    # Imported before the engine is built. A workflow may name a RAG service or
+    # a Python tool that only a module can register — and the engine resolves a
+    # named RAG service *eagerly*, so without this it cannot even be
+    # constructed. Same job as a suite's ``setup:`` key.
+    setup_module = env.str("KAVALAI_AGENT_SETUP_MODULE", "")
+    if setup_module:
+        logger.info(f"Importing agent setup module {setup_module}.")
+        _import_setup_module(setup_module)
+
     logger.info(f"Loading workflow from {workflow_path}.")
     engine = WorkflowEngine.from_yaml_path(
         workflow_path, agent_service=agent_service, task_logger=task_logger
@@ -574,6 +587,36 @@ def create_app_from_env_conf(
         engine=engine,
         session_provider=session_provider,
     )
+
+
+def _import_setup_module(reference: str) -> None:
+    """Import a setup module, by dotted name or by file path.
+
+    A path is accepted because an example (or a customer's workflow directory)
+    is usually not an installed package: ``examples/bakery/eval_setup.py`` is
+    how you would refer to it from a shell, so it is how you refer to it here.
+    The file's own directory goes on ``sys.path`` first, so the module can
+    import its siblings.
+    """
+    import importlib
+    import importlib.util
+    import sys
+
+    path = Path(reference)
+    if not path.suffix == ".py":
+        importlib.import_module(reference)
+        return
+    path = path.resolve()
+    if not path.exists():
+        raise FileNotFoundError(f"KAVALAI_AGENT_SETUP_MODULE not found: {path}")
+    if str(path.parent) not in sys.path:
+        sys.path.insert(0, str(path.parent))
+    spec = importlib.util.spec_from_file_location(
+        f"kavalai_agent_setup_{path.stem}", path
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
 
 
 def run_agent_server():

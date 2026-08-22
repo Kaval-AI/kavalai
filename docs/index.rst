@@ -47,6 +47,10 @@ Features
   (see :doc:`tutorials/run_in_browser`).
 * **Deterministic tests** — substitute a stub for the model and execute the
   graph offline (see :doc:`guides/safety`).
+* **Evaluation and acceptance gates** — datasets, simulated users and
+  thresholds as files in your repository, asserting on what a run *did* (which
+  tool, which branch, which rows in the database) rather than only on what it
+  said (see :doc:`guides/evaluation`).
 
 For a comparison against LangGraph, CrewAI, n8n and Dify, including the
 respects in which Kaval.AI remains behind, see :doc:`tutorials/comparison`.
@@ -201,6 +205,8 @@ Where to start
 * For an assessment against other frameworks, see :doc:`tutorials/comparison`.
 * For worked recipes, from retrieval-augmented generation to self-correcting
   loops, see :doc:`cookbook/index`.
+* Before deploying a change, :doc:`guides/evaluation` sets out how to gate it
+  on a suite you can run in continuous integration for nothing.
 
 .. toctree::
    :hidden:

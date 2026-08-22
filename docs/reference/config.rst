@@ -110,6 +110,12 @@ Agent server
      - Description
    * - ``KAVALAI_AGENT_WORKFLOW_PATH``
      - Path to the workflow YAML to serve. Required.
+   * - ``KAVALAI_AGENT_SETUP_MODULE``
+     - Optional module imported before the workflow is loaded — a dotted name
+       or a ``.py`` path. Registers the ``python://`` tools and named RAG
+       services the workflow refers to; a workflow with a ``rag_query`` node
+       naming a registered service cannot be built without it. Same job as a
+       suite's ``setup:`` key (:doc:`eval_yaml`).
    * - ``KAVALAI_AGENT_HOST``
      - Bind address. Default ``0.0.0.0``.
    * - ``KAVALAI_AGENT_PORT``

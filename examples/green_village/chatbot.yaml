@@ -1,0 +1,76 @@
+# A grounded chatbot: answers about Green Village strictly from the fact index.
+#
+# Two choices here exist purely to make the thing gradeable, and both are worth
+# copying into your own workflows:
+#
+#   * `used_ids` makes the model declare its evidence, so "did it make that up"
+#     is a set comparison rather than a judgement call;
+#   * the refusal instruction gives the unanswerable questions a *defined*
+#     correct behaviour, instead of grading whatever the model happens to do.
+name: green-village-chatbot
+description: Answers questions about Green Village from the indexed facts.
+llm_model: openai/gpt-5.4-mini
+
+# `rag_collection` is the workflow-wide default, so the retrieve node below
+# needs to name neither a service nor a collection.
+rag_collection: green_village
+
+data_types:
+  input:
+    type: object
+    properties:
+      user_message: {type: string}
+  # `hits` is deliberately not declared: a rag_query node stores a list of
+  # RagServiceResult objects, which is not a schema-parsed model.
+  output:
+    type: object
+    properties:
+      agent_response: {type: string}
+      grounded: {type: boolean}
+      used_ids:
+        type: array
+        items: {type: string}
+
+nodes:
+  - {name: begin, type: start, next: retrieve}
+
+  # Native retrieval. `store: results` keeps each hit's source_id and score,
+  # which is exactly what `retrieval_hit_at_k` grades — and it lands in an
+  # ordinary task row, so the metric needs no special case anywhere.
+  - name: retrieve
+    type: rag_query
+    query: "{{ context.input.user_message }}"
+    output: hits
+    top_k: 8
+    store: results
+    next: answer
+
+  - name: answer
+    type: llm
+    prompt: >-
+      You answer questions about Green Village using ONLY the retrieved facts
+      below. Never use anything you think you know about the world.
+
+      Retrieved facts:
+      {% for hit in context.hits %}
+      - [{{ hit.source_id }}] {{ hit.content }}
+      {% endfor %}
+
+      The question: {{ context.input.user_message }}
+
+      Write `agent_response` as a short, direct answer. Answer in the SAME
+      language the question was written in — if the question is in English,
+      answer in English. List in `used_ids` the source id of every fact you
+      actually used, and set `grounded` to true.
+
+      If the retrieved facts do not answer the question, say so plainly, set
+      `grounded` to false and leave `used_ids` empty. Never guess a number, a
+      date or a name. If the question assumes something the facts contradict,
+      correct it and give the real figure.
+    inputs:
+      input: {type: context, value: input}
+      hits: {type: context, value: hits}
+    output: output
+    next: finish
+
+  - {name: finish, type: end, output: output}

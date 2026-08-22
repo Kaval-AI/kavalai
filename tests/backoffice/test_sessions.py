@@ -271,3 +271,112 @@ async def test_get_sessions_summary_with_date_range(agents_db):
         agents_db, start_date=now - timedelta(days=15), end_date=now + timedelta(days=1)
     )
     assert result["total_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_get_sessions_summary_filters_by_external_id(agents_db):
+    """The one backoffice change evaluation needs: find *this* conversation.
+
+    Evaluation runs tag their sessions ``eval:{suite}:{tag}:{case}:{repeat}``,
+    so a prefix separates test traffic from production in one predicate, and a
+    full id from a failing case in a result file lands on exactly the
+    conversation that produced it.
+    """
+    agent = Agent(id=uuid4(), name="Agent")
+    agents_db.add(agent)
+    await agents_db.commit()
+
+    now = datetime.now(timezone.utc)
+    external_ids = [
+        "eval:bakery-acceptance:pr-412:vague_quantity:0",
+        "eval:bakery-acceptance:pr-412:clean_order:0",
+        "eval:bakery-acceptance:main:clean_order:0",
+        "chat-session-9931",
+        None,
+    ]
+    agents_db.add_all(
+        [
+            Session(
+                id=uuid4(),
+                agent_id=agent.id,
+                external_id=external_id,
+                created_at=now,
+                updated_at=now,
+            )
+            for external_id in external_ids
+        ]
+    )
+    await agents_db.commit()
+
+    everything = await get_sessions_summary(agents_db)
+    assert everything["total_count"] == 5
+
+    # A prefix separates one experiment's traffic from everything else.
+    experiment = await get_sessions_summary(
+        agents_db, external_id="eval:bakery-acceptance:pr-412:"
+    )
+    assert experiment["total_count"] == 2
+
+    # And all evaluation traffic from all real traffic.
+    all_evals = await get_sessions_summary(agents_db, external_id="eval:")
+    assert all_evals["total_count"] == 3
+
+    # A full id lands on the single failing conversation.
+    exact = await get_sessions_summary(
+        agents_db, external_id="eval:bakery-acceptance:pr-412:vague_quantity:0"
+    )
+    assert exact["total_count"] == 1
+    assert exact["sessions"][0].external_id.endswith("vague_quantity:0")
+
+    assert (await get_sessions_summary(agents_db, external_id="nope"))[
+        "total_count"
+    ] == 0
+
+
+@pytest.mark.asyncio
+async def test_session_details_returns_the_trajectory_in_execution_order(agents_db):
+    """``seq`` is what carries the structure; ``created_at`` is approximate."""
+    agent = Agent(id=uuid4(), name="Agent")
+    agents_db.add(agent)
+    await agents_db.commit()
+
+    now = datetime.now(timezone.utc)
+    session = Session(id=uuid4(), agent_id=agent.id, created_at=now, updated_at=now)
+    run = Run(id=uuid4(), session_id=session.id, created_at=now)
+
+    # Written out of order on purpose: task rows are fire-and-forget, so the
+    # order they land in is not the order they happened in.
+    rows = [
+        ("crawl", "tool_call", 2, "research", "python://crawl"),
+        ("begin", "start", 0, None, None),
+        ("research", "agent", 1, None, None),
+        ("finish", "end", 3, None, None),
+    ]
+    agents_db.add_all(
+        [session, run]
+        + [
+            Task(
+                id=uuid4(),
+                agent_id=agent.id,
+                session_id=session.id,
+                run_id=run.id,
+                name=name,
+                node_type=node_type,
+                seq=seq,
+                parent_task_name=parent,
+                tool_uri=tool_uri,
+                created_at=now,
+            )
+            for name, node_type, seq, parent, tool_uri in rows
+        ]
+    )
+    await agents_db.commit()
+
+    details = await get_session_details(agents_db, session.id)
+    assert [t.name for t in details.tasks] == ["begin", "research", "crawl", "finish"]
+
+    crawl = details.tasks[2]
+    assert crawl.node_type == "tool_call"
+    # This is what the run-tasks view indents under its node.
+    assert crawl.parent_task_name == "research"
+    assert crawl.tool_uri == "python://crawl"

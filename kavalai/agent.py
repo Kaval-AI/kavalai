@@ -1,6 +1,7 @@
 import asyncio
 import json
-from typing import Any, AsyncGenerator, Optional, Type
+import time
+from typing import Any, AsyncGenerator, Callable, Optional, Type
 import os
 
 from loguru import logger
@@ -200,6 +201,7 @@ class Agent:
         run_context: Optional[RunContext] = None,
         prompt_template: Optional[Template] = None,
         allowed_tools: Optional[list[str]] = None,
+        on_step: Optional[Callable[[dict], None]] = None,
         debug: bool = False,
     ):
         """Build an agent.
@@ -209,10 +211,19 @@ class Agent:
         for a whole server). The tools outside it are neither described to the
         model nor callable. ``None`` (the default) allows every registered
         tool; an empty list allows none.
+
+        ``on_step`` is an observer called once per completed reasoning step
+        with that step's record (index, instructions, tool calls with their
+        arguments, results and durations, and the step's output). It exists so
+        an agent's internal tool calls can be recorded — the workflow engine
+        turns them into task rows — without putting them on the public stream,
+        which every SSE consumer sees. It is called synchronously and its
+        exceptions are swallowed: a broken observer must never break a run.
         """
         self.debug = debug
         self.kernel = kernel
         self.allowed_tools = allowed_tools
+        self.on_step = on_step
         if not run_context:
             run_context = RunContext()
         self.run_context = run_context
@@ -353,7 +364,7 @@ class Agent:
                         for tc in step_output.tool_calls
                     ]
                 )
-                for tool_call, args, result in results:
+                for tool_call, args, result, duration in results:
                     planner_context[tool_call.call_id] = result
                     step_record["tool_calls"].append(
                         {
@@ -361,10 +372,12 @@ class Agent:
                             "args": args,
                             "call_id": tool_call.call_id,
                             "output": to_plain(result),
+                            "duration_seconds": duration,
                         }
                     )
 
             steps.append(step_record)
+            self._publish_step(step_record)
 
             if step_output.output is not None:
                 final_output = step_output.output
@@ -450,20 +463,42 @@ class Agent:
 
         return {**input_args, **context_args, **literal_args}
 
+    def _publish_step(self, step_record: dict) -> None:
+        """Hand a completed step to the ``on_step`` observer, if there is one.
+
+        Never raises: an observer that fails is a logging problem, not a
+        reason to abandon the run.
+        """
+        if self.on_step is None:
+            return
+        try:
+            self.on_step(step_record)
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning(f"Agent on_step observer failed: {e}")
+
     async def _call_tool(
         self, tool_call: ToolCall, planner_context: dict[str, Any]
-    ) -> tuple[ToolCall, dict, Any]:
+    ) -> tuple[ToolCall, dict, Any, float]:
         """Resolve arguments and execute a single tool call via the kernel.
 
-        Returns ``(tool_call, args, result)``. Execution errors are captured
-        and returned as the result so the model can self-correct.
+        Returns ``(tool_call, args, result, duration_seconds)``. Execution
+        errors are captured and returned as the result so the model can
+        self-correct. The duration is measured here rather than around the
+        caller's ``asyncio.gather`` — that would time the slowest call in the
+        batch and attribute it to all of them.
         """
         args = self._resolve_args(tool_call, planner_context)
+        start = time.perf_counter()
         if not _is_tool_allowed(tool_call.name, self.allowed_tools):
             # The tool was never described to the model; tell it so it can
             # pick one it is actually allowed to call.
             logger.warning(f"Tool {tool_call.name} is not allowed for this agent")
-            return tool_call, args, f"Error: tool {tool_call.name} is not available."
+            return (
+                tool_call,
+                args,
+                f"Error: tool {tool_call.name} is not available.",
+                time.perf_counter() - start,
+            )
         logger.info(f"Calling tool {tool_call.name} with {args}")
         try:
             result = await self.kernel.call_tool(
@@ -472,7 +507,7 @@ class Agent:
         except Exception as e:
             logger.error(f"Tool {tool_call.name} failed: {e}")
             result = f"Error: {e}"
-        return tool_call, args, result
+        return tool_call, args, result, time.perf_counter() - start
 
 
 if __name__ == "__main__":  # pragma: no cover - manual demo

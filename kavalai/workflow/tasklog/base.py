@@ -15,12 +15,45 @@ limitations under the License.
 """
 
 import asyncio
+import json
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 
 from loguru import logger
 
 from kavalai.llm_clients.base_client import ModelCallStat, ModelStatsReceiver
+
+# Operational, not a privacy control: a single ``crawl_url`` result can be
+# megabytes, and writing that into a row hits statement-size limits, grows the
+# write-behind logger's memory under concurrency and makes the backoffice task
+# list unusable. Payloads above the cap are replaced by a marker carrying their
+# real size and a preview. Everything below it is stored in full.
+DEFAULT_MAX_PAYLOAD_BYTES = 256 * 1024
+
+
+def truncate_payload(value: Any, max_bytes: int) -> Any:
+    """Return ``value`` unchanged, or a marker dict when it is too large.
+
+    Args:
+        value: The payload to measure, already reduced to plain types.
+        max_bytes: Size limit; ``0`` or less disables truncation.
+    """
+    if value is None or max_bytes <= 0:
+        return value
+    try:
+        encoded = json.dumps(value, default=str).encode("utf-8")
+    except (TypeError, ValueError):  # pragma: no cover - to_plain covers this
+        return value
+    if len(encoded) <= max_bytes:
+        return value
+    # Not ``_truncated``: ``to_plain`` drops keys starting with an underscore
+    # on the way into a row, which would make the marker indistinguishable
+    # from a genuine payload that happened to have a ``bytes`` field.
+    return {
+        "truncated": True,
+        "bytes": len(encoded),
+        "preview": encoded[:2048].decode("utf-8", errors="replace"),
+    }
 
 
 class TaskLogger(ABC):
@@ -32,8 +65,9 @@ class TaskLogger(ABC):
     await all pending writes.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, max_payload_bytes: int = DEFAULT_MAX_PAYLOAD_BYTES) -> None:
         self._background_tasks: set[asyncio.Task] = set()
+        self.max_payload_bytes = max_payload_bytes
 
     def log_node(
         self,
@@ -48,8 +82,19 @@ class TaskLogger(ABC):
         prompt: Optional[str] = None,
         duration: float = 0.0,
         errors: Optional[list[str]] = None,
+        seq: Optional[int] = None,
+        parent_task_name: Optional[str] = None,
+        tool_uri: Optional[str] = None,
     ) -> None:
-        """Record the execution of a single node (fire-and-forget)."""
+        """Record the execution of a single node (fire-and-forget).
+
+        Args:
+            seq: Position of this record in the run's execution order.
+            parent_task_name: Node that produced this record, set on the
+                tool-call rows an agent node emits.
+            tool_uri: Tool this record executed, for function nodes and agent
+                tool calls alike.
+        """
         self._spawn(
             self._log_node_impl(
                 run_id=run_id,
@@ -57,11 +102,14 @@ class TaskLogger(ABC):
                 agent_id=agent_id,
                 node_name=node_name,
                 node_type=node_type,
-                inputs=inputs,
-                output=output,
+                inputs=truncate_payload(inputs, self.max_payload_bytes),
+                output=truncate_payload(output, self.max_payload_bytes),
                 prompt=prompt,
                 duration=duration,
                 errors=errors,
+                seq=seq,
+                parent_task_name=parent_task_name,
+                tool_uri=tool_uri,
             )
         )
 
@@ -107,6 +155,9 @@ class TaskLogger(ABC):
         prompt: Optional[str],
         duration: float,
         errors: Optional[list[str]],
+        seq: Optional[int] = None,
+        parent_task_name: Optional[str] = None,
+        tool_uri: Optional[str] = None,
     ) -> None:
         """Persist a node execution record."""
 

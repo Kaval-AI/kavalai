@@ -136,12 +136,6 @@ evaluators ask first.
    * - No multi-agent patterns
      - There is no handoff, delegation, crew or group-chat primitive — one
        agent loop per node, with the graph doing the routing.
-   * - No evaluation tooling
-     - There is no dataset runner, scoring or regression harness for prompt
-       changes. The recorded runs are good raw material for one: the typed
-       inputs and outputs of every run, task and model call are already
-       persisted, so most of what other tools call instrumentation is a
-       ``SELECT`` here.
    * - No OpenTelemetry export
      - Observability is Kaval.AI's own tables plus ``loguru``. Pydantic AI, the
        OpenAI Agents SDK and the Microsoft Agent Framework all emit OTel spans,

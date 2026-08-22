@@ -19,7 +19,17 @@ import inspect
 import json
 from loguru import logger
 import os
-from typing import Any, Dict, List, Optional, Callable, Type
+from typing import (
+    Any,
+    Dict,
+    List,
+    Optional,
+    Callable,
+    Type,
+    Union,
+    get_args,
+    get_origin,
+)
 
 import httpx
 from pydantic import BaseModel, create_model
@@ -624,14 +634,17 @@ class FunctionKernel:
         try:
             call_args = Validator.validate_arguments(definition.input_model, arguments)
 
-            # Ensure complex Pydantic types are passed as model instances if needed
+            # Ensure complex Pydantic types are passed as model instances if
+            # needed. ``Optional[Model]`` counts: a tool whose parameter may
+            # legitimately be absent still wants the model when it is present,
+            # and leaving it a dict fails later, inside the tool, with a
+            # confusing error about the dict's own methods.
             for param_name, p in inspect.signature(func).parameters.items():
-                if (
-                    param_name in call_args
-                    and isinstance(p.annotation, type)
-                    and issubclass(p.annotation, BaseModel)
-                ):
-                    call_args[param_name] = p.annotation(**call_args[param_name])
+                model = _model_annotation(p.annotation)
+                if model is not None and call_args.get(param_name) is not None:
+                    value = call_args[param_name]
+                    if not isinstance(value, model):
+                        call_args[param_name] = model.model_validate(value)
         except Exception as e:
             raise FunctionKernelException(
                 f"Python tool '{python_tool}' argument validation failed: {e}"
@@ -821,6 +834,20 @@ def _is_tool_allowed(name: str, allowed_tools: Optional[List[str]]) -> bool:
             return True
 
     return False
+
+
+def _model_annotation(annotation: Any) -> Optional[Type[BaseModel]]:
+    """The Pydantic model in an annotation, unwrapping ``Optional``/``Union``.
+
+    Returns ``None`` when the annotation is not (or does not contain) a model.
+    """
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return annotation
+    if get_origin(annotation) is Union:
+        for arg in get_args(annotation):
+            if isinstance(arg, type) and issubclass(arg, BaseModel):
+                return arg
+    return None
 
 
 def _add_tool_to_list(

@@ -185,12 +185,15 @@ async def test_linear_llm_workflow_persists_everything():
         ("assistant", "hi there"),
     ]
 
-    # Node + model stats logged.
+    # Every node visit wrote a row, and ``ORDER BY seq`` is the executed path.
     await tlog.flush()
     conn = await tlog._connect()
-    async with conn.execute("SELECT name, node_type FROM tasks") as cur:
+    async with conn.execute(
+        "SELECT name, node_type, seq FROM tasks ORDER BY seq"
+    ) as cur:
         tasks = [tuple(r) for r in await cur.fetchall()]
-    assert tasks == [("answer", "llm")]
+    assert tasks == [("s", "start", 0), ("answer", "llm", 1), ("e", "end", 2)]
+    assert [t[0] for t in tasks] == state.trace
     async with conn.execute("SELECT count(*) FROM model_call_stats") as cur:
         assert (await cur.fetchone())[0] == 1
 
@@ -723,7 +726,7 @@ def test_next_node_end_returns_none():
     ]
     engine = WorkflowEngine.from_dict(graph_dict(nodes), client_factory=make_factory())
     end_node = engine.node_map["e"]
-    assert engine._next_node(end_node, RunContext()) is None
+    assert engine._next_node(end_node, RunContext()) == (None, None)
 
 
 def test_from_yaml_and_from_yaml_path(tmp_path):
@@ -1425,3 +1428,295 @@ async def test_unknown_service_fails_at_load_not_at_execution():
     message = str(error.value)
     assert "nosuch" in message
     assert "register_rag_service()" in message
+
+
+# ------------------------------------------------------- trajectory recording
+async def _trajectory(engine, input_data=None):
+    """Run once with a private in-memory logger and return its records."""
+    from kavalai.workflow.tasklog import MemoryTaskLogger
+
+    tlog = MemoryTaskLogger()
+    state = await engine.run(input_data or {"user_message": "hi"}, task_logger=tlog)
+    return state, tlog.records
+
+
+async def test_every_node_visit_writes_one_row_in_order():
+    """``ORDER BY seq`` is the executed path, not the subset that did something."""
+    nodes = [
+        {"name": "s", "type": "start", "next": "branch"},
+        {
+            "name": "branch",
+            "type": "if",
+            "condition": "input.user_message == 'hi'",
+            "then": "yes_node",
+            "else": "no_node",
+        },
+        {
+            "name": "yes_node",
+            "type": "llm",
+            "prompt": "y",
+            "output": "output",
+            "next": "e",
+        },
+        {
+            "name": "no_node",
+            "type": "llm",
+            "prompt": "n",
+            "output": "output",
+            "next": "e",
+        },
+        {"name": "e", "type": "end", "output": "output"},
+    ]
+    engine = WorkflowEngine.from_dict(
+        graph_dict(nodes), client_factory=make_factory({"agent_response": "r"})
+    )
+    state, records = await _trajectory(engine)
+
+    assert [r.name for r in records] == ["s", "branch", "yes_node", "e"]
+    assert [r.seq for r in records] == [0, 1, 2, 3]
+    # The trace the state reports and the rows the run wrote agree.
+    assert [r.name for r in records] == state.trace
+
+
+async def test_if_branch_records_the_value_it_routed_on():
+    nodes = [
+        {"name": "s", "type": "start", "next": "branch"},
+        {
+            "name": "branch",
+            "type": "if",
+            "condition": "input.user_message == 'hi'",
+            "then": "yes_node",
+            "else": "no_node",
+        },
+        {
+            "name": "yes_node",
+            "type": "llm",
+            "prompt": "y",
+            "output": "output",
+            "next": "e",
+        },
+        {
+            "name": "no_node",
+            "type": "llm",
+            "prompt": "n",
+            "output": "output",
+            "next": "e",
+        },
+        {"name": "e", "type": "end", "output": "output"},
+    ]
+    engine = WorkflowEngine.from_dict(
+        graph_dict(nodes), client_factory=make_factory({"agent_response": "r"})
+    )
+    _, records = await _trajectory(engine, {"user_message": "bye"})
+
+    branch = next(r for r in records if r.name == "branch")
+    assert branch.node_type == "if"
+    assert branch.inputs == {"expr": "input.user_message == 'hi'", "value": False}
+    assert branch.output == {"taken": "no_node", "matched": True}
+
+
+async def test_switch_records_the_unmatched_label_that_fell_to_default(caplog):
+    """A model returning a label outside the enum is the usual mis-route cause."""
+    nodes = [
+        {"name": "s", "type": "start", "next": "route"},
+        {
+            "name": "route",
+            "type": "switch",
+            "expr": "input.user_message",
+            "cases": {"order": "handle"},
+            "default": "handle",
+        },
+        {
+            "name": "handle",
+            "type": "llm",
+            "prompt": "h",
+            "output": "output",
+            "next": "e",
+        },
+        {"name": "e", "type": "end", "output": "output"},
+    ]
+    engine = WorkflowEngine.from_dict(
+        graph_dict(nodes), client_factory=make_factory({"agent_response": "r"})
+    )
+    _, records = await _trajectory(engine, {"user_message": "Order "})
+
+    route = next(r for r in records if r.name == "route")
+    assert route.inputs == {"expr": "input.user_message", "value": "Order "}
+    assert route.output == {"taken": "handle", "matched": False}
+
+
+async def test_function_node_row_carries_its_tool_uri():
+    @pythontool
+    def echo(text: str) -> str:
+        """Echo."""
+        return text
+
+    nodes = [
+        {"name": "s", "type": "start", "next": "call"},
+        {
+            "name": "call",
+            "type": "function",
+            "tool": "python://echo",
+            "inputs": {"text": {"type": "literal", "value": "hi"}},
+            "output": "classification",
+            "next": "answer",
+        },
+        {
+            "name": "answer",
+            "type": "llm",
+            "prompt": "a",
+            "output": "output",
+            "next": "e",
+        },
+        {"name": "e", "type": "end", "output": "output"},
+    ]
+    engine = WorkflowEngine.from_dict(
+        graph_dict(nodes), client_factory=make_factory({"agent_response": "r"})
+    )
+    engine.kernel.register_python_tool("echo", echo)
+    _, records = await _trajectory(engine)
+
+    call = next(r for r in records if r.name == "call")
+    assert call.tool_uri == "python://echo"
+
+
+async def test_parallel_branches_draw_from_one_sequence():
+    """One counter per run, so the interleaving is recorded rather than lost."""
+    nodes = [
+        {"name": "s", "type": "start", "next": "fan"},
+        {"name": "fan", "type": "parallel", "branches": ["a", "b"], "next": "e"},
+        {
+            "name": "a",
+            "type": "llm",
+            "prompt": "a",
+            "output": "classification",
+            "next": "e",
+        },
+        {"name": "b", "type": "llm", "prompt": "b", "output": "output", "next": "e"},
+        {"name": "e", "type": "end", "output": "output"},
+    ]
+    engine = WorkflowEngine.from_dict(
+        graph_dict(nodes), client_factory=make_factory({"agent_response": "r"})
+    )
+    _, records = await _trajectory(engine)
+
+    assert {r.name for r in records} == {"s", "fan", "a", "b", "e"}
+    # A gapless permutation: every visit took exactly one number.
+    assert sorted(r.seq for r in records) == list(range(len(records)))
+    fan = next(r for r in records if r.name == "fan")
+    assert fan.output == {"branches": ["a", "b"]}
+    # The fan row sorts ahead of everything its branches wrote.
+    assert fan.seq < min(r.seq for r in records if r.name in {"a", "b"})
+
+
+async def test_agent_tool_calls_become_child_rows():
+    """The gap this closes: what the agent chose, not just what it answered."""
+    from kavalai.llm_clients.streamer import StreamContent
+
+    @pythontool
+    def lookup(order_id: str) -> str:
+        """Look an order up."""
+        return "found"
+
+    class ToolCallingClient(BaseLlmClient):
+        """Calls ``lookup`` on step 0, answers on step 1."""
+
+        def __init__(self, model, parameters=None, stats_receiver=None):
+            super().__init__(parameters, stats_receiver)
+            self.step = 0
+
+        async def stream_chat_completions(
+            self, chat_history, response_model=None, **kw
+        ):
+            if self.step == 0:
+                payload = {
+                    "instructions": "look it up",
+                    "tool_calls": [
+                        {
+                            "name": "python://lookup",
+                            "call_id": "c1",
+                            "literal_args": '{"order_id": "4471"}',
+                        }
+                    ],
+                    "output": None,
+                }
+            else:
+                payload = {
+                    "instructions": "answer",
+                    "tool_calls": [],
+                    "output": {"agent_response": "found it"},
+                }
+            self.step += 1
+
+            async def gen():
+                yield StreamContent(
+                    type="partial", name="response", value=json.dumps(payload)
+                )
+                yield StreamContent(type="complete", name="response", value=None)
+
+            return gen()
+
+    nodes = [
+        {"name": "s", "type": "start", "next": "research"},
+        {
+            "name": "research",
+            "type": "agent",
+            "prompt": "find order 4471",
+            "output": "output",
+            "max_steps": 3,
+            "next": "e",
+        },
+        {"name": "e", "type": "end", "output": "output"},
+    ]
+    engine = WorkflowEngine.from_dict(
+        graph_dict(nodes),
+        client_factory=lambda model, params=None, stats=None: ToolCallingClient(
+            model, params, stats
+        ),
+    )
+    engine.kernel.register_python_tool("lookup", lookup)
+    _, records = await _trajectory(engine)
+
+    assert [r.name for r in records] == ["s", "research", "lookup", "e"]
+    call = next(r for r in records if r.node_type == "tool_call")
+    assert call.tool_uri == "python://lookup"
+    assert call.parent_task_name == "research"
+    assert call.inputs["args"] == {"order_id": "4471"}
+    assert call.inputs["step"] == 0
+    # A bare (non-Pydantic) tool result is wrapped as ``.result`` by the kernel.
+    assert call.output == {"result": "found"}
+    assert call.duration_seconds >= 0.0
+    # The child row sorts after its node and before the next one.
+    research = next(r for r in records if r.name == "research")
+    end = next(r for r in records if r.name == "e")
+    assert research.seq < call.seq < end.seq
+
+
+async def test_per_run_logger_isolates_concurrent_runs():
+    """One engine, two runs, two private trajectories — no run_id filtering."""
+    import asyncio
+
+    from kavalai.workflow.tasklog import MemoryTaskLogger
+
+    nodes = [
+        {"name": "s", "type": "start", "next": "answer"},
+        {
+            "name": "answer",
+            "type": "llm",
+            "prompt": "a",
+            "output": "output",
+            "next": "e",
+        },
+        {"name": "e", "type": "end", "output": "output"},
+    ]
+    engine = WorkflowEngine.from_dict(
+        graph_dict(nodes), client_factory=make_factory({"agent_response": "r"})
+    )
+    first, second = MemoryTaskLogger(), MemoryTaskLogger()
+    await asyncio.gather(
+        engine.run({"user_message": "a"}, task_logger=first),
+        engine.run({"user_message": "b"}, task_logger=second),
+    )
+
+    assert [r.name for r in first.records] == ["s", "answer", "e"]
+    assert [r.name for r in second.records] == ["s", "answer", "e"]

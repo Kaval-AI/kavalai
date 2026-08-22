@@ -63,6 +63,12 @@ export class AgentService {
     return this.http.get<any>(url);
   }
 
+  /**
+   * List conversations. `search` matches message content; `externalId` matches
+   * the session's caller-supplied key as a prefix — paste
+   * `eval:my-suite:pr-412:` to see one experiment's runs, or a full id from a
+   * failing case to land on the exact conversation that produced it.
+   */
   getSessions(
     projectId: string,
     agentId?: string,
@@ -70,7 +76,8 @@ export class AgentService {
     startDate?: string,
     endDate?: string,
     limit: number = 50,
-    offset: number = 0
+    offset: number = 0,
+    externalId?: string
   ): Observable<any> {
     let url = `/api/agents/sessions/${projectId}?limit=${limit}&offset=${offset}`;
     if (agentId) {
@@ -78,6 +85,9 @@ export class AgentService {
     }
     if (search) {
       url += `&search=${encodeURIComponent(search)}`;
+    }
+    if (externalId) {
+      url += `&external_id=${encodeURIComponent(externalId)}`;
     }
     if (startDate) {
       url += `&start_date=${startDate}`;

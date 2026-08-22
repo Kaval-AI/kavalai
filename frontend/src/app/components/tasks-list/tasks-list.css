@@ -137,3 +137,29 @@
   text-align: center;
   color: var(--color-neutral);
 }
+
+/* A tool call an agent chose for itself, shown under the node that made it.
+   One level of nesting only: `parent_task_name` is a name, and a name join
+   wants exactly one level. */
+.task-item.tool-call {
+  margin-left: 1.75rem;
+  border-left: 2px solid var(--color-base-300, #d1d5db);
+}
+
+.task-seq {
+  font-family: ui-monospace, monospace;
+  font-size: 0.65rem;
+  opacity: 0.4;
+  min-width: 1.5rem;
+}
+
+/* The routing decision, and the value it was made on. */
+.branch-summary {
+  padding: 0.25rem 0.75rem 0.5rem;
+  font-size: 0.8rem;
+  opacity: 0.85;
+}
+
+.branch-summary.unmatched {
+  opacity: 1;
+}

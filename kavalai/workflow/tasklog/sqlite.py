@@ -14,6 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
+import asyncio
 import json
 from typing import Any, Optional
 from uuid import uuid4
@@ -38,7 +39,10 @@ CREATE TABLE IF NOT EXISTS tasks (
     output TEXT,
     prompt TEXT,
     errors TEXT,
-    duration_seconds REAL
+    duration_seconds REAL,
+    seq INTEGER,
+    parent_task_name TEXT,
+    tool_uri TEXT
 );
 CREATE TABLE IF NOT EXISTS model_call_stats (
     id TEXT PRIMARY KEY,
@@ -76,13 +80,22 @@ class SqliteTaskLogger(TaskLogger):
         super().__init__()
         self.path = path
         self._conn: Optional[aiosqlite.Connection] = None
+        self._connect_lock = asyncio.Lock()
 
     async def _connect(self) -> aiosqlite.Connection:
-        if self._conn is None:
-            self._conn = await aiosqlite.connect(self.path)
-            self._conn.row_factory = aiosqlite.Row
-            await self._conn.executescript(_SCHEMA)
-            await self._conn.commit()
+        # Writes are fire-and-forget, so several of them race to open the
+        # connection. Without the lock each would open its own — and with
+        # ``:memory:`` that means several *different* databases, of which only
+        # the last assignment survives and the rest of the run's rows vanish.
+        if self._conn is not None:
+            return self._conn
+        async with self._connect_lock:
+            if self._conn is None:
+                conn = await aiosqlite.connect(self.path)
+                conn.row_factory = aiosqlite.Row
+                await conn.executescript(_SCHEMA)
+                await conn.commit()
+                self._conn = conn
         return self._conn
 
     async def _log_node_impl(
@@ -98,12 +111,16 @@ class SqliteTaskLogger(TaskLogger):
         prompt: Optional[str],
         duration: float,
         errors: Optional[list[str]],
+        seq: Optional[int] = None,
+        parent_task_name: Optional[str] = None,
+        tool_uri: Optional[str] = None,
     ) -> None:
         conn = await self._connect()
         await conn.execute(
             "INSERT INTO tasks (id, agent_id, session_id, run_id, name, "
-            "node_type, inputs, output, prompt, errors, duration_seconds) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "node_type, inputs, output, prompt, errors, duration_seconds, "
+            "seq, parent_task_name, tool_uri) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 str(uuid4()),
                 agent_id,
@@ -116,6 +133,9 @@ class SqliteTaskLogger(TaskLogger):
                 prompt,
                 _dumps(errors),
                 duration,
+                seq,
+                parent_task_name,
+                tool_uri,
             ),
         )
         await conn.commit()

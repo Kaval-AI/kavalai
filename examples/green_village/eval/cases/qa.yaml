@@ -1,0 +1,554 @@
+name: green_village_qa
+cases:
+- name: direct_fact-00
+  slice: direct
+  inputs:
+    user_message: Who is the president of Green Village?
+  expected:
+    source_ids:
+    - fact-00
+    contains:
+    - Thomas Cook
+- name: direct_fact-01
+  slice: direct
+  inputs:
+    user_message: How many residents does Green Village have?
+  expected:
+    source_ids:
+    - fact-01
+    contains:
+    - '104'
+- name: direct_fact-02
+  slice: direct
+  inputs:
+    user_message: When was Green Village founded?
+  expected:
+    source_ids:
+    - fact-02
+    contains:
+    - '1887'
+- name: direct_fact-03
+  slice: direct
+  inputs:
+    user_message: How tall is the Old Grain Tower?
+  expected:
+    source_ids:
+    - fact-03
+    contains:
+    - '23'
+- name: direct_fact-04
+  slice: direct
+  inputs:
+    user_message: What is Green Village's official flower?
+  expected:
+    source_ids:
+    - fact-04
+    contains:
+    - marsh marigold
+- name: direct_fact-05
+  slice: direct
+  inputs:
+    user_message: How many loaves does the village bakery sell each week?
+  expected:
+    source_ids:
+    - fact-05
+    contains:
+    - '340'
+- name: direct_fact-06
+  slice: direct
+  inputs:
+    user_message: How many pupils are there at the village school?
+  expected:
+    source_ids:
+    - fact-06
+    contains:
+    - '14'
+- name: direct_fact-07
+  slice: direct
+  inputs:
+    user_message: When is the Turnip Festival held?
+  expected:
+    source_ids:
+    - fact-07
+    contains:
+    - October
+- name: direct_fact-08
+  slice: direct
+  inputs:
+    user_message: How many volunteers are in the fire brigade?
+  expected:
+    source_ids:
+    - fact-08
+    contains:
+    - '7'
+- name: direct_fact-09
+  slice: direct
+  inputs:
+    user_message: How deep is Lake Miller?
+  expected:
+    source_ids:
+    - fact-09
+    contains:
+    - '1.2'
+- name: direct_fact-10
+  slice: direct
+  inputs:
+    user_message: Who is the oldest resident of Green Village?
+  expected:
+    source_ids:
+    - fact-10
+    contains:
+    - Agnes Whitlow
+- name: direct_fact-11
+  slice: direct
+  inputs:
+    user_message: How many streets does Green Village have?
+  expected:
+    source_ids:
+    - fact-11
+    contains:
+    - '3'
+- name: direct_fact-12
+  slice: direct
+  inputs:
+    user_message: How much does the church bell weigh?
+  expected:
+    source_ids:
+    - fact-12
+    contains:
+    - '412'
+- name: direct_fact-13
+  slice: direct
+  inputs:
+    user_message: How many beehives does Green Village have?
+  expected:
+    source_ids:
+    - fact-13
+    contains:
+    - '26'
+- name: direct_fact-14
+  slice: direct
+  inputs:
+    user_message: How many books does the village library own?
+  expected:
+    source_ids:
+    - fact-14
+    contains_any:
+    - 1,847
+    - '1847'
+- name: direct_fact-15
+  slice: direct
+  inputs:
+    user_message: What is the speed limit in Green Village?
+  expected:
+    source_ids:
+    - fact-15
+    contains:
+    - '30'
+- name: direct_fact-16
+  slice: direct
+  inputs:
+    user_message: How long has The Rusty Anchor been open?
+  expected:
+    source_ids:
+    - fact-16
+    contains:
+    - '1923'
+- name: paraphrase_fact-00_0
+  slice: paraphrase
+  inputs:
+    user_message: Who's currently in charge of Green Village?
+  expected:
+    source_ids:
+    - fact-00
+    contains:
+    - Thomas Cook
+- name: paraphrase_fact-00_1
+  slice: paraphrase
+  inputs:
+    user_message: Do you know who the president of Green Village is?
+  expected:
+    source_ids:
+    - fact-00
+    contains:
+    - Thomas Cook
+- name: paraphrase_fact-01_0
+  slice: paraphrase
+  inputs:
+    user_message: What is the population of Green Village?
+  expected:
+    source_ids:
+    - fact-01
+    contains:
+    - '104'
+- name: paraphrase_fact-01_1
+  slice: paraphrase
+  inputs:
+    user_message: Do you happen to know how many people live in Green Village?
+  expected:
+    source_ids:
+    - fact-01
+    contains:
+    - '104'
+- name: paraphrase_fact-02_0
+  slice: paraphrase
+  inputs:
+    user_message: Do you know what year Green Village was established?
+  expected:
+    source_ids:
+    - fact-02
+    contains:
+    - '1887'
+- name: paraphrase_fact-02_1
+  slice: paraphrase
+  inputs:
+    user_message: Green Village founding date?
+  expected:
+    source_ids:
+    - fact-02
+    contains:
+    - '1887'
+- name: paraphrase_fact-03_0
+  slice: paraphrase
+  inputs:
+    user_message: What's the height of the Old Grain Tower?
+  expected:
+    source_ids:
+    - fact-03
+    contains:
+    - '23'
+- name: paraphrase_fact-03_1
+  slice: paraphrase
+  inputs:
+    user_message: Can you tell me how high the Old Grain Tower is?
+  expected:
+    source_ids:
+    - fact-03
+    contains:
+    - '23'
+- name: paraphrase_fact-04_0
+  slice: paraphrase
+  inputs:
+    user_message: Does Green Village have a specific official flower?
+  expected:
+    source_ids:
+    - fact-04
+    contains:
+    - marsh marigold
+- name: paraphrase_fact-04_1
+  slice: paraphrase
+  inputs:
+    user_message: Which flower is recognized as the official symbol of Green Village?
+  expected:
+    source_ids:
+    - fact-04
+    contains:
+    - marsh marigold
+- name: paraphrase_fact-05_0
+  slice: paraphrase
+  inputs:
+    user_message: What's the weekly bread output over at Greta's bakery?
+  expected:
+    source_ids:
+    - fact-05
+    contains:
+    - '340'
+- name: paraphrase_fact-05_1
+  slice: paraphrase
+  inputs:
+    user_message: How much bread does Greta Lindqvist sell in a week?
+  expected:
+    source_ids:
+    - fact-05
+    contains:
+    - '340'
+- name: paraphrase_fact-06_0
+  slice: paraphrase
+  inputs:
+    user_message: Do you know how many kids go to the school in Green Village?
+  expected:
+    source_ids:
+    - fact-06
+    contains:
+    - '14'
+- name: paraphrase_fact-06_1
+  slice: paraphrase
+  inputs:
+    user_message: How many students are enrolled at the local village school?
+  expected:
+    source_ids:
+    - fact-06
+    contains:
+    - '14'
+- name: paraphrase_fact-07_0
+  slice: paraphrase
+  inputs:
+    user_message: What date does the Turnip Festival usually fall on?
+  expected:
+    source_ids:
+    - fact-07
+    contains:
+    - October
+- name: paraphrase_fact-07_1
+  slice: paraphrase
+  inputs:
+    user_message: Any idea when the Turnip Fest is happening this year?
+  expected:
+    source_ids:
+    - fact-07
+    contains:
+    - October
+- name: paraphrase_fact-08_0
+  slice: paraphrase
+  inputs:
+    user_message: What is the volunteer firefighter count for Green Village?
+  expected:
+    source_ids:
+    - fact-08
+    contains:
+    - '7'
+- name: paraphrase_fact-08_1
+  slice: paraphrase
+  inputs:
+    user_message: How many people volunteer at the local fire brigade?
+  expected:
+    source_ids:
+    - fact-08
+    contains:
+    - '7'
+- name: paraphrase_fact-09_0
+  slice: paraphrase
+  inputs:
+    user_message: Do you happen to know how deep the village pond gets?
+  expected:
+    source_ids:
+    - fact-09
+    contains:
+    - '1.2'
+- name: paraphrase_fact-09_1
+  slice: paraphrase
+  inputs:
+    user_message: What's the max depth of Lake Miller?
+  expected:
+    source_ids:
+    - fact-09
+    contains:
+    - '1.2'
+- name: paraphrase_fact-10_0
+  slice: paraphrase
+  inputs:
+    user_message: Does anyone know who the oldest person living in Green Village is?
+  expected:
+    source_ids:
+    - fact-10
+    contains:
+    - Agnes Whitlow
+- name: paraphrase_fact-10_1
+  slice: paraphrase
+  inputs:
+    user_message: Who's the most senior resident in Green Village?
+  expected:
+    source_ids:
+    - fact-10
+    contains:
+    - Agnes Whitlow
+- name: paraphrase_fact-11_0
+  slice: paraphrase
+  inputs:
+    user_message: How many roads are there in Green Village altogether?
+  expected:
+    source_ids:
+    - fact-11
+    contains:
+    - '3'
+- name: paraphrase_fact-11_1
+  slice: paraphrase
+  inputs:
+    user_message: Can you tell me the total number of streets in Green Village?
+  expected:
+    source_ids:
+    - fact-11
+    contains:
+    - '3'
+- name: paraphrase_fact-12_0
+  slice: paraphrase
+  inputs:
+    user_message: Do you happen to know how heavy that old church bell is?
+  expected:
+    source_ids:
+    - fact-12
+    contains:
+    - '412'
+- name: paraphrase_fact-12_1
+  slice: paraphrase
+  inputs:
+    user_message: What's the weight on the church bell?
+  expected:
+    source_ids:
+    - fact-12
+    contains:
+    - '412'
+- name: paraphrase_fact-13_0
+  slice: paraphrase
+  inputs:
+    user_message: Do you know how many hives Green Village maintains?
+  expected:
+    source_ids:
+    - fact-13
+    contains:
+    - '26'
+- name: paraphrase_fact-13_1
+  slice: paraphrase
+  inputs:
+    user_message: How many beehives are there in Green Village altogether?
+  expected:
+    source_ids:
+    - fact-13
+    contains:
+    - '26'
+- name: paraphrase_fact-14_0
+  slice: paraphrase
+  inputs:
+    user_message: Do you happen to know how many books they have in the village library's
+      collection?
+  expected:
+    source_ids:
+    - fact-14
+    contains_any:
+    - 1,847
+    - '1847'
+- name: paraphrase_fact-14_1
+  slice: paraphrase
+  inputs:
+    user_message: What's the total book count at the local library?
+  expected:
+    source_ids:
+    - fact-14
+    contains_any:
+    - 1,847
+    - '1847'
+- name: paraphrase_fact-15_0
+  slice: paraphrase
+  inputs:
+    user_message: How fast can you actually drive through Green Village?
+  expected:
+    source_ids:
+    - fact-15
+    contains:
+    - '30'
+- name: paraphrase_fact-15_1
+  slice: paraphrase
+  inputs:
+    user_message: Green Village speed limit?
+  expected:
+    source_ids:
+    - fact-15
+    contains:
+    - '30'
+- name: paraphrase_fact-16_0
+  slice: paraphrase
+  inputs:
+    user_message: Do you happen to know how old The Rusty Anchor pub is?
+  expected:
+    source_ids:
+    - fact-16
+    contains:
+    - '1923'
+- name: paraphrase_fact-16_1
+  slice: paraphrase
+  inputs:
+    user_message: What year did The Rusty Anchor first open its doors?
+  expected:
+    source_ids:
+    - fact-16
+    contains:
+    - '1923'
+- name: multi_hop_00
+  slice: multi_hop
+  inputs:
+    user_message: Which is older, the village bakery's owner's business or the pub?
+  expected:
+    source_ids:
+    - fact-05
+    - fact-16
+- name: multi_hop_01
+  slice: multi_hop
+  inputs:
+    user_message: What share of Green Village's residents are pupils at the school?
+  expected:
+    source_ids:
+    - fact-01
+    - fact-06
+- name: multi_hop_02
+  slice: multi_hop
+  inputs:
+    user_message: Does Green Village have more beehives or more library books?
+  expected:
+    source_ids:
+    - fact-13
+    - fact-14
+- name: unanswerable_00
+  slice: unanswerable
+  inputs:
+    user_message: What is Green Village's annual budget?
+- name: unanswerable_01
+  slice: unanswerable
+  inputs:
+    user_message: How many cars are registered in Green Village?
+- name: unanswerable_02
+  slice: unanswerable
+  inputs:
+    user_message: Who won the Turnip Festival in 2019?
+- name: unanswerable_03
+  slice: unanswerable
+  inputs:
+    user_message: What is the average house price in Green Village?
+- name: unanswerable_04
+  slice: unanswerable
+  inputs:
+    user_message: How many dogs live in Green Village?
+- name: adversarial_fact-09
+  slice: adversarial
+  inputs:
+    user_message: The village pond is about 4 metres deep, right?
+  expected:
+    source_ids:
+    - fact-09
+    contains:
+    - '1.2'
+- name: adversarial_fact-01
+  slice: adversarial
+  inputs:
+    user_message: Green Village has around 500 residents, doesn't it?
+  expected:
+    source_ids:
+    - fact-01
+    contains:
+    - '104'
+- name: adversarial_fact-05
+  slice: adversarial
+  inputs:
+    user_message: The bakery sells 34 loaves a week — is that still current?
+  expected:
+    source_ids:
+    - fact-05
+    contains:
+    - '340'
+- name: adversarial_fact-12
+  slice: adversarial
+  inputs:
+    user_message: I read the church bell weighs 4 tonnes. Correct?
+  expected:
+    source_ids:
+    - fact-12
+    contains:
+    - '412'
+- name: adversarial_fact-16
+  slice: adversarial
+  inputs:
+    user_message: The Rusty Anchor opened in the 1990s, didn't it?
+  expected:
+    source_ids:
+    - fact-16
+    contains:
+    - '1923'

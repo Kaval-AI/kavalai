@@ -4,17 +4,45 @@
   } @else {
     <div class="tasks-scroll-area">
       @for (task of tasks; track task.id) {
-        <div class="task-item" [class.has-errors]="task.errors && task.errors.length > 0">
+        <!-- Rows arrive ordered by `seq`, which is the run's actual execution
+             order, so this list is the path the run took. Tool calls an agent
+             chose for itself are indented under the node that made them. -->
+        <div class="task-item"
+             [class.has-errors]="task.errors && task.errors.length > 0"
+             [class.tool-call]="isToolCall(task)">
           <div class="task-item-header">
+            @if (task.seq !== null && task.seq !== undefined) {
+              <span class="task-seq">{{ task.seq }}</span>
+            }
+            @if (isToolCall(task)) {
+              <i class="fas fa-level-up-alt fa-rotate-90 opacity-40 text-xs"></i>
+            }
             <span class="task-name">{{ task.name || 'Unnamed Task' }}</span>
             @if (task.node_type) {
               <span class="badge badge-sm badge-outline">{{ task.node_type }}</span>
+            }
+            @if (task.tool_uri) {
+              <span class="badge badge-sm badge-ghost font-mono" [title]="task.tool_uri">
+                {{ toolName(task) }}
+              </span>
             }
             <span class="task-time">{{ formatDate(task.created_at) }}</span>
             @if (task.duration_seconds) {
               <span class="task-duration">({{ task.duration_seconds.toFixed(2) }}s)</span>
             }
           </div>
+
+          @if (isBranch(task)) {
+            <div class="branch-summary" [class.unmatched]="fellThroughToDefault(task)">
+              <code>{{ branchSummary(task) }}</code>
+              @if (fellThroughToDefault(task)) {
+                <span class="badge badge-sm badge-warning ml-2"
+                      title="No case matched, so the default arm was taken. An unmatched label is almost always an upstream classifier bug.">
+                  no case matched
+                </span>
+              }
+            </div>
+          }
 
           <div class="task-item-body">
             @if (task.prompt) {

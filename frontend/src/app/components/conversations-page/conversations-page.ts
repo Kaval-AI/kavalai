@@ -47,6 +47,8 @@ export class ConversationsPage implements OnInit {
   // Pagination & Filtering
   selectedAgentId: string = '';
   searchText: string = '';
+  /** Prefix match on the session's external id — the eval click-through. */
+  externalId: string = '';
   startDate: string = '';
   endDate: string = '';
   limit: number = 20;
@@ -77,6 +79,10 @@ export class ConversationsPage implements OnInit {
     this.route.queryParams.subscribe(params => {
       if (params['agentId']) {
         this.selectedAgentId = params['agentId'];
+      }
+      // Lets a result file's external id be linked to directly.
+      if (params['externalId']) {
+        this.externalId = params['externalId'];
       }
     });
 
@@ -122,7 +128,9 @@ export class ConversationsPage implements OnInit {
     const startDate = this.startDate ? new Date(this.startDate).toISOString() : undefined;
     const endDate = this.endDate ? new Date(this.endDate).toISOString() : undefined;
 
-    this.agentService.getSessions(this.activeProjectId, agentId, search, startDate, endDate, this.limit, this.offset).subscribe({
+    const externalId = this.externalId.trim() || undefined;
+
+    this.agentService.getSessions(this.activeProjectId, agentId, search, startDate, endDate, this.limit, this.offset, externalId).subscribe({
       next: (data) => {
         const sessions = data.sessions;
         this.totalSessions = data.total_count;
@@ -152,6 +160,14 @@ export class ConversationsPage implements OnInit {
 
   onFilterChange(): void {
     this.loadSessions(true);
+  }
+
+  /**
+   * Whether this conversation came from an evaluation run rather than from a
+   * real user. Marked so test traffic is never mistaken for production.
+   */
+  isEvalSession(session: SessionSummary): boolean {
+    return !!session.external_id?.startsWith('eval:');
   }
 
   viewSession(sessionId: string): void {

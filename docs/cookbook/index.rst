@@ -12,6 +12,15 @@ structured extraction, routing, evaluator–optimizer loops, batch classificatio
 
 For the reasoning behind them, follow the links into the tutorials.
 
+Two longer walkthroughs have pages of their own — grading a chatbot and grading
+a workflow with side effects:
+
+.. toctree::
+   :maxdepth: 1
+
+   green_village_eval
+   bakery_eval
+
 A chatbot that remembers
 ------------------------
 
@@ -316,53 +325,131 @@ method a stub implements — not ``chat_completions``. See
 Using a provider Kaval.AI does not ship
 ---------------------------------------
 
-The built-in provider names are a starting set, not a closed one. Implement
-:class:`~kavalai.BaseLlmClient` --- one method --- and register it under a name
-of your own:
+The built-in provider names are a starting set, not a closed one. Registering a
+client gives it a name, and from that point it is indistinguishable from a
+built-in: ``mycorp/model-x`` works in :func:`~kavalai.make_client`, as a
+workflow's ``llm_model``, in a YAML node and in ``KAVALAI_DEFAULT_LLM_MODEL``.
+
+**If the provider speaks the OpenAI wire format** --- DeepSeek, Groq, Together,
+Fireworks and OpenRouter all do --- there is nothing to implement. Bind the base
+URL and the key to a name of your own:
 
 .. code-block:: python
 
-   from kavalai import BaseLlmClient, register_llm_provider
+   import os
 
+   from kavalai import OpenAIClient, make_client, register_llm_provider
 
-   class MyCorpClient(BaseLlmClient):
-       provider = "mycorp"
-
-       def __init__(self, model, llm_client_parameters=None,
-                    model_stats_receiver=None, base_url=None):
-           super().__init__(llm_client_parameters, model_stats_receiver)
-           self.model = model
-           self.base_url = base_url
-
-       async def _run_chat_completions(self, chat_history, response_model,
-                                       streamer):
-           ...  # call your API, then stream the result
-
-
-   register_llm_provider("mycorp", MyCorpClient)
-
-``mycorp/model-x`` now works everywhere a model name is accepted --- in
-``make_client``, in a workflow's ``llm_model``, in
-``KAVALAI_DEFAULT_LLM_MODEL``. Forwarding ``model_stats_receiver`` to the base
-class is what puts your client's token usage in the backoffice next to the
-built-in providers.
-
-Three things can be registered, and there are three ways to name each:
-
-.. code-block:: python
-
-   # A class.
-   register_llm_provider("mycorp", MyCorpClient)
-
-   # A dotted path — imported on first use, not at registration.
-   register_llm_provider("mycorp", "mycorp.llm.MyCorpClient")
-
-   # A class plus bound arguments, so one class serves several names.
    register_llm_provider(
-       "mycorp-eu", MyCorpClient, base_url="https://eu.mycorp.example/v1"
+       "deepseek",
+       OpenAIClient,
+       base_url="https://api.deepseek.com",
+       api_key=os.environ["DEEPSEEK_API_KEY"],
    )
 
-   register_embedding_provider("mycorp", "mycorp.embeddings.MyEmbeddings")
+   client = make_client("deepseek/deepseek-chat")
+
+Arguments given at registration are bound to the name and passed to the client
+on every use, so one class can serve several endpoints under different names. A
+registration may equally name a class that has not been imported yet --- the
+dotted path is resolved on first use, which is how Kaval.AI registers its own
+clients, and why ``import kavalai`` costs nothing where no provider SDK is
+installed:
+
+.. code-block:: python
+
+   register_llm_provider("mycorp", "mycorp_sdk.client.MyCorpClient")
+
+**If the API has a protocol of its own**, implement
+:class:`~kavalai.BaseLlmClient`. The one method to write,
+``_run_chat_completions``, does three things: send the request, push text into
+the value streamer as it arrives, and report a
+:class:`~kavalai.ModelCallStat` --- which is what puts a custom provider's token
+usage in the same tables as the built-ins, and so in the backoffice.
+:doc:`../tutorials/llm_clients` builds a complete one against a live API,
+structured output included.
+
+Embeddings work the same way. An embedding client implements
+``compute_embeddings``, returning the vectors and a
+:class:`~kavalai.ModelCallStat`. The one below calls no provider at all: it
+hashes words into a fixed number of dimensions, needing no key and no download.
+Be clear about what that buys --- the vectors are lexical rather than semantic.
+They match shared words, which is useful for exact terms, offline runs and
+tests, and no substitute for an embedding model when the question is worded
+differently from the answer.
+
+.. code-block:: python
+
+   import time
+
+   from sklearn.feature_extraction.text import HashingVectorizer
+
+   from kavalai import (
+       BaseEmbeddingClient,
+       ModelCallStat,
+       register_embedding_provider,
+   )
+   from kavalai.rag import SqliteRagService
+
+   FACTS = [
+       "Green Village's oldest resident is Agnes Whitlow "
+       "(born 02.06.1929).",
+       "Green Village has 104 residents.",
+       "The village pond, Lake Miller, is 1.2 metres deep at its "
+       "deepest point.",
+   ]
+
+
+   class LexicalEmbeddingClient(BaseEmbeddingClient):
+       """Hashed bag-of-words vectors: no download, no key, no network."""
+
+       def __init__(self, model, dimensions=512):
+           super().__init__(model)
+           self.vectorizer = HashingVectorizer(
+               n_features=dimensions, norm="l2", alternate_sign=False
+           )
+
+       async def compute_embeddings(self, texts, normalize=False,
+                                    normalizer=None, **kwargs):
+           started = time.perf_counter()
+           vectors = self.vectorizer.transform(texts).toarray().tolist()
+           stats = ModelCallStat(
+               call_type="embedding",
+               model=f"lexical/{self.model}",
+               batch_size=len(texts),
+               total_tokens=0,
+               duration_seconds=time.perf_counter() - started,
+           )
+           return vectors, stats
+
+
+   register_embedding_provider(
+       "lexical", LexicalEmbeddingClient, dimensions=512
+   )
+
+   village_index = SqliteRagService(":memory:", model="lexical/word-hash")
+   await village_index.index_batch(
+       texts=FACTS,
+       metadata_list=[{}] * len(FACTS),
+       source_ids=[f"fact-{i}" for i in range(len(FACTS))],
+   )
+
+   for hit in await village_index.query("How deep is Lake Miller?", top_k=2):
+       print(f"{hit.similarity:.3f}  {hit.content}")
+
+.. code-block:: text
+
+   0.516  The village pond, Lake Miller, is 1.2 metres deep at its deepest point.
+   0.135  Green Village's oldest resident is Agnes Whitlow (born 02.06.1929).
+
+The name was all the RAG service needed. It builds its embedding client through
+the same registry, so a backend registered in one line reaches indexing,
+retrieval and every ``rag_query`` node without either being told about it.
+:func:`~kavalai.register_rag_service` completes the set, naming a whole
+configured service so a workflow can ask for it by name:
+
+.. code-block:: python
+
    register_rag_service(
        "handbook", SqliteRagService,
        filename="handbook.db", model="fastembed/BAAI/bge-small-en-v1.5",

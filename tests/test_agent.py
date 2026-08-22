@@ -229,9 +229,10 @@ async def test_tool_error_is_captured(mock_kernel, run_context):
     mock_kernel.call_tool.side_effect = RuntimeError("boom")
 
     tool_call = ToolCall(name="python://broken", call_id="c1")
-    _, _, result = await agent._call_tool(tool_call, {})
+    _, _, result, duration = await agent._call_tool(tool_call, {})
 
     assert result == "Error: boom"
+    assert duration >= 0.0
 
 
 # ------------------------------------------------------------------- streaming

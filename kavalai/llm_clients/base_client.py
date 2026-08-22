@@ -327,7 +327,3 @@ class BaseLlmClient:
 
 class LlmClientException(RuntimeError):
     pass
-
-
-class BaseEmbeddingClient:
-    pass

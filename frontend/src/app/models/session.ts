@@ -22,6 +22,8 @@ export interface SessionSummary {
   session_id: string;
   agent_id: string;
   agent_name: string;
+  /** Caller-supplied key. Evaluation runs use `eval:{suite}:{tag}:{case}:{repeat}`. */
+  external_id: string | null;
   runs_count: number;
   tasks_count: number;
   messages_count: number;

@@ -85,6 +85,7 @@ from kavalai.functionkernel import (
 # --- LLM & embedding clients ----------------------------------------------
 from kavalai.llm_clients.base_client import (
     BaseLlmClient,
+    ensure_user_turn,
     LlmClientParameters,
     ChatHistory,
     ChatMessage,
@@ -93,6 +94,7 @@ from kavalai.llm_clients.base_client import (
     ModelStatsLogger,
 )
 from kavalai.llm_clients.embeddings import (
+    BaseEmbeddingClient,
     make_embedding_client,
     BrowserEmbeddingClient,
 )
@@ -212,6 +214,7 @@ __all__ = [
     "pythontool",
     # LLM & embedding clients
     "BaseLlmClient",
+    "ensure_user_turn",
     "LlmClientParameters",
     "ChatHistory",
     "ChatMessage",
@@ -223,6 +226,7 @@ __all__ = [
     "AnthropicClient",
     "OllamaClient",
     "BrowserLLMClient",
+    "BaseEmbeddingClient",
     "make_embedding_client",
     "BrowserEmbeddingClient",
     # Backend registration

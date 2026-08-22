@@ -109,4 +109,86 @@ describe('TasksList', () => {
     expect(taskItem.nativeElement.classList).toContain('has-errors');
   });
 
+  // --------------------------------------------------------- the trajectory
+  const trajectory: Task[] = [
+    {
+      id: 't0', agent_id: 'a', session_id: 's', run_id: 'r',
+      name: 'route', node_type: 'switch', seq: 0,
+      inputs: { expr: 'parsed.intent', value: 'refund' },
+      output: { taken: 'handle_refund', matched: true },
+      prompt: null, errors: null, duration_seconds: 0,
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString()
+    } as Task,
+    {
+      id: 't1', agent_id: 'a', session_id: 's', run_id: 'r',
+      name: 'research', node_type: 'agent', seq: 1,
+      inputs: null, output: null, prompt: null, errors: null,
+      duration_seconds: 2, created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    } as Task,
+    {
+      id: 't2', agent_id: 'a', session_id: 's', run_id: 'r',
+      name: 'crawl_url', node_type: 'tool_call', seq: 2,
+      parent_task_name: 'research', tool_uri: 'python://webtools.crawl_url',
+      inputs: { args: { url: 'https://x' }, step: 0 }, output: { result: 'ok' },
+      prompt: null, errors: null, duration_seconds: 0.4,
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString()
+    } as Task
+  ];
+
+  it('indents an agent tool call under the node that made it', () => {
+    component.tasks = trajectory;
+    fixture.detectChanges();
+
+    const items = fixture.debugElement.queryAll(By.css('.task-item'));
+    expect(items[1].nativeElement.classList).not.toContain('tool-call');
+    expect(items[2].nativeElement.classList).toContain('tool-call');
+    expect(component.isToolCall(trajectory[1])).toBeFalse();
+    expect(component.isToolCall(trajectory[2])).toBeTrue();
+  });
+
+  it('shows the readable half of a tool URI', () => {
+    expect(component.toolName(trajectory[2])).toBe('webtools.crawl_url');
+    expect(component.toolName({ tool_uri: 'plain' } as Task)).toBe('plain');
+    expect(component.toolName({} as Task)).toBe('');
+
+    component.tasks = trajectory;
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('webtools.crawl_url');
+  });
+
+  it('renders a branch decision with the value it routed on', () => {
+    // The value is the diagnostic: a mis-route is usually a classifier
+    // emitting "Refund" where the graph expects "refund".
+    component.tasks = trajectory;
+    fixture.detectChanges();
+
+    const summary = fixture.debugElement.query(By.css('.branch-summary'));
+    expect(summary.nativeElement.textContent).toContain('parsed.intent');
+    expect(summary.nativeElement.textContent).toContain('"refund"');
+    expect(summary.nativeElement.textContent).toContain('handle_refund');
+  });
+
+  it('flags a switch that matched no case', () => {
+    const unmatched = {
+      ...trajectory[0],
+      inputs: { expr: 'parsed.intent', value: 'Refund ' },
+      output: { taken: 'fallback', matched: false }
+    } as Task;
+    expect(component.fellThroughToDefault(unmatched)).toBeTrue();
+    expect(component.fellThroughToDefault(trajectory[0])).toBeFalse();
+    expect(component.fellThroughToDefault(trajectory[1])).toBeFalse();
+
+    component.tasks = [unmatched];
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('no case matched');
+  });
+
+  it('shows the execution order', () => {
+    component.tasks = trajectory;
+    fixture.detectChanges();
+    const seqs = fixture.debugElement.queryAll(By.css('.task-seq'));
+    expect(seqs.map(s => s.nativeElement.textContent.trim())).toEqual(['0', '1', '2']);
+  });
+
 });

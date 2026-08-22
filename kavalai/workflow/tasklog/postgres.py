@@ -78,6 +78,9 @@ class PostgresTaskLogger(TaskLogger):
         prompt: Optional[str],
         duration: float,
         errors: Optional[list[str]],
+        seq: Optional[int] = None,
+        parent_task_name: Optional[str] = None,
+        tool_uri: Optional[str] = None,
     ) -> None:
         # A task row requires a run + session; skip if the engine ran without them.
         if not run_id or not session_id:
@@ -93,6 +96,9 @@ class PostgresTaskLogger(TaskLogger):
             prompt=prompt,
             errors=errors,
             duration_seconds=duration,
+            seq=seq,
+            parent_task_name=parent_task_name,
+            tool_uri=tool_uri,
         )
 
     async def _log_model_call_impl(

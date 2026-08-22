@@ -15,17 +15,29 @@ limitations under the License.
 """
 
 from kavalai.workflow.tasklog.base import (
+    DEFAULT_MAX_PAYLOAD_BYTES,
     TaskLogger,
     StatsBridge,
     TokenAccumulator,
+    truncate_payload,
+)
+from kavalai.workflow.tasklog.memory import (
+    MemoryTaskLogger,
+    TaskRecord,
+    TeeTaskLogger,
 )
 from kavalai.workflow.tasklog.sqlite import SqliteTaskLogger
 from kavalai.workflow.tasklog.postgres import PostgresTaskLogger
 
 __all__ = [
+    "DEFAULT_MAX_PAYLOAD_BYTES",
     "TaskLogger",
     "StatsBridge",
     "TokenAccumulator",
+    "truncate_payload",
+    "MemoryTaskLogger",
+    "TaskRecord",
+    "TeeTaskLogger",
     "SqliteTaskLogger",
     "PostgresTaskLogger",
 ]

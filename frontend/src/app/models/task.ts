@@ -26,6 +26,12 @@ export interface Task {
   prompt: string | null;
   errors: string[] | null;
   duration_seconds: number | null;
+  /** Position in the run's execution order — this is the executed path. */
+  seq?: number | null;
+  /** Set on the tool calls an agent node made, naming the node that made them. */
+  parent_task_name?: string | null;
+  /** The tool that ran: `python://store_order`, `rest://billing.refund`. */
+  tool_uri?: string | null;
   created_at: string;
   updated_at: string;
 }

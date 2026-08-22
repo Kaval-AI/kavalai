@@ -40,6 +40,7 @@ describe('ConversationsPage', () => {
       session_id: 'sess1',
       agent_id: 'agent1',
       agent_name: 'Agent 1',
+      external_id: null,
       runs_count: 1,
       tasks_count: 2,
       messages_count: 3,
@@ -86,7 +87,7 @@ describe('ConversationsPage', () => {
     agentServiceSpy.getSessions.and.returnValue(of({ sessions: [], total_count: 0 }));
     component.activeProjectId = 'proj1';
     component.loadSessions();
-    expect(agentServiceSpy.getSessions).toHaveBeenCalledWith('proj1', undefined, undefined, jasmine.any(String), jasmine.any(String), 20, 0);
+    expect(agentServiceSpy.getSessions).toHaveBeenCalledWith('proj1', undefined, undefined, jasmine.any(String), jasmine.any(String), 20, 0, undefined);
   });
 
   it('should load agents and sessions on init', () => {
@@ -96,7 +97,7 @@ describe('ConversationsPage', () => {
     fixture.detectChanges();
 
     expect(agentServiceSpy.getAgentsByProject).toHaveBeenCalledWith('proj1');
-    expect(agentServiceSpy.getSessions).toHaveBeenCalledWith('proj1', undefined, undefined, jasmine.any(String), jasmine.any(String), 20, 0);
+    expect(agentServiceSpy.getSessions).toHaveBeenCalledWith('proj1', undefined, undefined, jasmine.any(String), jasmine.any(String), 20, 0, undefined);
     expect(component.agents).toEqual(mockAgents);
     expect(component.sessions).toEqual(mockSessions);
     expect(component.totalSessions).toBe(1);
@@ -111,7 +112,7 @@ describe('ConversationsPage', () => {
     component.selectedAgentId = 'agent1';
     component.onFilterChange();
 
-    expect(agentServiceSpy.getSessions).toHaveBeenCalledWith('proj1', 'agent1', undefined, jasmine.any(String), jasmine.any(String), 20, 0);
+    expect(agentServiceSpy.getSessions).toHaveBeenCalledWith('proj1', 'agent1', undefined, jasmine.any(String), jasmine.any(String), 20, 0, undefined);
   });
 
   it('should set hasMore to true if exactly limit sessions are returned', () => {
@@ -147,7 +148,7 @@ describe('ConversationsPage', () => {
     component.nextPage();
 
     expect(component.offset).toBe(20);
-    expect(agentServiceSpy.getSessions).toHaveBeenCalledWith('proj1', undefined, undefined, jasmine.any(String), jasmine.any(String), 20, 20);
+    expect(agentServiceSpy.getSessions).toHaveBeenCalledWith('proj1', undefined, undefined, jasmine.any(String), jasmine.any(String), 20, 20, undefined);
     expect(component.sessions.length).toBe(21);
     expect(component.totalSessions).toBe(21);
   });
@@ -189,6 +190,6 @@ describe('ConversationsPage', () => {
     component.ngOnInit();
 
     expect(component.selectedAgentId).toBe('agent-789');
-    expect(agentServiceSpy.getSessions).toHaveBeenCalledWith('proj1', 'agent-789', undefined, jasmine.any(String), jasmine.any(String), 20, 0);
+    expect(agentServiceSpy.getSessions).toHaveBeenCalledWith('proj1', 'agent-789', undefined, jasmine.any(String), jasmine.any(String), 20, 0, undefined);
   });
 });
