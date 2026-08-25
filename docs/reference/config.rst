@@ -166,10 +166,6 @@ Tools
 
    * - Variable
      - Description
-   * - ``GOOGLE_CUSTOM_SEARCH_API_KEY`` / ``GOOGLE_CUSTOM_SEARCH_CX``
-     - Credentials and search-engine id for ``google_custom_search``.
-   * - ``LANGSEARCH_API_KEY``
-     - Key for ``langsearch_web_search``.
    * - ``RSS_AUTH_USER`` / ``RSS_AUTH_PASSWORD``
      - Basic-auth credentials for protected RSS feeds.
    * - ``TOR_PROXY_HOST`` / ``TOR_PROXY_PORT``

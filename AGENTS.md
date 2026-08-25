@@ -109,7 +109,7 @@ uv run --env-file .env pytest
 ```
 
 `conftest.py` does not auto-load `.env`, so integration tests gated on
-`OPENAI_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `LANGSEARCH_API_KEY`
+`OPENAI_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`
 or the `KAVALAI_*` database settings will silently skip without it. Avoid
 `set -a && source .env && set +a`: changing shell option state defeats static
 command analysis and forces a permission prompt.

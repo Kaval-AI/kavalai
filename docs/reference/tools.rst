@@ -44,12 +44,6 @@ In a workflow, declare them under ``python_functions`` instead — see
    * - ``get_rss_feed``
      - ``kavalai.tools.rss``
      - —
-   * - ``google_custom_search``
-     - ``kavalai.tools.websearch.google_custom_search``
-     - API key + engine id
-   * - ``langsearch_web_search``
-     - ``kavalai.tools.websearch.langsearch``
-     - API key
 
 Web crawling
 ------------
@@ -158,37 +152,6 @@ Fetches and parses an RSS or Atom feed.
 
 Returns ``title``, ``url`` and ``items``. Credentials for a protected feed come
 from ``RSS_AUTH_USER`` / ``RSS_AUTH_PASSWORD``.
-
-Keyed search APIs
------------------
-
-``google_custom_search``
-^^^^^^^^^^^^^^^^^^^^^^^^
-
-Google's Custom Search JSON API.
-
-.. code-block:: python
-
-   google_custom_search(query: str, api_key=None, cx=None,
-                        num: int = 10) -> CustomSearchResponse
-
-Reads ``GOOGLE_CUSTOM_SEARCH_API_KEY`` and ``GOOGLE_CUSTOM_SEARCH_CX`` (the
-search-engine id) when the arguments are omitted. Returns ``items`` and
-``searchInformation``.
-
-``langsearch_web_search``
-^^^^^^^^^^^^^^^^^^^^^^^^^
-
-LangSearch, which can return summaries alongside results.
-
-.. code-block:: python
-
-   langsearch_web_search(query: str, freshness="noLimit", summary: bool = False,
-                         count: int = 10, api_key=None) -> SearchResponse
-
-``freshness`` is one of ``oneDay``, ``oneWeek``, ``oneMonth``, ``oneYear`` or
-``noLimit``. Reads ``LANGSEARCH_API_KEY`` when ``api_key`` is omitted. Returns
-``search_type``, ``queryContext`` and ``webPages``.
 
 Writing your own
 ----------------
