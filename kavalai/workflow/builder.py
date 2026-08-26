@@ -109,7 +109,7 @@ class WorkflowBuilder:
         name: str,
         *,
         description: str = "",
-        version: str = "2.0",
+        version: str = "1.0",
         llm_model: Optional[str] = None,
         llm_kwargs: Optional[dict[str, Any]] = None,
         rag_service: Optional[str] = None,
