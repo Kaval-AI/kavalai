@@ -71,9 +71,31 @@ To be explicit instead, register the provider with ``cuda=True`` (and
 :class:`~kavalai.llm_clients.embeddings.FastEmbedClient` passes both straight
 through to FastEmbed.
 
-Check the card before taking the newest wheel: CUDA 13 dropped compute
-capability below 7.5, so a Pascal or Volta GPU needs an ``onnxruntime-gpu``
-built against CUDA 12.
+Check the card before taking the newest wheel. The current
+``onnxruntime-gpu`` on PyPI is a CUDA 13 build, and CUDA 13 dropped compute
+capability below 7.5 --- on a Pascal or Volta card it fails to load
+``libcublasLt.so.13`` and quietly falls back to the CPU. Such a card needs the
+CUDA 12 build and a cuDNN 9 still carrying its kernels:
+
+.. code-block:: bash
+
+   uv pip install "onnxruntime-gpu==1.22.0"
+   uv pip install nvidia-cublas-cu12 nvidia-cuda-nvrtc-cu12 \
+       nvidia-cuda-runtime-cu12 nvidia-cufft-cu12 nvidia-curand-cu12 \
+       "nvidia-cudnn-cu12==9.1.0.70"
+
+Those wheels install under ``site-packages/nvidia/*/lib``, which the dynamic
+loader does not search by default, so put them on the path when running:
+
+.. code-block:: bash
+
+   export LD_LIBRARY_PATH=$(python -c "import glob, os, site; \
+       print(':'.join(sorted({os.path.dirname(f) for f in \
+       glob.glob(site.getsitepackages()[0] + '/nvidia/*/lib/*.so*')})))")
+
+FastEmbed logs which providers it ended up with; if the list is
+``['CPUExecutionProvider']`` the GPU was not picked up, and the embeddings are
+still correct but computed on the CPU.
 
 From source
 ^^^^^^^^^^^
