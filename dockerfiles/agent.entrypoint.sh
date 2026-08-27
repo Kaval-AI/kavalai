@@ -4,7 +4,7 @@ set -e
 # Function to run agent migrations
 run_agent_migrations() {
     echo "Running agent migrations..."
-    python -m kavalai.migrate_db app
+    python -m kavalai.migrate_db agents
 }
 
 # Function to run agent server
