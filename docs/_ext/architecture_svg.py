@@ -247,15 +247,22 @@ def _build_svg() -> str:
     )
     arrow(450, 822, 870, "queried by")
 
+    # One element per line, indented one level: the file is committed, so it is
+    # read in diffs. A single 16 kB line reports every edit as "the whole
+    # picture changed"; a line per element reports the box that moved.
+    body = "\n".join(f"  {part}" for part in parts)
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" '
         f'viewBox="0 0 {WIDTH} {HEIGHT}" width="{WIDTH}" height="{HEIGHT}" '
-        f'role="img" aria-label="Kaval.AI component architecture">'
-        f'<defs><marker id="head" viewBox="0 0 10 10" refX="9" refY="5" '
-        f'markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
-        f'<path d="M 0 0 L 10 5 L 0 10 z" fill="{ARROW}"/></marker></defs>'
-        + "".join(parts)
-        + "</svg>"
+        f'role="img" aria-label="Kaval.AI component architecture">\n'
+        f"  <defs>\n"
+        f'    <marker id="head" viewBox="0 0 10 10" refX="9" refY="5" '
+        f'markerWidth="7" markerHeight="7" orient="auto-start-reverse">\n'
+        f'      <path d="M 0 0 L 10 5 L 0 10 z" fill="{ARROW}"/>\n'
+        f"    </marker>\n"
+        f"  </defs>\n"
+        f"{body}\n"
+        f"</svg>\n"
     )
 
 
