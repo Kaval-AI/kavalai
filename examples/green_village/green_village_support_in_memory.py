@@ -1,13 +1,8 @@
 """The Green Village tourist information chatbot, served over REST.
 
-A minimal end-to-end Kaval.AI example: a handful of facts are embedded into an
-in-memory RAG index, a two-node workflow retrieves the relevant ones and lets
-the model answer from them, and :func:`kavalai.server.create_agent_router`
-turns that workflow into an HTTP API.
-
 Run it::
 
-    python -m examples.green_village.green_village_support
+    python -m examples.green_village.green_village_support_in_memory
 
 Then talk to it from the terminal chat client::
 
@@ -19,8 +14,6 @@ or straight over HTTP::
         -H 'Content-Type: application/json' \
         -d '{"data": {"user_message": "How deep is Lake Miller?"}}'
 
-The YAML twin of this workflow lives in ``chatbot.yaml``; it answers the same
-questions with a richer output type and is what the evaluation suite grades.
 """
 
 from contextlib import asynccontextmanager
@@ -43,6 +36,10 @@ LLM_MODEL = "openai/gpt-5.4-mini"
 # Host and port to serve the agent
 HOST = "0.0.0.0"
 PORT = 25000
+
+# Use in-memory SQLLite for both agent db and RAG index.
+AGENT_DB_PATH = ":memory:"
+INDEX_PATH = ":memory:"
 
 # List of green village facts.
 FACTS = [
@@ -84,11 +81,11 @@ class Reply(BaseModel):
     agent_response: str
 
 
-session_maker = db_manager.get_sqlite_sessionmaker(db_path=":memory")
+session_maker = db_manager.get_sqlite_sessionmaker(db_path=AGENT_DB_PATH)
 agent_service = AgentService(session_maker)
 
 logger.info(f"Initializing RAG with model {EMBEDDING_MODEL}")
-rag = SqliteRagService(":memory:", EMBEDDING_MODEL)
+rag = SqliteRagService(INDEX_PATH, EMBEDDING_MODEL)
 
 # Build the workflow engine.
 # 1. We query RAG with facts related to the user message
@@ -135,7 +132,7 @@ def create_app() -> FastAPI:
         in the RAG, so the server only starts serving once there is something
         to retrieve and somewhere to record the conversation.
         """
-        await db_manager.init_sqlite(db_path=":memory")
+        await db_manager.init_sqlite(db_path=AGENT_DB_PATH)
         logger.info(f"Indexing {len(FACTS)} facts")
         await rag.index_batch(
             texts=FACTS,
