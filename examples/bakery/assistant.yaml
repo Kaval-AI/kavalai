@@ -1,39 +1,13 @@
-# Lindqvist Bakery Workshop, Green Village — the email assistant, in YAML.
-#
-# This file *is* the agent. It reads an incoming email, decides whether it is
-# an order, validates it, stores the complete ones and writes a reply:
-# acknowledging receipt while making clear a human will review it, or asking
-# for the specific detail that is missing.
-#
-# Everything the graph needs from Python lives in `bakery.py` and is reached
-# through the `python_functions` block below — so the same graph runs against
-# an in-memory order book (`bakery_in_memory.py`) or a Postgres one
-# (`bakery_real_db.py`) without a line of it changing.
-#
-# The design decision worth stealing: **the model extracts, Python decides.**
-# The `parse` node pulls structured fields out of prose and nothing more; the
-# `validate` node is ordinary code and is the only thing that says whether an
-# order is complete; `compose` stamps the outcome onto the answer. That is what
-# makes `eval_cases.yaml` mostly literal comparisons rather than a judge — and
-# what stops a model upgrade quietly changing the definition of a valid order.
+# dotenv run kavalai-eval examples/bakery/eval_cases.yaml --port 25001 --tag baseline
 name: bakery-email-assistant
 description: Reads customer email, validates orders, stores them and replies.
 llm_model: openai/gpt-5.6-luna
 
-# Dotted import paths, resolved when the engine is built. They are written from
-# the repository root because that is where the servers are started from
-# (`python -m examples.bakery.bakery_in_memory`).
 python_functions:
   - {name: validate_order, path: examples.bakery.bakery.validate_order}
   - {name: store_order, path: examples.bakery.bakery.store_order}
   - {name: compose_reply, path: examples.bakery.bakery.compose_reply}
 
-# The workflow's own view of the data. It mirrors the Pydantic models in
-# bakery.py, which is what the tools actually use: the engine validates a
-# tool's result into the node's declared type field by field, so the two have
-# to agree. Optional fields are `required: false` on purpose — extraction must
-# be able to say "the customer did not say", and a required field forces a
-# guess.
 data_types:
   input:
     type: object
@@ -64,12 +38,6 @@ data_types:
     type: object
     properties:
       intent: {type: string, enum: [order, question, complaint, other]}
-      # Extracted as a field rather than left to an instruction in the reply
-      # prompt. "Reply in the customer's language" kept losing to Estonian
-      # customer names on short English emails; naming the language once, as
-      # data, and then telling the reply node to use *that* is the same
-      # extract-then-decide split the rest of this workflow is built on.
-      language: {type: string, required: false}
       order: {$ref: order, required: false}
 
   validation:
@@ -122,11 +90,6 @@ nodes:
 
       {{ context.input.email.body }}
 
-      Set `language` to the language the email is *written* in, as an English
-      name ("English", "Estonian"). Judge that from the words used, never from
-      the sender's name: a short message signed with an Estonian name is still
-      English if it is written in English.
-
       Set `intent` to exactly one of: order, question, complaint, other.
       Choose `order` whenever the sender is trying to buy something — even if
       they also complain, even if they phrase it as an enquiry ("would it be
@@ -135,8 +98,15 @@ nodes:
       to order at all.
 
       For an order, fill `order` with the customer's name, the delivery date as
-      YYYY-MM-DD, and one item per thing they asked for, with the product named
-      as they wrote it. Leave a field null when the email does not state it.
+      YYYY-MM-DD, and one item per thing they asked for.
+
+      Set each item's `product` to exactly one of these catalogue keys:
+      sourdough_loaf, rye_loaf, kringle, cinnamon_bun, birthday_cake.
+      Matching what the customer wrote to a key is your job — "sourdough
+      bread", "kringles" and "a loaf of rye" are all catalogue items. If what
+      they asked for is genuinely not on that list, put their own words in
+      `product` instead of forcing a key, so the bakery can tell them what it
+      does bake. Leave a field null when the email does not state it.
       Never invent a quantity or a date, and never turn a vague amount ("a
       few", "some", "enough for the office") into a number — leave the quantity
       null instead. A number of *people* is not a number of items: "a cake for
@@ -203,8 +173,7 @@ nodes:
       The order: {{ context.validation.order }}
       Reference: {{ context.stored.order_id }}
 
-      Write the reply in {{ context.parsed.language }}, and in no other
-      language. For reference, this is what the customer sent:
+      For reference, this is what the customer sent:
 
       """
       {{ context.input.email.body }}
@@ -230,8 +199,7 @@ nodes:
       Ask for nothing else. Do not guess at a quantity or a date on the
       customer's behalf, and do not promise anything.
 
-      Write the reply in {{ context.parsed.language }}, and in no other
-      language. For reference, this is what the customer sent:
+      For reference, this is what the customer sent:
 
       """
       {{ context.input.email.body }}
@@ -257,8 +225,7 @@ nodes:
     prompt: >-
       This email to the bakery is not an order — it is a
       {{ context.parsed.intent }}. Reply helpfully and briefly. Do not treat it
-      as an order and do not confirm anything you have not been told. Write the
-      reply in {{ context.parsed.language }}, and in no other language.
+      as an order and do not confirm anything you have not been told.
 
       From: {{ context.input.email.sender }}
       Subject: {{ context.input.email.subject }}

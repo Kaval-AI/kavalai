@@ -1,22 +1,5 @@
-# The Green Village acceptance cases, in the shape kavalai-eval reads.
-#
-# Start the agent first:
-#
-#     dotenv run python -m examples.green_village.green_village_support_in_memory
-#
-# then run the cases against it:
-#
-#     dotenv run kavalai-eval examples/green_village/eval_cases.yaml --port 25000 --tag baseline
-#
-# Which agent is evaluated is named on the command line, never here, so the
-# same cases can be pointed at another deployment -- or at two model versions
-# in turn, one `--tag` each, to be compared afterwards in the agent database.
-#
-# A case is `simple` unless it says otherwise: its `expected` names output
-# fields and the values they must carry, and no model decides anything.
-# The cases a literal comparison cannot settle -- a conclusion to be
-# reasoned out, a refusal -- are `judge` cases, and say in words what the
-# answer has to do.
+# dotenv run kavalai-eval examples/green_village/eval_cases.yaml --port 25001 --tag baseline
+
 name: green-village
 
 cases:

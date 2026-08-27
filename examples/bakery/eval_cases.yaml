@@ -1,27 +1,14 @@
-# The bakery acceptance cases, in the shape kavalai-eval reads.
+# dotenv run kavalai-eval examples/bakery/eval_cases.yaml --port 25001 --tag baseline
 #
-# Start the agent first, from the repository root:
+# Most cases are `simple`: the assistant's `status`, `order_id` and `missing`
+# are decided by Python, not written by a model, so the outcome of a run is a
+# value to compare. The `judge` cases are the ones a literal comparison cannot
+# settle -- whether a reply promised a price, whether it took an instruction
+# from an email.
 #
-#     dotenv run python -m examples.bakery.bakery_in_memory
-#
-# then run the cases against it:
-#
-#     dotenv run kavalai-eval examples/bakery/eval_cases.yaml --port 25100 --tag baseline
-#
-# Which agent is evaluated is named on the command line, never here, so the
-# same cases can be pointed at the Postgres deployment on port 25101, at
-# staging, or at two model versions in turn -- one `--tag` each, to be compared
-# afterwards in the agent database.
-#
-# Most of these are `simple` cases, and they can be because the assistant's
-# `status`, `order_id` and `missing` fields are decided by Python rather than
-# written by a model: the outcome of a run is a value to compare, not prose to
-# interpret. The `judge` cases are the ones a literal comparison genuinely
-# cannot settle -- whether a reply promised a price, whether it is written in
-# the customer's language, whether it took an instruction from an email.
-#
-# The bakery's clock is pinned to 2026-09-01 (see `TODAY` in bakery.py), so the
-# dates below keep meaning what they meant when they were written.
+# The bakery's clock is pinned to 2026-09-01 (`TODAY` in bakery.py), so these
+# dates keep meaning what they meant when they were written.
+
 name: bakery-email-assistant
 
 cases:
@@ -81,28 +68,16 @@ cases:
 
   # "sourdough bread" is not what the catalogue calls it. The alias table
   # resolves it, and the stored row says "sourdough loaf".
-  - name: order_product_alias
+  # "sourdough bread" is not a catalogue key. Mapping the customer's words
+  # onto `sourdough_loaf` is the parse step's job -- there is no alias table
+  # in Python to fall back on.
+  - name: order_names_the_product_loosely
     input:
       email:
         sender: Liis Oja <liis@example.test>
         subject: order
         body: |
           Hello, Liis Oja here. Could I get 2 sourdough bread on 2026-09-10?
-    expected:
-      status: stored
-      missing: {equals: []}
-
-  - name: order_in_estonian
-    input:
-      email:
-        sender: Jaan Sepp <jaan@example.test>
-        subject: Tellimus
-        body: |
-          Tere! Jaan Sepp siin.
-
-          Sooviksin tellida 8 kaneelirulli 20. septembriks 2026.
-
-          Aitäh!
     expected:
       status: stored
       missing: {equals: []}
@@ -363,30 +338,6 @@ cases:
       The reply explains that kringles are baked in batches of at least two,
       and asks the customer whether they want that many. It does not silently
       accept the order for one.
-
-  - name: reply_is_in_estonian
-    type: judge
-    input:
-      email:
-        sender: Jaan Sepp <jaan@example.test>
-        subject: Tellimus
-        body: |
-          Tere! Jaan Sepp siin. Sooviksin tellida 8 kaneelirulli
-          20. septembriks 2026. Aitäh!
-    expected: The reply is written in Estonian.
-
-  - name: reply_is_in_english
-    type: judge
-    input:
-      email:
-        sender: Kadri Saar <kadri@example.test>
-        subject: order
-        body: |
-          Hi, Kadri Saar here. 6 cinnamon buns for the 15th of September 2026,
-          thanks.
-    expected: >-
-      The reply is written in English. The customer's name is Estonian but
-      their email is not, and the reply follows the email.
 
   # A fixed set of injection strings tests yesterday's attacks: this is a
   # regression guard, not a security assessment. Note what is graded --

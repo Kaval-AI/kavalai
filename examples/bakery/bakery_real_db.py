@@ -1,4 +1,4 @@
-"""The bakery email assistant again, on Postgres instead of in memory.
+"""The bakery email assistant again, recording its sessions into Postgres.
 
 Bring the database up and run it from the repository root::
 
@@ -8,7 +8,7 @@ Bring the database up and run it from the repository root::
 
 Then send it an email::
 
-    curl -s http://localhost:25101/run_agent \
+    curl -s http://localhost:25001/run_agent \
         -H 'Content-Type: application/json' \
         -d '{"data": {"email": {
               "sender": "Mari Tamm <mari@example.test>",
@@ -16,16 +16,15 @@ Then send it an email::
               "body": "Hello, I would like 4 kringles for 2026-09-12. Mari Tamm"
             }}}'
 
-Same :file:`assistant.yaml`, same tools, same replies — and this one still has
-the order tomorrow. Two databases are involved and they are not the same kind
-of thing: the **agent database** is Kaval.AI's own (sessions, runs, tasks,
-model-call statistics) and its tables come from ``kavalai.migrate_db``; the
-**order book** belongs to the bakery, so this example owns its DDL and creates
-its table at startup. They share one engine and one connection pool.
+Same `assistant.yaml`, same tools, same replies. The only difference from
+`bakery_in_memory.py` is the agent database — sessions, runs, tasks and
+model-call statistics survive a restart here, and can be read afterwards in the
+backoffice. The order book stays in memory either way: it belongs to the
+example, not to Kaval.AI.
 """
 
 import os
-from contextlib import asynccontextmanager
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI
@@ -33,23 +32,18 @@ from loguru import logger
 
 from kavalai import db_manager
 from kavalai.agent_service import AgentService
-from kavalai.server import mask_db_uri
+from kavalai.server import create_agent_router, mask_db_uri
+from kavalai.workflow import WorkflowEngine
 
-from examples.bakery.bakery import (
-    PostgresOrderBook,
-    build_engine,
-    create_app,
-    use_order_book,
-)
-
-# Host and port to serve the agent
 HOST = "0.0.0.0"
-PORT = 25101
+PORT = 25001
 
 DB_URI = os.environ["KAVALAI_DB_URI"]
 DB_SCHEMA = os.environ.get("KAVALAI_DB_SCHEMA", "public")
 DB_POOL_SIZE = int(os.environ.get("KAVALAI_DB_POOL_SIZE", "0"))
 DB_MAX_OVERFLOW = int(os.environ.get("KAVALAI_DB_MAX_OVERFLOW", "0"))
+
+WORKFLOW_PATH = Path(__file__).with_name("assistant.yaml")
 
 logger.info(f"Agent database: {mask_db_uri(DB_URI)} (schema {DB_SCHEMA})")
 session_maker = db_manager.get_sessionmaker(
@@ -60,30 +54,34 @@ session_maker = db_manager.get_sessionmaker(
 )
 agent_service = AgentService(session_maker)
 
-# The order book the workflow's `store_order` tool writes to. Bound once, here,
-# because assistant.yaml names the tool and not its dependencies.
-order_book = use_order_book(PostgresOrderBook(session_maker, schema=DB_SCHEMA))
 
-engine = build_engine(agent_service)
+def build_engine(agent_service: AgentService) -> WorkflowEngine:
+    """Load assistant.yaml and give it somewhere to record its runs."""
+    return WorkflowEngine.from_yaml_path(
+        str(WORKFLOW_PATH), agent_service=agent_service
+    )
 
 
-@asynccontextmanager
-async def lifespan(_app: FastAPI):
-    """Create the bakery's own table before the first request arrives.
+def create_app(engine: WorkflowEngine) -> FastAPI:
+    """Serve the workflow over POST /run_agent and POST /stream_agent.
 
-    The agent database's tables are Alembic's job (``python -m
-    kavalai.migrate_db agents``) and are deliberately not created here: a server
-    that migrates on startup is a server that migrates from several replicas at
-    once.
+    No lifespan hook: the tables are Alembic's job (`python -m
+    kavalai.migrate_db agents`). A server that migrates on startup is a server
+    that migrates from several replicas at once.
     """
-    await order_book.create_table()
-    logger.info(f"Order book ready at {order_book.qualified_table}")
-    yield
+    app = FastAPI(
+        title=engine.graph.name,
+        description=engine.graph.description,
+        version=engine.graph.version,
+    )
+    app.state.engine = engine
+    app.include_router(create_agent_router(engine, session_provider=session_maker))
+    return app
 
 
 def main() -> None:
     logger.info(f"Serving the bakery email assistant on http://{HOST}:{PORT}")
-    uvicorn.run(create_app(engine, session_maker, lifespan), host=HOST, port=PORT)
+    uvicorn.run(create_app(build_engine(agent_service)), host=HOST, port=PORT)
 
 
 if __name__ == "__main__":

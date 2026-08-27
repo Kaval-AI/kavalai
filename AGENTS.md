@@ -40,7 +40,7 @@ Two components:
 | `backoffice/`, `frontend/` | Management API and Angular UI |
 | `tests/` | Pytest suite; mock MCP servers in `tests/helpers/` |
 | `docs/`, `notebooks/` | Sphinx documentation; the five tutorial notebooks are the source of truth |
-| `examples/` | Runnable examples; `green_village/` (RAG chatbot, port 25000) and `bakery/` (a YAML workflow with side effects, ports 25100/25101) each ship an `eval_cases.yaml` |
+| `examples/` | Runnable examples; `green_village/` (RAG chatbot, port 25000) and `bakery/` (a YAML workflow with side effects, ports 25100/25001) each ship an `eval_cases.yaml` |
 
 ## Invariants
 
@@ -208,7 +208,7 @@ The two worked examples:
 
 - `examples/green_village/eval_cases.yaml` — 64 cases against a RAG chatbot;
   literal ones for the facts, judged ones for the comparisons and refusals.
-- `examples/bakery/eval_cases.yaml` — 29 cases against a workflow that *writes*
+- `examples/bakery/eval_cases.yaml` — 26 cases against a workflow that *writes*
   orders. It can be mostly literal because the model only writes `subject` and
   `body`: `compose_reply` stamps `status`, `order_id` and `missing` onto the
   answer from what deterministic Python decided, so the outcome of a run is a

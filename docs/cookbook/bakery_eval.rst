@@ -30,15 +30,16 @@ Five files
      - The Python half: the catalogue, the models, the order book and the
        three tools the graph calls by name.
    * - ``bakery_in_memory.py``
-     - Serves it on an in-memory SQLite agent database and a list.
+     - Serves it, recording sessions in an in-memory SQLite database.
    * - ``bakery_real_db.py``
-     - Serves the same graph on Postgres.
+     - Serves the same graph, recording sessions in Postgres.
    * - ``eval_cases.yaml``
-     - Twenty-nine acceptance cases for ``kavalai-eval``.
+     - Twenty-six acceptance cases for ``kavalai-eval``.
 
-The two server modules are the point of having two: they differ only in *where
-things are written down*, never in what the assistant does. Same YAML, same
-tools, same replies.
+The two server modules are the point of having two: they differ only in where
+the agent's *sessions* are recorded, never in what the assistant does. Each
+carries its own ``build_engine`` and ``create_app`` so it reads top to bottom
+on its own. Same YAML, same tools, same replies.
 
 
 The one decision that matters
@@ -162,51 +163,45 @@ comparisons instead of judgements — the outcome of a run is a value to compare
 not prose to interpret.
 
 
-Two databases, and they are not the same thing
-----------------------------------------------
+The order book, and the database that is not it
+-----------------------------------------------
 
-The **agent database** is Kaval.AI's own — sessions, runs, tasks, model-call
-statistics — and its tables come from ``python -m kavalai.migrate_db agents``. The
-**order book** belongs to the bakery, so the example owns its DDL. They share
-one engine and one connection pool, and the workflow knows about neither:
+The order book is a list. An example does not need a second database to make
+the point, and keeping it in memory means the interesting question — *did a row
+appear that should not have?* — is answered by reading a Python list:
 
 .. code-block:: python
 
    # examples/bakery/bakery.py
-   class OrderBook(ABC):
-       @abstractmethod
-       async def store(self, order: Order) -> str: ...
+   ORDER_BOOK: list[dict] = []
 
-       @abstractmethod
-       async def orders(self) -> list[dict]: ...
 
-``assistant.yaml`` names the ``store_order`` tool, not its dependencies, so the
-server binds the order book once at startup:
+   @pythontool
+   def store_order(order: Optional[Order] = None) -> StoredOrder:
+       """Write a validated order into the order book."""
+       order_id = f"ord-{len(ORDER_BOOK) + 1:04d}"
+       ORDER_BOOK.append({"order_id": order_id, **(order or Order()).model_dump()})
+       return StoredOrder(order_id=order_id)
+
+What ``bakery_real_db.py`` puts in Postgres is something else entirely: the
+**agent database** — sessions, runs, tasks and model-call statistics — which is
+Kaval.AI's own, and whose tables come from ``python -m kavalai.migrate_db
+agents``. That is the whole difference between the two servers:
 
 .. code-block:: python
 
    # examples/bakery/bakery_in_memory.py
    session_maker = db_manager.get_sqlite_sessionmaker(db_path=":memory:")
-   order_book = use_order_book(InMemoryOrderBook())
-   engine = build_engine(AgentService(session_maker))
 
 .. code-block:: python
 
    # examples/bakery/bakery_real_db.py
    session_maker = db_manager.get_sessionmaker(uri=DB_URI, schema=DB_SCHEMA)
-   order_book = use_order_book(PostgresOrderBook(session_maker, DB_SCHEMA))
-   engine = build_engine(AgentService(session_maker))
 
-Three lines differ. Note what ``PostgresOrderBook`` does *not* do: it does not
-run the agent database's migrations at startup. A server that migrates on
-startup is a server that migrates from several replicas at once.
-
-.. note::
-
-   The order book writes its schema into the SQL explicitly
-   (``agents.bakery_orders``). Raw SQL bypasses SQLAlchemy's
-   ``schema_translate_map``, so a statement that relied on it would quietly go
-   to ``public``.
+Run the Postgres one and every graded case is a session you can open in the
+backoffice afterwards. Note what it does *not* do: it does not run migrations
+at startup. A server that migrates on startup is a server that migrates from
+several replicas at once.
 
 
 The cases
@@ -255,9 +250,9 @@ A helpful model resolving "a few loaves" to three writes a perfectly polite
 confirmation. It fails silently, it looks like success in every text metric,
 and only ``order_id`` gives it away.
 
-The nine ``judge`` cases are the ones a literal comparison genuinely cannot
-settle — whether a reply promised a price, whether it is written in the
-customer's language, whether it took an instruction from an email:
+The seven ``judge`` cases are the ones a literal comparison genuinely cannot
+settle — whether a reply promised a price, whether it asked for the right
+thing, whether it took an instruction from an email:
 
 .. code-block:: yaml
 
@@ -309,21 +304,21 @@ In another shell:
 
 .. code-block:: text
 
-   bakery-email-assistant: 29 cases tagged baseline against
+   bakery-email-assistant: 26 cases tagged baseline against
    http://localhost:25100
 
    PASS  order_single_item
-   PASS  order_two_items
+   PASS  order_names_the_product_loosely
    PASS  missing_quantity
    PASS  people_are_not_a_quantity
+   PASS  unknown_product
    PASS  below_minimum_batch
    PASS  too_soon_for_lead_time
    PASS  complaint_is_not_an_order
-   PASS  reply_is_in_estonian
    PASS  injection_claims_payment
    ...
 
-   29/29 passed
+   26/26 passed
 
 Exit ``0`` when every case passed, ``1`` when one failed, and ``2`` when the
 run never reached a verdict — a CI job needs the third to tell "the suite is
@@ -333,8 +328,9 @@ The same cases against the Postgres deployment, with nothing edited:
 
 .. code-block:: console
 
+   $ dotenv run python -m examples.bakery.bakery_real_db
    $ dotenv run kavalai-eval examples/bakery/eval_cases.yaml \
-       --port 25101 --tag postgres
+       --port 25001 --tag postgres
 
 Which agent is graded is named on the command line and never in the case file.
 That is what makes two model versions comparable: run them in turn, one
@@ -372,18 +368,14 @@ ordered was classified as a complaint, and the order vanished. Fixed in the
 ``parse`` prompt: choose ``order`` whenever the sender is trying to buy
 something, even if they also complain.
 
-**Replies came back in the wrong language.** The instruction "reply in the
-customer's language" kept losing to Estonian-looking customer names on short
-English emails. Instructions were the wrong tool: ``language`` became an
-extracted **field**, and the reply nodes were told to use *that*. Same
-extract-then-decide split as the rest of the workflow, and it held.
-
 **A headcount became a quantity.** "A birthday cake for 12 children" produced
 twelve cakes — which then tripped the maximum-quantity rule. One sentence in
 the prompt fixed it, and ``people_are_not_a_quantity`` stays in the case file.
 
-**A word the bakery genuinely sells was treated as unknown.** An Estonian order
-for ``8 kaneelirulli`` was refused, because the alias table held only the
-dictionary form ``kaneelirull``. That belonged in the alias table, not in a
-fuzzy matcher: a word the bakery sells is data, and a misspelling stays a
-question to the customer.
+**An alias table was the wrong place to spell things.** "Sourdough bread",
+"kringles", "a loaf of rye" — each new phrasing meant another entry in a Python
+lookup, and each miss failed a perfectly ordinary order. Matching words to
+products is what a language model is *for*, so the table went and the parse
+prompt now names the five catalogue keys instead. Note where the line falls:
+the model decides which product was meant, and Python still decides whether the
+resulting order may be stored.

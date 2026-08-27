@@ -1,4 +1,4 @@
-"""The bakery email assistant on an in-memory database, served over REST.
+"""The bakery email assistant, served over REST with nothing to set up.
 
 Run it from the repository root::
 
@@ -14,15 +14,14 @@ Then send it an email::
               "body": "Hello, I would like 4 kringles for 2026-09-12. Mari Tamm"
             }}}'
 
-Nothing here describes what the assistant *does* — that is
-:file:`assistant.yaml`, and this module only decides where its runs and its
-orders are written down. Both go to memory: the SQLite agent database is
-``:memory:`` and the order book is a Python list, so the process is the whole
-world and restarting it is the reset button. :file:`bakery_real_db.py` is the
-same agent with both of those pointed at Postgres.
+What the assistant does is `assistant.yaml`; this module only decides where its
+*sessions* are recorded. Here that is an in-memory SQLite database, so the
+process is the whole world and restarting it is the reset button.
+`bakery_real_db.py` is the same agent recording into Postgres instead.
 """
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI
@@ -30,42 +29,52 @@ from loguru import logger
 
 from kavalai import db_manager
 from kavalai.agent_service import AgentService
+from kavalai.server import create_agent_router
+from kavalai.workflow import WorkflowEngine
 
-from examples.bakery.bakery import (
-    InMemoryOrderBook,
-    build_engine,
-    create_app,
-    use_order_book,
-)
-
-# Host and port to serve the agent
 HOST = "0.0.0.0"
 PORT = 25100
 
-# In-memory SQLite for the agent database: sessions, runs, tasks and model-call
-# stats live only as long as the process.
+# In-memory SQLite: sessions, runs, tasks and model-call stats live only as
+# long as the process.
 AGENT_DB_PATH = ":memory:"
+
+WORKFLOW_PATH = Path(__file__).with_name("assistant.yaml")
 
 session_maker = db_manager.get_sqlite_sessionmaker(db_path=AGENT_DB_PATH)
 agent_service = AgentService(session_maker)
 
-# The order book the workflow's `store_order` tool writes to. Bound once, here,
-# because assistant.yaml names the tool and not its dependencies.
-order_book = use_order_book(InMemoryOrderBook())
 
-engine = build_engine(agent_service)
+def build_engine(agent_service: AgentService) -> WorkflowEngine:
+    """Load assistant.yaml and give it somewhere to record its runs."""
+    return WorkflowEngine.from_yaml_path(
+        str(WORKFLOW_PATH), agent_service=agent_service
+    )
 
 
-@asynccontextmanager
-async def lifespan(_app: FastAPI):
-    """Create the agent database tables before the first request arrives."""
-    await db_manager.init_sqlite(db_path=AGENT_DB_PATH)
-    yield
+def create_app(engine: WorkflowEngine) -> FastAPI:
+    """Serve the workflow over POST /run_agent and POST /stream_agent."""
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        # Create the agent database tables before the first request arrives.
+        await db_manager.init_sqlite(db_path=AGENT_DB_PATH)
+        yield
+
+    app = FastAPI(
+        title=engine.graph.name,
+        description=engine.graph.description,
+        version=engine.graph.version,
+        lifespan=lifespan,
+    )
+    app.state.engine = engine
+    app.include_router(create_agent_router(engine, session_provider=session_maker))
+    return app
 
 
 def main() -> None:
     logger.info(f"Serving the bakery email assistant on http://{HOST}:{PORT}")
-    uvicorn.run(create_app(engine, session_maker, lifespan), host=HOST, port=PORT)
+    uvicorn.run(create_app(build_engine(agent_service)), host=HOST, port=PORT)
 
 
 if __name__ == "__main__":
