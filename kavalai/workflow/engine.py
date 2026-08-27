@@ -416,10 +416,7 @@ class WorkflowEngine:
             response_model=output_type,
             stream_delta=node.stream_delta,
         )
-        # Reviewer: It would be better if demuxing and buffer accumulations happened
-        # in a dedicated class/module.
-        # In delta mode the complete chunk carries no value, so accumulate the
-        # raw deltas ourselves to parse the output from.
+
         buffer = ""
         response_value: Optional[str] = None
         async for chunk in streamer:
