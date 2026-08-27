@@ -149,6 +149,27 @@ cd frontend && npm test -- --watch=false
   not written by hand.
 - Every code example on an `.rst` page should be executed before it is
   committed, with the real output pasted underneath.
+- **Writing style.** The documentation is written in an academic, clean
+  register, and new pages and edits must match it:
+  - Declarative sentences in the present tense; plain, precise vocabulary.
+    Prefer "the engine records every run" to "the engine will go ahead and
+    record every run for you".
+  - No marketing or enthusiasm — no "powerful", "seamless", "simply",
+    "easily", exclamation marks or rhetorical questions. State what a thing
+    does and why it is designed so; let the reader judge.
+  - Impersonal or third-person phrasing by default. "You" is acceptable for
+    instructions the reader performs; "we" and "let's" are not.
+  - Every claim about behaviour is one the code exhibits — check the source
+    before describing a control, a default or an error message, and name it
+    exactly as it appears.
+  - Explain the *reason* behind a design choice where one exists (the missing
+    cost column, the refused unregistered user), in one or two sentences.
+  - British spelling (behaviour, normalise, artefact), a spaced em dash
+    (` — `) for asides, and `**bold**` only for the first mention of a UI
+    element or a defined term.
+  - Screenshots: describe what the image *shows the reader*, not that an image
+    exists; give each one a full `:alt:` sentence. Crop captures to the
+    application viewport — never ship a desktop or IDE capture.
 - Keep code blocks within roughly 80 characters so the rendered page needs no
   horizontal scrollbar.
 - Anything that needs a code change rather than a documentation fix goes in

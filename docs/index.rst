@@ -190,6 +190,22 @@ the assistant memory across turns. The persisted structure is described in
 The same graph is equally expressible in YAML, and the same engine serves it
 over HTTP. The example is developed in full in :doc:`tutorials/quickstart`.
 
+Inspect what ran
+----------------
+
+Nothing about a run is discarded. Every session, run, node and model call is
+written to a database you own, and the bundled backoffice reads it: projects
+and their agents, whole conversations, a per-node task debugger, model-call
+statistics and a RAG explorer that projects the embedding space.
+
+.. image:: ui/projectinfopage.png
+   :alt: Backoffice project page with the active-project selector, database
+         access details and seven-day activity and token charts
+   :width: 100%
+
+Setting the backoffice up, and what each page answers, is covered in
+:doc:`ui/index`; the tables it reads are described in :doc:`guides/data_model`.
+
 Where to start
 --------------
 

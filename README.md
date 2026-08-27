@@ -34,6 +34,18 @@ See the [full documentation](https://docs.kaval.ai) for a more detailed
 reference. The design of the library, and the reasoning behind it, is set out
 in [Architecture](https://docs.kaval.ai/tutorials/architecture.html).
 
+## The backoffice
+
+Every session, run, node and model call is recorded in a database you own, and
+browsable in the bundled backoffice: projects and their agents, whole
+conversations, a per-node task debugger, model-call statistics and a RAG
+explorer with a PCA view of the embedding space.
+
+<img src="https://raw.githubusercontent.com/Kaval-AI/kaval.ai/main/docs/ui/projectinfopage.png" alt="Kaval.AI backoffice project page with database details and activity charts" width="100%"/>
+
+Setup and a tour of every page are in
+[Using the backoffice UI](https://docs.kaval.ai/ui/index.html).
+
 ## Install
 
 ```
