@@ -100,8 +100,7 @@ docs = [
 # and prints the conversation. Both are thin wrappers over `kavalai.eval`,
 # which needs no dependency the core install does not already have.
 [project.scripts]
-kavalai-eval = "kavalai.eval.cli:main"
-kavalai-persona = "kavalai.eval.cli:persona_main"
+kavalai-eval = "kavalai.eval.eval_runner:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

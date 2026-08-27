@@ -33,7 +33,7 @@ Two components:
 | `kavalai/` | Runtime: `agent.py`, `agent_service.py`, `db.py`, `server.py`, `run_context.py`, `functionkernel.py`, `schema_parser.py` |
 | `kavalai/workflow/` | Engine v2: `models.py` (the graph), `engine.py`, `builder.py`, `expressions.py`, `render.py`, `tasklog/` |
 | `kavalai/llm_clients/` | OpenAI, Gemini, Anthropic, Ollama and in-browser clients behind one streaming interface; `registry.py` makes that set extensible |
-| `kavalai/eval/` | Evaluation & acceptance testing: `models.py` (Case/Dataset/Suite/results), `targets.py` (Engine/Rest/Callable + `RunRecord`), `trajectory.py`, `evaluators/` (deterministic, trajectory, judged, conversation), `runner.py`, `report.py`, `persona.py`, `fixtures.py`, `cli.py`. Console scripts `kavalai-eval` / `kavalai-persona` |
+| `kavalai/eval/` | Evaluation against a **running** agent server: `base.py` (`AgentEvaluator`, `EvalResult`), `simple_evaluator.py` (literal matchers), `judge_evaluator.py` (a model grades a plain-language criterion), `eval_runner.py` (YAML cases + the `kavalai-eval` console script) |
 | `kavalai/rag/` | `BaseRagService` (three capability tiers), `PostgresRagService` (pgvector), `SqliteRagService` (portable file index) |
 | `kavalai/tools/` | Bundled tools: browser, RSS, web search, HTTP |
 | `kavalai/migrations/` | Alembic sets: `agents` and `backoffice` |
@@ -156,42 +156,47 @@ cd frontend && npm test -- --watch=false
 
 ## Evaluation & acceptance testing
 
-`kavalai/eval/` is a **library over files**. A suite is a directory holding a
-dataset, personas, a `suite.yaml` and a **committed `baseline.json`**. There are
-no eval tables and nothing is written to a database unless asked — deliberately,
-so a suite runs on every pull request rather than when somebody remembers.
+`kavalai/eval/` evaluates an agent server that is **already running**. It holds
+two evaluators and one runner, and knows nothing about the engine, the database
+or the workflow file — it speaks HTTP to a server and discovers that server's
+input and output types from its OpenAPI spec (`kavalai/client.py`).
+
+- `simple_evaluator.py` — send one input, compare the answer with expected
+  values. No model is involved, so the verdict is the same every time. Its
+  matcher vocabulary is five names: `equals`, `contains`, `not_contains`,
+  `regex`, `one_of`.
+- `judge_evaluator.py` — send one input, then ask a judging model whether the
+  answer meets a plain-language criterion. A failing case carries the judge's
+  reason. The judge is built on first use, so a run of literal cases needs no
+  API key.
+- `eval_runner.py` — a YAML file of cases (`type: simple` or `type: judge`),
+  run in order against one server. `kavalai-eval <cases.yaml> --host … --port …
+  --auth user:password`.
 
 ```bash
-uv run --env-file .env kavalai-eval examples/bakery/eval/suite.yaml --tag pr-412
-uv run --env-file .env kavalai-persona <persona.yaml> --suite <suite.yaml>
+uv run --env-file .env kavalai-eval \
+    examples/green_village/eval_cases.yaml --port 25000
 ```
 
-Exit `0` gate passed, `1` gate failed, `2` the run itself broke — CI needs the
-third to tell "the harness broke" from "the workflow is wrong".
+Exit `0` every case passed, `1` a case failed, `2` the run never reached a
+verdict — CI needs the third to tell "the suite is broken" from "the agent is
+wrong".
 
 Rules that are load-bearing:
 
-- **`kavalai.eval` reads no environment variables**; only `cli.py:main()` does.
-  A database, a base URL or an auth pair is passed in explicitly.
-- A suite's `setup:` imports a module before the run, registering the
-  `python://` tools, named RAG services and custom evaluators the workflow and
-  dataset name. **Not optional** for a non-trivial workflow: the engine resolves
-  a named RAG service eagerly, at construction. `KAVALAI_AGENT_SETUP_MODULE`
-  does the same for `kavalai/server.py`.
-- Every evaluator ships with a known-good *and* a known-bad test.
-  `tests/eval/test_evaluators.py` fails if any registered evaluator was never
-  shown to fail — an evaluator that cannot fail manufactures confidence.
-- **Never let an unrunnable assertion read as a pass.** A trajectory assertion
-  against a target that cannot observe one raises, and a run that would drop
-  them refuses to start unless `--skip-trajectory-evaluators` says otherwise.
-  Skipped evaluators are always named in `result.notes`.
-- `--fixtures` replays recorded model responses (no API key);
-  `--record-fixtures` records them. Replay keys on the exact prompt, so
-  **anything reaching a prompt must be deterministic** — see the bakery's
-  sequential order ids and pinned clock.
-- `--persist-sessions` tags each run
-  `external_id = "eval:{suite}:{tag}:{case}:{repeat}"`. `eval:` is reserved; the
-  backoffice sessions page filters on it.
+- **`kavalai.eval` reads no environment variables**; only
+  `eval_runner.py:main()` does. A base URL, an auth pair and the judge model
+  are passed in.
+- Both evaluators are usable straight from a unit test: construct one, `await
+  evaluator.evaluate(inputs, expected)`, assert on `result.passed` and
+  `result.reason`.
+- **A judged case must state a criterion.** `EvalCase` rejects one that does
+  not, because judging against nothing passes on any answer at all.
+- A failing agent call fails its case with a reason instead of raising, so one
+  broken case cannot end a run — but a malformed *suite* refuses to start.
+- Each case runs in its own session, and is recorded under
+  `external_id = "eval:{case}"`. `eval:` is reserved; the backoffice sessions
+  page filters on it.
 
 ## Where things usually belong
 
@@ -206,8 +211,8 @@ Rules that are load-bearing:
 | New persisted field | `kavalai/db.py`, then an autogenerated Alembic revision, then `SQLITE_SCHEMA_VERSION` |
 | New REST endpoint | `kavalai/server.py` (runtime) or `kavalai/backoffice/server.py` (management) |
 | New documentation page | `docs/`, added to the toctree in the matching `index.rst` |
-| New evaluator | `kavalai/eval/evaluators/`, registered with `@evaluator("name")`, plus a known-good and a known-bad case in `tests/eval/test_evaluators.py`. A *domain* evaluator belongs in the customer's own setup module, not here |
-| New target kind | `kavalai/eval/targets.py`, behind the `Target` protocol; set `observes_trajectory` honestly |
+| New eval matcher | `kavalai/eval/simple_evaluator.py`, added to `MATCHERS` and to `check_field`, with a passing *and* a failing test in `tests/eval/test_simple_evaluator.py` — a matcher never shown to fail manufactures confidence |
+| New eval case type | `kavalai/eval/eval_runner.py` (`EvalCase.type`) and a matching evaluator class; the validator has to reject an expectation the new evaluator cannot read |
 
 ## Further reading
 
