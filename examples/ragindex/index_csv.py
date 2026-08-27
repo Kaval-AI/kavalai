@@ -8,21 +8,26 @@ memory.
 
 Index the bundled 100 made-up songs into a local SQLite file::
 
-    uv run python -m examples.ragindex.index_csv \
+    dotenv run python -m examples.ragindex.index_csv \
         examples/ragindex/songs.csv --index songs.db
 
 Index them into the Postgres database from ``.env`` instead, which is what
 the backoffice RAG explorer reads::
 
-    uv run --env-file .env python -m examples.ragindex.index_csv \
-        examples/ragindex/songs.csv --index postgres --collection songs
+    dotenv run python -m examples.ragindex.index_csv examples/ragindex/songs.csv --index postgres --collection songs
 
 Take a slice of a much bigger file --- here the first 2000 English rows of a
 lyrics dump --- and put it in its own collection::
 
-    uv run --env-file .env python -m examples.ragindex.index_csv \
-        local_data/song_lyrics.csv --index postgres \
+    dotenv run python -m examples.ragindex.index_csv local_data/song_lyrics.csv --index postgres \
         --collection lyrics_sample --where language=en --limit 2000
+
+Add to a collection without paying for it twice --- rows whose source id is
+already there are never embedded, which is the expensive part::
+
+    dotenv run python -m examples.ragindex.index_csv \
+        local_data/song_lyrics.csv --index postgres \
+        --collection lyrics_sample --limit 4000 --skip-existing
 
 ``--index`` decides the backend: ``postgres`` reads ``KAVALAI_DB_URI`` and
 ``KAVALAI_DB_SCHEMA`` from the environment, anything containing ``://`` is
@@ -60,6 +65,24 @@ DEFAULT_SOURCE_ID_COLUMN = "id"
 # bge-small truncates at 512 tokens, so embedding a whole novel of a field
 # wastes time and tells you nothing the first paragraphs did not.
 DEFAULT_MAX_CHARS = 2000
+
+
+@dataclass
+class IndexReport:
+    """What one indexing run did.
+
+    ``indexed`` alone cannot answer "did this run succeed": a
+    ``--skip-existing`` re-run of an up-to-date collection indexes nothing and
+    is entirely successful, which is why the skipped rows are counted too.
+    """
+
+    indexed: int = 0
+    skipped: int = 0
+
+    @property
+    def handled(self) -> int:
+        """Rows the run accounted for, indexed or deliberately skipped."""
+        return self.indexed + self.skipped
 
 
 @dataclass
@@ -206,13 +229,41 @@ def make_rag_service(index: str, model: str, schema: Optional[str]) -> BaseRagSe
     return SqliteRagService(index, model)
 
 
+async def existing_source_ids(rag: BaseRagService, collection_name: str) -> set[str]:
+    """The source ids a collection already holds.
+
+    Used by ``--skip-existing`` so a re-run only embeds what is new. Embedding
+    is the expensive half of indexing by a wide margin, so reading the
+    collection once is cheap next to re-embedding rows that are already there.
+
+    Args:
+        rag: The RAG backend to read from.
+        collection_name: Collection to enumerate.
+
+    Returns:
+        set[str]: Every source id in the collection, empty if it does not exist
+        yet.
+
+    Raises:
+        ValueError: If the backend does not implement ``iter_entries``, which
+            is an optional part of :class:`BaseRagService`.
+    """
+    if not rag.supports("iter_entries"):
+        raise ValueError(
+            f"{type(rag).__name__} cannot list existing entries, so "
+            "--skip-existing is unavailable; use --replace instead"
+        )
+    return {entry["source_id"] async for entry in rag.iter_entries(collection_name)}
+
+
 async def index_rows(
     rag: BaseRagService,
     rows: Iterator[IndexRow],
     collection_name: str,
     batch_size: int = 32,
     replace: bool = False,
-) -> int:
+    skip_source_ids: frozenset = frozenset(),
+) -> IndexReport:
     """Embed and store rows in batches, reporting progress as it goes.
 
     Args:
@@ -223,15 +274,17 @@ async def index_rows(
         replace: Delete any existing entries carrying the same source ids
             first, which makes re-running the script idempotent instead of
             doubling the collection.
+        skip_source_ids: Source ids to leave alone. A skipped row is never
+            embedded, which is the whole point --- see
+            :func:`existing_source_ids`.
 
     Returns:
-        int: How many rows were indexed.
+        IndexReport: How many rows were indexed and how many were skipped.
     """
-    total = 0
+    report = IndexReport()
     batch: list[IndexRow] = []
 
     async def flush() -> None:
-        nonlocal total
         if not batch:
             return
         if replace:
@@ -242,16 +295,21 @@ async def index_rows(
             source_ids=[r.source_id for r in batch],
             collection_name=collection_name,
         )
-        total += len(batch)
-        logger.info(f"Indexed {total} rows into {collection_name!r}")
+        report.indexed += len(batch)
+        logger.info(f"Indexed {report.indexed} rows into {collection_name!r}")
         batch.clear()
 
     for row in rows:
+        if row.source_id in skip_source_ids:
+            report.skipped += 1
+            continue
         batch.append(row)
         if len(batch) >= batch_size:
             await flush()
     await flush()
-    return total
+    if report.skipped:
+        logger.info(f"Skipped {report.skipped} rows already in {collection_name!r}")
+    return report
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -332,16 +390,25 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"Truncate the text at this length, 0 to keep it whole "
         f"(default: {DEFAULT_MAX_CHARS})",
     )
-    parser.add_argument(
+    rerun = parser.add_mutually_exclusive_group()
+    rerun.add_argument(
         "--replace",
         action="store_true",
         help="Delete entries with the same source ids first (idempotent re-run)",
     )
+    rerun.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help=(
+            "Skip rows whose source id is already in the collection, so a "
+            "re-run embeds only what is new"
+        ),
+    )
     return parser
 
 
-async def run(args: argparse.Namespace) -> int:
-    """Index the file described by ``args`` and return the row count."""
+async def run(args: argparse.Namespace) -> IndexReport:
+    """Index the file described by ``args`` and return what the run did."""
     rag = make_rag_service(args.index, args.model, args.schema)
     rows = read_rows(
         csv_path=args.csv_path,
@@ -356,15 +423,23 @@ async def run(args: argparse.Namespace) -> int:
         f"Indexing {args.csv_path} into {args.index} "
         f"(collection {args.collection!r}, model {args.model})"
     )
-    total = await index_rows(
+    skip: frozenset = frozenset()
+    if args.skip_existing:
+        skip = frozenset(await existing_source_ids(rag, args.collection))
+        logger.info(f"Collection {args.collection!r} already holds {len(skip)} ids")
+    report = await index_rows(
         rag,
         rows,
         collection_name=args.collection,
         batch_size=args.batch_size,
         replace=args.replace,
+        skip_source_ids=skip,
     )
-    logger.info(f"Done: {total} rows in collection {args.collection!r}")
-    return total
+    logger.info(
+        f"Done: {report.indexed} rows indexed into {args.collection!r}"
+        + (f", {report.skipped} already there" if report.skipped else "")
+    )
+    return report
 
 
 def main() -> int:
@@ -373,11 +448,13 @@ def main() -> int:
     csv.field_size_limit(min(sys.maxsize, 2**31 - 1))
     args = build_parser().parse_args()
     try:
-        total = asyncio.run(run(args))
+        report = asyncio.run(run(args))
     except (ValueError, KeyError, FileNotFoundError) as error:
         logger.error(error)
         return 2
-    return 0 if total else 1
+    # An up-to-date --skip-existing re-run indexes nothing and has still done
+    # its job, so success is "rows accounted for", not "rows written".
+    return 0 if report.handled else 1
 
 
 if __name__ == "__main__":

@@ -14,6 +14,7 @@ import pytest
 from examples.ragindex.index_csv import (
     DEFAULT_MAX_CHARS,
     IndexRow,
+    existing_source_ids,
     build_metadata,
     build_parser,
     build_text,
@@ -39,11 +40,20 @@ SONGS_CSV = "examples/ragindex/songs.csv"
 class FakeRag:
     """A RAG service that records calls instead of embedding anything."""
 
-    def __init__(self, results=None):
+    def __init__(self, results=None, existing=(), can_iter=True):
         self.batches = []
         self.deleted = []
         self.queries = []
         self._results = results or []
+        self._existing = list(existing)
+        self._can_iter = can_iter
+
+    def supports(self, capability):
+        return capability == "iter_entries" and self._can_iter
+
+    async def iter_entries(self, collection_name, batch_size=500):
+        for source_id in self._existing:
+            yield {"source_id": source_id, "content": "x"}
 
     async def index_batch(self, texts, metadata_list, source_ids, collection_name):
         self.batches.append((texts, metadata_list, source_ids, collection_name))
@@ -251,7 +261,8 @@ async def test_index_rows_batches_and_counts():
     rag = FakeRag()
     rows = [IndexRow(str(i), f"text {i}", {"n": str(i)}) for i in range(5)]
 
-    assert await index_rows(rag, iter(rows), "songs", batch_size=2) == 5
+    report = await index_rows(rag, iter(rows), "songs", batch_size=2)
+    assert (report.indexed, report.skipped) == (5, 0)
     assert [len(batch[0]) for batch in rag.batches] == [2, 2, 1]
     assert rag.batches[0][2] == ["0", "1"]
     assert rag.batches[0][3] == "songs"
@@ -268,7 +279,8 @@ async def test_index_rows_replaces_the_same_source_ids_first():
 
 async def test_index_rows_on_an_empty_file_indexes_nothing():
     rag = FakeRag()
-    assert await index_rows(rag, iter([]), "songs") == 0
+    report = await index_rows(rag, iter([]), "songs")
+    assert (report.indexed, report.skipped, report.handled) == (0, 0, 0)
     assert rag.batches == []
 
 
@@ -300,7 +312,8 @@ async def test_run_indexes_the_file_through_the_selected_backend(csv_file, monke
     )
     args = build_parser().parse_args([csv_file, "--batch-size", "10"])
 
-    assert await run(args) == 3
+    report = await run(args)
+    assert report.indexed == 3
     assert rag.batches[0][3] == "songs"
 
 
@@ -433,3 +446,60 @@ def test_bundled_csv_reads_with_the_default_settings():
     assert len(rows) == 100
     assert rows[0].text.startswith("My Stapler Has Tenure\nThe Beige Alarmists\n")
     assert rows[0].metadata["tag"] == "rock"
+
+
+# --------------------------------------------------------------------------
+# Skipping what is already indexed
+# --------------------------------------------------------------------------
+
+
+async def test_existing_source_ids_reads_the_collection():
+    rag = FakeRag(existing=["1", "2", "2"])
+    assert await existing_source_ids(rag, "songs") == {"1", "2"}
+
+
+async def test_existing_source_ids_needs_iter_entries():
+    with pytest.raises(ValueError, match="--skip-existing is unavailable"):
+        await existing_source_ids(FakeRag(can_iter=False), "songs")
+
+
+async def test_index_rows_never_embeds_a_skipped_row():
+    rag = FakeRag()
+    rows = [IndexRow(str(i), f"text {i}", {}) for i in range(4)]
+
+    report = await index_rows(
+        rag, iter(rows), "songs", batch_size=10, skip_source_ids=frozenset({"1", "3"})
+    )
+    assert (report.indexed, report.skipped, report.handled) == (2, 2, 4)
+    # The skipped rows never reached the embedding call at all.
+    assert rag.batches[0][2] == ["0", "2"]
+
+
+async def test_run_skips_rows_already_in_the_collection(csv_file, monkeypatch):
+    rag = FakeRag(existing=["10", "11"])
+    monkeypatch.setattr(
+        "examples.ragindex.index_csv.make_rag_service", lambda *a, **k: rag
+    )
+    args = build_parser().parse_args([csv_file, "--skip-existing"])
+
+    report = await run(args)
+    assert (report.indexed, report.skipped) == (1, 2)
+    assert rag.batches[0][2] == ["12"]
+
+
+def test_skip_existing_and_replace_are_mutually_exclusive(capsys):
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["--replace", "--skip-existing"])
+    assert "not allowed with" in capsys.readouterr().err
+
+
+def test_an_up_to_date_skip_existing_rerun_succeeds(csv_file, monkeypatch):
+    """Nothing left to index is a success, not a failure exit code."""
+    rag = FakeRag(existing=["10", "11", "12"])
+    monkeypatch.setattr(
+        "examples.ragindex.index_csv.make_rag_service", lambda *a, **k: rag
+    )
+    monkeypatch.setattr("sys.argv", ["index_csv", csv_file, "--skip-existing"])
+
+    assert main() == 0
+    assert rag.batches == []

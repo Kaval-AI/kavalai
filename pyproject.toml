@@ -89,9 +89,11 @@ common_web = [
 # choice by registering the provider with `cuda=True` / `device_ids=[…]`,
 # which `FastEmbedClient` passes straight to FastEmbed.
 #
-# Unpinned on purpose, but check the card first: CUDA 13 dropped compute
-# capability below 7.5, so on a Pascal or Volta GPU pin an `onnxruntime-gpu`
-# built against CUDA 12 instead of taking the newest wheel.
+# Unpinned on purpose, but check the card first: the current `onnxruntime-gpu`
+# is a CUDA 13 build, and CUDA 13 dropped compute capability below 7.5 --- on a
+# Pascal or Volta card it silently falls back to the CPU. Those need the CUDA 12
+# build plus a cuDNN 9 that still has their kernels; `docs/tutorials/
+# installation.rst` carries the verified combination.
 gpu = [
     "fastembed-gpu",
 ]
@@ -117,12 +119,13 @@ docs = [
     "ipywidgets",
 ]
 
-# The evaluation runner. `kavalai-eval <suite.yaml>` runs an acceptance suite;
-# `kavalai-persona <persona.yaml>` plays one simulated user against an agent
-# and prints the conversation. Both are thin wrappers over `kavalai.eval`,
-# which needs no dependency the core install does not already have.
+# The evaluation runner. `kavalai-eval <cases.yaml>` grades a running agent
+# server; it is a thin wrapper over `kavalai.eval`, which needs no dependency
+# the core install does not already have. `kavalai-skills` copies the bundled
+# agent skills into a project.
 [project.scripts]
 kavalai-eval = "kavalai.eval.eval_runner:main"
+kavalai-skills = "kavalai.skills:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -130,6 +133,10 @@ include = ["kavalai*"]
 
 [tool.setuptools.package-data]
 "kavalai" = [
+    # The agent skills ship inside the wheel, so an agent that reads an
+    # installed package's `.agents` directory finds them with no install step.
+    ".agents/skills/*/SKILL.md",
+    ".agents/skills/*/references/*.md",
     "migrations/*/env.py",
     "migrations/*/script.py.mako",
     "migrations/*/versions/*.py",
