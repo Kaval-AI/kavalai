@@ -132,8 +132,8 @@ def main():
     parser = argparse.ArgumentParser(description="Kaval.AI Database Migration Tool")
     parser.add_argument(
         "type",
-        choices=["app", "backoffice"],
-        help="Type of migrations to run ('app' = the agents set).",
+        choices=["agents", "backoffice"],
+        help="Type of migrations to run ('agents' = the agents set).",
     )
     parser.add_argument(
         "--uri",

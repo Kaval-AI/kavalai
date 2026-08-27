@@ -1,21 +1,26 @@
-"""The Green Village tourist information chatbot, served over REST.
+"""The Green Village chatbot again, but on Postgres instead of in-memory SQLite.
 
-Run it::
-
-    python -m examples.green_village.green_village_support_in_memory
+Bring up the docker postgres database
+    docker compose up -d postgres_db
+    dotenv run python -m kavalai.migrate_db app
+    dotenv run python -m examples.green_village.green_village_support_real_db
 
 Then talk to it from the terminal chat client::
 
-    python -m examples.chat_client.chat_client --base-url http://localhost:25000
+    python -m examples.chat_client.chat_client --base-url http://localhost:25001
 
 or straight over HTTP::
 
-    curl -s http://localhost:10000/run_agent \
+    curl -s http://localhost:25001/run_agent \
         -H 'Content-Type: application/json' \
         -d '{"data": {"user_message": "How deep is Lake Miller?"}}'
 
+The reply carries a ``session_id``; send it back on the next request and the
+two turns are one conversation — the same as the in-memory example, except this
+one still remembers it tomorrow.
 """
 
+import os
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -25,8 +30,8 @@ from pydantic import BaseModel
 
 from kavalai import db_manager
 from kavalai.agent_service import AgentService
-from kavalai.rag import SqliteRagService
-from kavalai.server import create_agent_router
+from kavalai.rag import PostgresRagService
+from kavalai.server import create_agent_router, mask_db_uri
 from kavalai.workflow import WorkflowBuilder
 
 # See https://qdrant.github.io/fastembed/examples/Supported_Models/ for list of models
@@ -35,11 +40,17 @@ LLM_MODEL = "openai/gpt-5.4-mini"
 
 # Host and port to serve the agent
 HOST = "0.0.0.0"
-PORT = 25000
+PORT = 25001
 
-# Use in-memory SQLLite for both agent db and RAG index.
-AGENT_DB_PATH = ":memory:"
-INDEX_PATH = ":memory:"
+
+DB_URI = os.environ["KAVALAI_DB_URI"]
+DB_SCHEMA = os.environ.get("KAVALAI_DB_SCHEMA", "public")
+DB_POOL_SIZE = int(os.environ.get("KAVALAI_DB_POOL_SIZE", "0"))
+DB_MAX_OVERFLOW = int(os.environ.get("KAVALAI_DB_MAX_OVERFLOW", "0"))
+
+# A collection is a table of its own here, rather than a filter over one index,
+# so give it a name of its own instead of retrieving from "default".
+COLLECTION = "green_village"
 
 # List of green village facts.
 FACTS = [
@@ -81,17 +92,33 @@ class Reply(BaseModel):
     agent_response: str
 
 
-session_maker = db_manager.get_sqlite_sessionmaker(db_path=AGENT_DB_PATH)
+logger.info(f"Agent database: {mask_db_uri(DB_URI)} (schema {DB_SCHEMA})")
+session_maker = db_manager.get_sessionmaker(
+    uri=DB_URI,
+    schema=DB_SCHEMA,
+    pool_size=DB_POOL_SIZE,
+    max_overflow=DB_MAX_OVERFLOW,
+)
 agent_service = AgentService(session_maker)
 
+# The same sessionmaker serves the index: one database, one pool. The RAG
+# tables are not part of the Alembic set — this backend owns its own DDL and
+# provisions a collection on first index, taking the vector dimension from the
+# embeddings it just computed.
 logger.info(f"Initializing RAG with model {EMBEDDING_MODEL}")
-rag = SqliteRagService(INDEX_PATH, EMBEDDING_MODEL)
+rag = PostgresRagService.from_session_maker(
+    session_maker, EMBEDDING_MODEL, schema=DB_SCHEMA
+)
 
 # Build the workflow engine.
 # 1. We query RAG with facts related to the user message
 # 2. We construct the reply using the facts.
 engine = (
-    WorkflowBuilder("Green Village support", llm_model=LLM_MODEL)
+    WorkflowBuilder(
+        "Green Village support",
+        llm_model=LLM_MODEL,
+        rag_collection=COLLECTION,
+    )
     .data_model("input", Message)
     .data_model("output", Reply)
     .start("get_related_facts")
@@ -123,23 +150,31 @@ engine = (
 )
 
 
+async def index_facts() -> None:
+    """Rebuild the index from FACTS on every start."""
+    indexed = await rag.count_entries(COLLECTION)
+    if indexed:
+        logger.info(f"Clearing {indexed} facts from collection '{COLLECTION}'")
+        await rag.drop_collection(COLLECTION)
+
+    logger.info(f"Indexing {len(FACTS)} facts")
+    await rag.index_batch(
+        texts=FACTS,
+        metadata_list=[{}] * len(FACTS),
+        source_ids=[f"fact-{i:02d}" for i in range(len(FACTS))],
+        collection_name=COLLECTION,
+    )
+
+
 def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         """Lifespan of the app.
 
-        During startup, create the agent database tables and perform indexing
-        in the RAG, so the server only starts serving once there is something
-        to retrieve and somewhere to record the conversation.
+        During startup, rebuild the fact index, so the server only starts
+        serving once there is something to retrieve.
         """
-        await db_manager.init_sqlite(db_path=AGENT_DB_PATH)
-        logger.info(f"Indexing {len(FACTS)} facts")
-        await rag.index_batch(
-            texts=FACTS,
-            metadata_list=[{}] * len(FACTS),
-            source_ids=[str(i) for i in range(len(FACTS))],
-            collection_name="default",
-        )
+        await index_facts()
         yield
 
     app = FastAPI(
