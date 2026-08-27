@@ -57,7 +57,7 @@ agent runtime tables, one for the backoffice.
 .. code-block:: bash
 
    # Agent runtime tables — reads KAVALAI_DB_URI and KAVALAI_DB_SCHEMA
-   python -m kavalai.migrate_db app
+   python -m kavalai.migrate_db agents
 
    # Backoffice tables — reads KAVALAI_BO_DB_URI and KAVALAI_BO_DB_SCHEMA
    python -m kavalai.migrate_db backoffice

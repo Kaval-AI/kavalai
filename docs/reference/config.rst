@@ -79,7 +79,7 @@ Models
 Agent database
 --------------
 
-Read by ``python -m kavalai.server`` and ``python -m kavalai.migrate_db app``.
+Read by ``python -m kavalai.server`` and ``python -m kavalai.migrate_db agents``.
 
 .. list-table::
    :header-rows: 1

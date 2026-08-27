@@ -121,7 +121,7 @@ def test_migrate_main_with_env_vars(db_uri):
         "KAVALAI_DB_URI": db_uri,
         "KAVALAI_DB_SCHEMA": schema,
     }
-    with patch.dict(os.environ, env), patch("sys.argv", ["migrate_db.py", "app"]):
+    with patch.dict(os.environ, env), patch("sys.argv", ["migrate_db.py", "agents"]):
         main()
 
     engine, insp = _inspector(db_uri)

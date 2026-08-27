@@ -194,11 +194,11 @@ It listens on ``localhost:6543``, with ``kavalai_dev`` as user, password and
 database name.
 
 **Create the tables.** The schema is managed with Alembic; the agent runtime
-tables are the ``app`` set:
+tables are the ``agents`` set:
 
 .. code-block:: bash
 
-   python -m kavalai.migrate_db app \
+   python -m kavalai.migrate_db agents \
        --uri postgresql://kavalai_dev:kavalai_dev@localhost:6543/kavalai_dev \
        --schema agents
 
