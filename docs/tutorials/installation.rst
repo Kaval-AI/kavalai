@@ -171,6 +171,11 @@ locally. See :doc:`../ui/index`.
 **No install at all.** Kaval.AI can run a small open model entirely in your
 browser over WebGPU — no Python, no API key. See :doc:`run_in_browser`.
 
+**Skills for your coding agent.** ``kavalai-skills install`` copies Kaval.AI's
+agent skills into your project, so an assistant writing workflows against this
+framework works from how it actually behaves rather than from another
+framework's habits. See :doc:`../reference/skills`.
+
 Where to next
 -------------
 

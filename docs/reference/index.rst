@@ -2,7 +2,8 @@ Reference
 =========
 
 Exhaustive, look-it-up material: every YAML key, every bundled tool, every
-model provider and every environment variable. The generated
+model provider, every environment variable and the skills that brief a
+coding agent. The generated
 :doc:`../api/index` documents the Python objects themselves.
 
 .. toctree::
@@ -13,3 +14,4 @@ model provider and every environment variable. The generated
    tools
    providers
    config
+   skills

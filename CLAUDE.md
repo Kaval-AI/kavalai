@@ -233,6 +233,28 @@ cd frontend && npm test -- --watch=false --code-coverage
   `compose_reply` stamps `status` / `order_id` / `missing` onto the answer from
   what Python decided — the model only ever writes `subject` and `body`.
 
+## Agent Skills
+
+`kavalai/.agents/skills/` holds the six skills shipped to clients so their
+coding agents write Kaval.AI code correctly: `kavalai` (entry + router),
+`kavalai-workflows`, `kavalai-tools`, `kavalai-serving`, `kavalai-rag`,
+`kavalai-eval`. Long tables live in a skill's `references/`, read only when
+needed.
+
+- They ship **inside the wheel** (`[tool.setuptools.package-data]`), and
+  `kavalai-skills install` (`kavalai/skills.py`) copies them into a client's
+  `.claude/skills/`. An already-installed skill is kept unless `--force`, so a
+  client's edits survive an upgrade.
+- A skill carries only what a model gets *wrong* without it: our unguessable
+  schemas, the places the design deliberately differs from the obvious
+  (interpolation that is not Jinja2, `rag_service` a name not a URI, a failed
+  SSE run returning 200, no cost column), and the load-time invariants.
+- `tests/test_skills.py` is the drift guard: node types, node input types, eval
+  matchers, `EvalCase`/`EvalSuite` keys and every environment variable a skill
+  names are checked against the code. **Rename any of them and update the skill
+  in the same commit** — a stale skill misleads a client's agent silently.
+- User-facing docs: `docs/reference/skills.rst`.
+
 ## Database Migrations
 
 - Alembic, two sets: `kavalai/migrations/agents/` and `kavalai/migrations/backoffice/`; the ORM models (`kavalai/db.py`, `kavalai/backoffice/db.py`) are the single source of truth
