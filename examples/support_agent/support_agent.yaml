@@ -11,7 +11,7 @@
 #
 #   await db_manager.init_sqlite()  # in-memory SQLite; point at Postgres in prod
 #   engine = WorkflowEngine.from_yaml_path(
-#       "examples/v2_workflow_support_agent.yaml",
+#       "examples/support_agent/support_agent.yaml",
 #       agent_service=AgentService(db_manager.get_sqlite_sessionmaker()),
 #       task_logger=SqliteTaskLogger(),
 #   )

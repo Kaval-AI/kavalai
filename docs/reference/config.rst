@@ -190,7 +190,7 @@ A ``.env`` for local development against Docker Compose:
    KAVALAI_DB_SCHEMA=agents
 
    # Agent server
-   KAVALAI_AGENT_WORKFLOW_PATH=examples/v2_workflow_support_agent.yaml
+   KAVALAI_AGENT_WORKFLOW_PATH=examples/support_agent/support_agent.yaml
    KAVALAI_AGENT_PORT=10000
 
    # Backoffice (its own database)

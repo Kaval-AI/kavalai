@@ -577,6 +577,6 @@ are allowed, so this is what makes them safe.
 A complete example
 ------------------
 
-.. literalinclude:: ../../examples/v2_workflow_support_agent.yaml
+.. literalinclude:: ../../examples/support_agent/support_agent.yaml
    :language: yaml
-   :caption: examples/v2_workflow_support_agent.yaml
+   :caption: examples/support_agent/support_agent.yaml

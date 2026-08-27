@@ -69,7 +69,7 @@ following exceptions:
   have been captured into the documentation are fixed, so ``ollama/…`` examples
   can be added and executed.
 * **``crawl_url`` / ``web_search``** — these drive a headless browser and were
-  documented from their signatures and ``examples/business_info_agent.py``
+  documented from their signatures and ``examples/business_info_agent/``
   rather than executed in a notebook.
 * **The backoffice screenshots** in :doc:`ui/index` predate this pass and were
   not re-captured.

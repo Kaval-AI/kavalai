@@ -38,9 +38,9 @@ Two components:
 | `kavalai/tools/` | Bundled tools: browser, RSS, web search, HTTP |
 | `kavalai/migrations/` | Alembic sets: `agents` and `backoffice` |
 | `backoffice/`, `frontend/` | Management API and Angular UI |
-| `tests/` | Pytest suite; mock MCP servers in `tests/helpers/` |
+| `tests/` | Pytest suite for the library; mock MCP servers in `tests/helpers/`. An example's tests live beside it under `examples/`, and `testpaths` covers both |
 | `docs/`, `notebooks/` | Sphinx documentation; the five tutorial notebooks are the source of truth |
-| `examples/` | Runnable examples; `green_village/` (RAG chatbot, port 25000) and `bakery/` (a YAML workflow with side effects, ports 25100/25001) each ship an `eval_cases.yaml` |
+| `examples/` | Runnable examples; `green_village/` (RAG chatbot, port 25000), `bakery/` (a YAML workflow with side effects, ports 25100/25001) and `business_info_agent/` (web research: search, crawl, summarise, port 25200) each ship an `eval_cases.yaml`; `support_agent/support_agent.yaml` is the branching-DAG example the docs load |
 
 ## Invariants
 
@@ -204,10 +204,14 @@ Rules that are load-bearing:
   backoffice sessions page filters on it. Nothing is written when the agent
   server has no `AgentService`.
 
-The two worked examples:
+The three worked examples:
 
 - `examples/green_village/eval_cases.yaml` — 64 cases against a RAG chatbot;
   literal ones for the facts, judged ones for the comparisons and refusals.
+- `examples/business_info_agent/eval_cases.yaml` — 10 cases against an agent
+  that reads the live web, so they assert only what a company keeps stating
+  about itself, plus the two cases that grade a refusal: a business that does
+  not exist, and a near-match that does.
 - `examples/bakery/eval_cases.yaml` — 26 cases against a workflow that *writes*
   orders. It can be mostly literal because the model only writes `subject` and
   `body`: `compose_reply` stamps `status`, `order_id` and `missing` onto the

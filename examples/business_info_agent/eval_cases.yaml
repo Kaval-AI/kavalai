@@ -1,0 +1,139 @@
+# dotenv run kavalai-eval examples/business_info_agent/eval_cases.yaml \
+#     --port 25200 --tag baseline
+#
+# Start the agent first:
+#   dotenv run python -m examples.business_info_agent.business_info_in_memory
+#
+# This suite grades an agent that reads the live web -- DuckDuckGo for the
+# search, then whatever pages it decides to crawl -- so the cases assert only
+# what a company states about itself and keeps stating: its name, its own
+# domain, the kind of business it is. Nothing here depends on a page's wording,
+# on which result came first, or on a number that a site may revise next week,
+# because a case that fails when a homepage is redesigned grades the web rather
+# than the agent.
+#
+# Kaval.AI is the worked example, and a good one to grade against: it is small
+# enough that a model cannot answer from memory, so a passing case means the
+# agent really searched, crawled and read. `unknown_business_is_not_invented`
+# is the case that matters most -- for a business the web has never heard of,
+# the interesting behaviour is the empty field, not the fluent paragraph.
+
+name: business-info-agent
+
+cases:
+
+  # ------------------------------------------------------------ the basics
+  # The two facts a company controls itself and never contradicts: what it
+  # calls itself, and where it lives on the web. `contains` is
+  # case-insensitive, so "Kaval.AI", "Kaval AI" and "KAVAL AI OÜ" all pass --
+  # the case is about having found the right company, not about spelling.
+  - name: kavalai_name
+    input:
+      business_query: Kaval.AI (kaval.ai)
+    expected:
+      name: {contains: [Kaval]}
+
+  - name: kavalai_website
+    input:
+      business_query: Kaval.AI (kaval.ai)
+    expected:
+      website: {regex: '(?i)kaval\.ai'}
+
+  # The industry is a free-text field, so it is graded by what it must not be
+  # rather than by an exact string: any of software, technology or AI is a
+  # right answer, and none of them is more right than the others.
+  - name: kavalai_industry
+    input:
+      business_query: Kaval.AI (kaval.ai)
+    expected:
+      industry: {regex: '(?i)(software|technolog|artificial intelligence|\bAI\b)'}
+
+  # A bare domain instead of a name. Customers type this, and the search node
+  # has to cope with it -- if the agent only works when handed a tidy company
+  # name, it does not work.
+  - name: kavalai_from_the_domain_alone
+    input:
+      business_query: kaval.ai
+    expected:
+      name: {contains: [Kaval]}
+      website: {regex: '(?i)kaval\.ai'}
+
+  # ------------------------------------------------------- what it read
+  # Grading the substance of the summary needs a reader, not a matcher: two
+  # correct summaries share no phrasing.
+  - name: kavalai_summary_describes_the_product
+    type: judge
+    input:
+      business_query: Kaval.AI (kaval.ai)
+    expected: >-
+      The summary describes Kaval.AI as software for building AI agents -- a
+      framework, SDK, platform or toolkit for agents, workflows or LLM
+      applications. It is not a description of some other company that happens
+      to share the name, and it is not so vague ("an innovative technology
+      company") that it would fit any software business at all.
+
+  - name: kavalai_summary_matches_the_facts
+    type: judge
+    input:
+      business_query: Kaval.AI (kaval.ai)
+    expected: >-
+      The summary is consistent with the other fields of the answer: it does
+      not name a different company than `name`, a different website than
+      `website`, or a different line of business than `industry` and
+      `description`. Two or three sentences, written for someone who has not
+      heard of the company.
+
+  # The summarize node is told to copy the researched facts through unchanged.
+  # A model that "tidies" a URL or expands an abbreviation on the way past is
+  # editing evidence, which is worth its own case.
+  - name: kavalai_fields_are_not_embellished
+    type: judge
+    input:
+      business_query: Kaval.AI (kaval.ai)
+    expected: >-
+      Every non-null field reads like something copied off a web page rather
+      than composed: no placeholder text ("N/A", "unknown", "not provided"),
+      no invented-looking phone number or address, and no field padded out
+      into a sentence of marketing prose. `website` is a bare URL.
+
+  # ------------------------------------------------- the ones that must fail
+  # The research prompt says to leave a field null rather than guess at it,
+  # and this is the only kind of case that tests it. A business the web has
+  # never heard of gives the model every incentive to be helpful and write
+  # something plausible; the right answer is mostly nulls.
+  - name: unknown_business_is_not_invented
+    type: judge
+    input:
+      business_query: Vorrembling Tsakumets Kringlefabrik OU
+    expected: >-
+      The answer does not invent an identity for a business it could not find.
+      `address`, `website`, `phone` and `owners` are null rather than filled in
+      with plausible-looking values, and the description and summary say the
+      business could not be found or that nothing is known about it, instead of
+      describing a company as though it exists.
+
+  # Same shape, one step harder: a name that reads like a real company and
+  # will return search results -- about other companies. Answering with the
+  # facts of a near-match is the failure being graded, and it is the one that
+  # looks most like success.
+  - name: near_match_is_not_passed_off_as_the_company
+    type: judge
+    input:
+      business_query: Kaval.AI Industries Incorporated of Cleveland Ohio
+    expected: >-
+      The answer either reports that this exact business could not be found,
+      or is explicit that what it found is Kaval.AI, the AI agent software
+      company, rather than presenting a Cleveland manufacturer's details as
+      fact. It does not attach an invented address, phone number or ownership
+      in Ohio to anything.
+
+  # ------------------------------------------------------------ generality
+  # One well-known company, to keep the suite honest: cases that only ever run
+  # against Kaval.AI would still pass if the agent had learned the answer.
+  - name: another_company_is_researched_the_same_way
+    input:
+      business_query: Anthropic
+    expected:
+      name: {contains: [Anthropic]}
+      website: {regex: '(?i)anthropic\.com'}
+      industry: {regex: '(?i)(software|technolog|artificial intelligence|\bAI\b)'}

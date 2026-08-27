@@ -1,14 +1,20 @@
-"""Regression tests for the business info example.
+"""Regression tests for the business info example, next to what they test.
 
-``examples/business_info_agent.py`` doubles as the script that fills a demo
-agent database for the backoffice, so both its workflow shape and the rows the
-engine writes for it are worth protecting. The workflow runs here against a
-throwaway SQLite database with fake tools and a fake LLM, so no network,
-Crawl4AI service or Postgres is involved.
+``business_info.py`` is the workflow, ``research_companies.py`` runs a list of
+companies through it, and ``eval_cases.yaml`` grades the server in
+``business_info_in_memory.py``. The workflow shape, the rows the engine writes
+and the case file are all worth protecting — an example that quietly stopped
+working is worse than no example.
+
+These are not the evaluation: they run the workflow against a throwaway SQLite
+database with fake tools and a fake LLM, so they need no network, no Crawl4AI
+browser and no API key. ``eval_cases.yaml`` is what grades the agent's answers,
+and it needs a running server.
 """
 
 import json
 from importlib import import_module
+from pathlib import Path
 
 import pytest
 from sqlalchemy import func, select
@@ -17,12 +23,16 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from kavalai import pythontool
 from kavalai.agent_service import AgentService
 from kavalai.db import Agent, Base, ChatMessage, ModelCallStat, Run, Session, Task
+from kavalai.eval.eval_runner import load_suite
 from kavalai.llm_clients.base_client import BaseLlmClient
 from kavalai.llm_clients.base_client import ModelCallStat as LlmModelCallStat
 from kavalai.tools.webtools.crawl4ai import WebSearchResponse, WebSearchResult
-from kavalai.workflow.tasklog.postgres import PostgresTaskLogger
 
-demo = import_module("examples.business_info_agent")
+workflow = import_module("examples.business_info_agent.business_info")
+demo = import_module("examples.business_info_agent.research_companies")
+server = import_module("examples.business_info_agent.business_info_in_memory")
+
+CASES = Path(__file__).resolve().parent / "eval_cases.yaml"
 
 INFO = {
     "name": "Kaval.AI",
@@ -82,7 +92,7 @@ class _FakeClient(BaseLlmClient):
                     "instructions": "Crawl the official site.",
                     "tool_calls": [
                         {
-                            "name": f"python://{demo.CRAWL_TOOL}",
+                            "name": f"python://{workflow.CRAWL_TOOL}",
                             "literal_args": json.dumps({"url": "https://example.com"}),
                             "call_id": "c0",
                         }
@@ -135,17 +145,21 @@ def demo_env(monkeypatch, session_maker):
     here = __name__
 
     monkeypatch.setattr(
-        demo,
+        workflow,
         "TOOLS",
         {
-            demo.SEARCH_TOOL: f"{here}.fake_web_search",
-            demo.CRAWL_TOOL: f"{here}.fake_crawl_url",
+            workflow.SEARCH_TOOL: f"{here}.fake_web_search",
+            workflow.CRAWL_TOOL: f"{here}.fake_crawl_url",
         },
     )
-    monkeypatch.setattr(demo, "open_agent_service", lambda: AgentService(maker))
+
+    async def open_agent_service():
+        return AgentService(maker)
+
+    monkeypatch.setattr(demo, "open_agent_service", open_agent_service)
 
     state = {"fail": False}
-    real_build_engine = demo.build_engine
+    real_build_engine = workflow.build_engine
 
     def build_engine(**kwargs):
         engine = real_build_engine(**kwargs)
@@ -164,7 +178,7 @@ async def _count(maker, model):
 
 
 def _engine():
-    return demo.build_engine(
+    return workflow.build_engine(
         model="fake/model",
         max_steps=4,
         search_results=3,
@@ -194,10 +208,10 @@ def test_workflow_is_a_search_research_summarize_pipeline():
     ]
 
     nodes = {n.name: n for n in graph.nodes}
-    assert nodes["search"].tool == f"python://{demo.SEARCH_TOOL}"
+    assert nodes["search"].tool == f"python://{workflow.SEARCH_TOOL}"
     assert nodes["search"].output == "search_results"
     # The research agent may crawl pages but not re-run the search.
-    assert nodes["research"].allowed_tools == [f"python://{demo.CRAWL_TOOL}"]
+    assert nodes["research"].allowed_tools == [f"python://{workflow.CRAWL_TOOL}"]
     assert nodes["research"].output == "business_info"
     # Each company is researched from scratch.
     assert nodes["summarize"].use_history is False
@@ -225,7 +239,7 @@ async def test_run_is_recorded_for_every_company(demo_env):
         agent = (await session.execute(select(Agent))).scalars().one()
         sessions = (await session.execute(select(Session))).scalars().all()
 
-    assert agent.name == demo.AGENT_NAME
+    assert agent.name == workflow.AGENT_NAME
     # The stored graph is what lets the backoffice draw the workflow.
     assert agent.workflow["nodes"][1]["name"] == "search"
     assert {s.external_id for s in sessions} == {
@@ -274,9 +288,9 @@ async def test_run_records_the_profile_tasks_and_tokens(demo_env):
 
     # A function node and an agent's own tool call are both findable by URI,
     # which is what lets one assertion cover "was this tool ever called".
-    assert by_name["search"].tool_uri == f"python://{demo.SEARCH_TOOL}"
+    assert by_name["search"].tool_uri == f"python://{workflow.SEARCH_TOOL}"
     crawl = by_name["webtools.crawl_url"]
-    assert crawl.tool_uri == f"python://{demo.CRAWL_TOOL}"
+    assert crawl.tool_uri == f"python://{workflow.CRAWL_TOOL}"
     # The agent step is a field on the row, not a level of nesting.
     assert crawl.parent_task_name == "research"
     assert crawl.inputs["step"] == 0
@@ -325,3 +339,63 @@ async def test_no_db_flag_skips_persistence(demo_env):
 
     assert await _count(maker, Run) == 0
     assert await _count(maker, Agent) == 0
+
+
+# -- the evaluated server and its case file ----------------------------------
+
+
+def test_server_serves_the_same_workflow():
+    """The evaluated server is the example workflow, not a copy of it.
+
+    ``kavalai-eval`` discovers the agent's input and output types from the
+    served OpenAPI spec, so the spec is the part of the server the case file
+    depends on.
+    """
+    app = server.create_app(_engine())
+
+    assert server.PORT == 25200
+    assert app.state.engine.graph.name == workflow.AGENT_NAME
+
+    spec = app.openapi()
+    assert {"/run_agent", "/stream_agent"} <= set(spec["paths"])
+    schemas = spec["components"]["schemas"]
+    assert "business_query" in schemas["BusinessQuery"]["properties"]
+    assert "summary" in schemas["BusinessProfile"]["properties"]
+
+
+def test_eval_cases_fit_the_agents_input_type():
+    """Every case can actually be sent to this agent.
+
+    The evaluator validates a case's input against the agent's own input type
+    before it sends it, so a mistyped field is a case that never runs. Checking
+    it here means the suite is known to be runnable without an agent, an API
+    key or a network.
+    """
+    suite = load_suite(CASES)
+    assert suite.name == "business-info-agent"
+    assert len(suite.cases) >= 5
+
+    for case in suite.cases:
+        workflow.BusinessQuery(**case.input)
+
+    # Judged cases carry a criterion; literal ones name output fields that
+    # exist. A matcher on a field the agent never returns always fails.
+    fields = set(workflow.BusinessProfile.model_fields)
+    for case in suite.cases:
+        if case.type == "judge":
+            assert isinstance(case.expected, str) and case.expected.strip()
+        else:
+            assert set(case.expected) <= fields, case.name
+
+
+def test_eval_cases_grade_kavalai_and_a_refusal():
+    """The suite covers the two behaviours worth protecting.
+
+    Facts about Kaval.AI are what the agent must find; leaving a field null for
+    a business that does not exist is what it must not paper over. A suite that
+    only asked for facts would pass an agent that invents them.
+    """
+    names = [case.name for case in load_suite(CASES).cases]
+
+    assert any(name.startswith("kavalai_") for name in names)
+    assert "unknown_business_is_not_invented" in names

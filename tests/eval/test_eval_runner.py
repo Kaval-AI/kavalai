@@ -1,7 +1,6 @@
 """The YAML suite: what it accepts, how it runs, and what the CLI returns."""
 
 import json
-from pathlib import Path
 
 import pytest
 import yaml
@@ -26,8 +25,6 @@ from kavalai.eval.eval_runner import (
 )
 from kavalai.eval.judge_evaluator import JudgeVerdict
 from tests.eval.conftest import FakeJudge, agent_transport
-
-REPO = Path(__file__).resolve().parent.parent.parent
 
 SUITE = {
     "name": "demo",
@@ -359,10 +356,3 @@ def test_no_auth_flag_means_no_credentials(suite_file, monkeypatch):
 
     assert seen["username"] is None and seen["password"] is None
     assert seen["tag"] is None
-
-
-def test_the_shipped_green_village_cases_are_a_valid_suite():
-    suite = load_suite(REPO / "examples" / "green_village" / "eval_cases.yaml")
-
-    assert suite.cases
-    assert {c.type for c in suite.cases} == {"simple", "judge"}

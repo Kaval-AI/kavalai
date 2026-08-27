@@ -43,7 +43,7 @@ def _support_agent_graph(repo_root: Path):
 
     from kavalai.workflow import WorkflowGraph
 
-    path = repo_root / "examples" / "v2_workflow_support_agent.yaml"
+    path = repo_root / "examples" / "support_agent" / "support_agent.yaml"
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     return WorkflowGraph(**data)
 

@@ -18,7 +18,7 @@ the environment:
 
 .. code-block:: bash
 
-   export KAVALAI_AGENT_WORKFLOW_PATH=examples/v2_workflow_support_agent.yaml
+   export KAVALAI_AGENT_WORKFLOW_PATH=examples/support_agent/support_agent.yaml
    export KAVALAI_DB_URI=postgresql://user:pass@localhost:5432/kavalai
    export KAVALAI_DB_SCHEMA=agents
    export OPENAI_API_KEY=sk-...
@@ -27,7 +27,7 @@ the environment:
 
 .. code-block:: text
 
-   INFO | Loading workflow from examples/v2_workflow_support_agent.yaml.
+   INFO | Loading workflow from examples/support_agent/support_agent.yaml.
    INFO | Starting agent <Support agent>.
    INFO: Uvicorn running on http://0.0.0.0:10000 (Press CTRL+C to quit)
 

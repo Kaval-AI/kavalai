@@ -1,4 +1,4 @@
-"""``examples/chat_client/chat_client.py`` — the terminal chat client."""
+"""``chat_client.py`` — the terminal chat client, tested beside the example."""
 
 import json
 

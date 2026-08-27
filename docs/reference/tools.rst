@@ -103,9 +103,11 @@ Returns ``query``, ``success``, ``error_message`` and ``results`` — a list of
    ``docker-compose.yml`` includes a ``crawl4ai`` service if you would rather
    run the crawler as a container.
 
-The pair is combined in ``examples/business_info_agent.py``: a search node finds
-candidate pages, an agent node restricted to the crawl tool reads the promising
-ones, and an LLM node writes the summary.
+The pair is combined in ``examples/business_info_agent/business_info.py``: a
+search node finds candidate pages, an agent node restricted to the crawl tool
+reads the promising ones, and an LLM node writes the summary. The case file
+beside it grades what that agent reports about a company it cannot answer from
+memory.
 
 HTTP
 ----
