@@ -280,16 +280,18 @@ it would silently change the order of side effects the author wrote down. See
 with no network at all, so branching logic can be exercised in continuous
 integration at no cost. See :doc:`../guides/safety`.
 
-**Evaluation asserts on what the run did, not only on what it said.** Because
-the runtime owns the run, a case can assert that a tool was *not* called, which
-arm a branch took and on what value, or that the retrieved fact was the right
-one — and it can do that against a stubbed world, so a suite grading a workflow
-with side effects checks the database rows and the sent mail rather than the
-prose about them. LangSmith and agentevals offer trajectory evaluation but need
-their SDK inside your process and their service outside it; pydantic-evals and
-promptfoo grade inputs and outputs. Datasets, personas and the accepted
-baseline are files in your repository, so a behaviour change is a diff in code
-review rather than a number in a dashboard. See :doc:`../guides/evaluation`.
+**Evaluation grades the deployment, and needs no service.** A suite is one
+YAML file of cases run against an agent server that is already up: the
+evaluators discover its input and output types from its OpenAPI specification
+and judge what a caller would see, so the artefact under test is the one you
+are about to promote rather than a graph reassembled in a test process. Which
+agent is graded is named on the command line and never in the file, which is
+what makes two model versions comparable. LangSmith and agentevals need their
+SDK inside your process and their service outside it; pydantic-evals and
+promptfoo grade inputs and outputs as this does, without the sessions the
+graded runs leave behind in your own database. Cases are files in your
+repository, so a behaviour change is a diff in code review rather than a number
+in a dashboard. See :doc:`../guides/evaluation`.
 
 **It runs in a browser.** Engine, model and embeddings execute client-side over
 WebGPU and Pyodide — no server, no API key, no data leaving the device. Nothing

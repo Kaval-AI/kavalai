@@ -74,6 +74,28 @@ common_web = [
     "pyodide-http",
 ]
 
+# Local embedding on an NVIDIA GPU. `fastembed-gpu` is the same library under
+# the same import name as `fastembed`, built against `onnxruntime-gpu` instead
+# of `onnxruntime` --- the two therefore cannot be installed side by side,
+# which is why this is its own extra rather than part of `common`. Swap the
+# CPU package for it:
+#
+#     uv pip uninstall fastembed
+#     uv pip install "kavalai[common,gpu]"
+#
+# No code or configuration changes: FastEmbed defaults to `cuda=Device.AUTO`
+# and selects the CUDA execution provider when one is available, so
+# `fastembed/<model>` keeps working and simply runs on the GPU. Force the
+# choice by registering the provider with `cuda=True` / `device_ids=[…]`,
+# which `FastEmbedClient` passes straight to FastEmbed.
+#
+# Unpinned on purpose, but check the card first: CUDA 13 dropped compute
+# capability below 7.5, so on a Pascal or Volta GPU pin an `onnxruntime-gpu`
+# built against CUDA 12 instead of taking the newest wheel.
+gpu = [
+    "fastembed-gpu",
+]
+
 # Test tooling. The suite exercises the real provider SDKs, servers and native
 # deps, so it pulls in `common` rather than repeating that list.
 test = [

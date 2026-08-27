@@ -17,4 +17,5 @@ variables instead? Those are in :doc:`../reference/index`.
    llm_clients
    functionkernel
    server
+   eval
    backoffice

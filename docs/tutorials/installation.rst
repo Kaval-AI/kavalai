@@ -42,10 +42,38 @@ browser. Almost everyone wants ``common`` on top of it.
    * - ``kavalai[common_web]``
      - The browser counterpart, for running the core under Pyodide / WebLLM.
        See :doc:`run_in_browser`.
+   * - ``kavalai[gpu]``
+     - Local embedding on an NVIDIA GPU. Replaces the CPU ``fastembed``
+       rather than adding to it --- see below.
    * - ``kavalai[test]``
      - Test tooling. Pulls in ``common``; this is what CI installs.
    * - ``kavalai[docs]``
      - Sphinx, the theme and the notebook kernel, for building these docs.
+
+Embedding on a GPU
+^^^^^^^^^^^^^^^^^^
+
+``fastembed`` runs the local embedding models on the CPU. ``fastembed-gpu`` is
+the same library under the same import name, built against ``onnxruntime-gpu``,
+so the two cannot be installed together --- the GPU extra *replaces* the CPU
+package instead of adding to it:
+
+.. code-block:: bash
+
+   uv pip uninstall fastembed
+   uv pip install "kavalai[common,gpu]"
+
+Nothing else changes. FastEmbed defaults to ``cuda=Device.AUTO`` and selects
+the CUDA execution provider when one is available, so a model name like
+``fastembed/BAAI/bge-small-en-v1.5`` keeps working and simply runs on the GPU.
+To be explicit instead, register the provider with ``cuda=True`` (and
+``device_ids=[0]`` to pick a card):
+:class:`~kavalai.llm_clients.embeddings.FastEmbedClient` passes both straight
+through to FastEmbed.
+
+Check the card before taking the newest wheel: CUDA 13 dropped compute
+capability below 7.5, so a Pascal or Volta GPU needs an ``onnxruntime-gpu``
+built against CUDA 12.
 
 From source
 ^^^^^^^^^^^

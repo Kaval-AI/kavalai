@@ -194,9 +194,8 @@ test, with no database at all:
        print(row.seq, row.name, row.node_type, row.tool_uri or "")
 
 It overrides the engine's logger for that run only, so one engine can serve many
-concurrent runs that each want their own trace. This is what the evaluation
-runner uses, and it is why trajectory assertions need no database — see
-:doc:`evaluation`.
+concurrent runs that each want their own trace — which is how a test can assert
+on what a run *did* with no database anywhere near it.
 
 
 .. _observability-external-id:
@@ -210,12 +209,14 @@ structured prefix, which is a convention worth respecting:
 
 .. code-block:: text
 
-   eval:{suite}:{tag}:{case}:{repeat}
-   eval:bakery-acceptance:pr-412:vague_quantity:0
+   eval:{tag}:{case}
+   eval:pr-412:missing_quantity
 
 ``LIKE 'eval:%'`` then separates test traffic from real traffic in one
-predicate, and the backoffice's **External ID** filter turns a failing case in a
-result file into the conversation that produced it.
+predicate; ``LIKE 'eval:pr-412:%'`` narrows it to one experiment, which is what
+``--tag`` is for. The backoffice's **External ID** filter turns a failing case
+in a run's output into the conversation that produced it — see
+:doc:`evaluation`.
 
 .. warning::
 

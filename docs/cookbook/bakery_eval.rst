@@ -32,14 +32,15 @@ Five files
    * - ``bakery_in_memory.py``
      - Serves it, recording sessions in an in-memory SQLite database.
    * - ``bakery_real_db.py``
-     - Serves the same graph, recording sessions in Postgres.
+     - Serves the same graph, recording sessions in Postgres — and, because it
+       also wires a ``PostgresTaskLogger``, one task row per node as well.
    * - ``eval_cases.yaml``
      - Twenty-six acceptance cases for ``kavalai-eval``.
 
-The two server modules are the point of having two: they differ only in where
-the agent's *sessions* are recorded, never in what the assistant does. Each
-carries its own ``build_engine`` and ``create_app`` so it reads top to bottom
-on its own. Same YAML, same tools, same replies.
+The two server modules are the point of having two: they differ in where the
+agent's runs are recorded and how much of each run is kept, never in what the
+assistant does. Each carries its own ``build_engine`` and ``create_app`` so it
+reads top to bottom on its own. Same YAML, same tools, same replies.
 
 
 The one decision that matters
@@ -158,7 +159,7 @@ outcomes apart. So the answer carries the outcome as data:
              on 2026-09-10. How many would you like?"}
 
 A model wrote ``subject`` and ``body``. Python decided ``status``, ``order_id``
-and ``missing``. That is what lets twenty of the twenty-nine cases be literal
+and ``missing``. That is what lets nineteen of the twenty-six cases be literal
 comparisons instead of judgements — the outcome of a run is a value to compare,
 not prose to interpret.
 
@@ -233,7 +234,8 @@ and output types from the server's OpenAPI spec. It knows nothing about the
 engine, the YAML file or the order book — which is why the same cases can be
 pointed at the in-memory deployment, at the Postgres one, or at staging.
 
-A case is ``simple`` unless it says otherwise:
+A case is ``simple`` unless it says otherwise. Every matcher it may use is in
+:doc:`../reference/eval_yaml`:
 
 .. code-block:: yaml
 

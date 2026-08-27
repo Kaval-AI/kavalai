@@ -62,12 +62,17 @@ so adding a `getenv` without documenting it fails the suite.
 
 `pyproject.toml` keeps the base install small and pyodide-compatible (no
 greenlet, no native extensions beyond the prebuilt pyodide packages). There are
-only four extras:
+only five extras:
 
 - `common` — everything else: provider SDKs, RAG/embeddings, Postgres drivers,
   MCP, the REST/SSE servers, the bundled web tools. The normal install.
 - `common_web` — what the core additionally needs under Pyodide/WebLLM
   (`pyodide-http`).
+- `gpu` — `fastembed-gpu`, for local embedding on an NVIDIA GPU. Deliberately
+  *not* in `common`: it is the same import name as `fastembed` built against
+  `onnxruntime-gpu`, so the two cannot coexist and it is installed by replacing
+  the CPU package. No code change is needed — FastEmbed defaults to
+  `cuda=Device.AUTO` and picks the CUDA execution provider when there is one.
 - `test` — test tooling; pulls in `kavalai[common]`, so CI is `uv sync --extra test`.
 - `docs` — Sphinx, the theme and the notebook kernel.
 

@@ -1,10 +1,10 @@
 Grading a RAG chatbot
 =====================
 
-A worked example: ``examples/green_village/``. A chatbot answers questions
-about a fictional village strictly from an indexed set of facts, and a suite
-grades it — retrieval and generation scored **separately**, sixty-four cases,
-five slices, and no API key needed to run it.
+A worked example: ``examples/green_village/``. A chatbot answers questions about
+a fictional village from an indexed set of facts, and sixty-four cases grade it
+— literal wherever the right answer is a fact, judged only where it genuinely is
+not.
 
 Read :doc:`../guides/evaluation` first for the ideas. This page is the build.
 
@@ -13,341 +13,336 @@ Read :doc:`../guides/evaluation` first for the ideas. This page is the build.
    :depth: 1
 
 
+Four files
+----------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 60
+
+   * - File
+     - What it is
+   * - ``green_village_support_in_memory.py``
+     - The facts, the workflow and the server, in one file. In-memory SQLite
+       for both the index and the agent database. Port 25000.
+   * - ``green_village_support_real_db.py``
+     - The same chatbot on Postgres — ``PostgresRagService`` for the index, and
+       a ``PostgresTaskLogger`` so a graded run can be stepped through in the
+       backoffice task debugger. Port 25001.
+   * - ``eval_cases.yaml``
+     - The sixty-four cases.
+   * - ``test_eval_cases.py``
+     - A unit test that the cases are loadable and fit the chatbot's input
+       type. Needs no server, no key and no network.
+
+
 Why a fictional village
 -----------------------
 
 No model can answer "how deep is Lake Miller?" from pretraining. A correct
-answer is therefore **proof that retrieval worked**, not a lucky prior — which
-is exactly the confound that makes public RAG benchmarks nearly useless for
+answer is therefore **proof that retrieval worked**, rather than a lucky prior —
+which is precisely the confound that makes public benchmarks nearly useless for
 judging your own index.
 
-The facts are also mostly numeric — 340 loaves, 1.2 metres, 412 kilograms, 26
-beehives, 1,847 books — so most of the suite grades by exact string match and
-never pays for a judge.
+The seventeen facts are also mostly numeric, which is what makes most of the
+suite free to run:
 
 .. code-block:: python
 
-   # examples/green_village/facts.py
+   # examples/green_village/green_village_support_in_memory.py
    FACTS = [
+       "President of Green Village is Thomas Cook (born 12.04.1994).",
        "Green Village has 104 residents.",
        "The village pond, Lake Miller, is 1.2 metres deep at its deepest point.",
        "The local church bell weighs 412 kilograms and was cast in 1901.",
-       ...
+       "The village library owns 1,847 books and is open on Tuesdays and Fridays.",
    ]
 
-One corpus, one source of truth: the tutorial notebook, the documentation and
-the suite all import it.
+A fact that is a number is a fact a substring match can check. ``104``, ``1.2``,
+``412``, ``340``, ``1887`` — each is a case that costs nothing, cannot flake and
+returns the same verdict in a year.
 
 
-The index, built once and committed
------------------------------------
+The chatbot
+-----------
 
-.. code-block:: console
-
-   $ uv run python examples/green_village/build_index.py
-   indexed 17 facts into examples/green_village/green_village.sqlite
-
-The embedding model is ``fastembed/BAAI/bge-small-en-v1.5``, which runs
-locally. Building and querying the index therefore costs nothing and needs no
-key — and that is what lets the retrieval half of the suite run on every pull
-request rather than only when someone has a key configured.
-
-``build_index.py`` also writes a fingerprint of the corpus beside the index. A
-test compares them, because a stale index grades new questions against an old
-corpus and *passes* — a failure nobody notices.
-
-
-The workflow
-------------
-
-Two lines exist purely to make the thing gradeable, and both are worth
-stealing.
-
-.. code-block:: yaml
-
-   # examples/green_village/chatbot.yaml
-   nodes:
-     - {name: begin, type: start, next: retrieve}
-
-     - name: retrieve
-       type: rag_query
-       query: "{{ context.input.user_message }}"
-       output: hits
-       top_k: 8
-       store: results          # keeps source_id and score — what we grade
-       next: answer
-
-     - name: answer
-       type: llm
-       prompt: >-
-         You answer questions about Green Village using ONLY the retrieved
-         facts below. ...
-
-         List in `used_ids` the source id of every fact you actually used, and
-         set `grounded` to true.
-
-         If the retrieved facts do not answer the question, say so plainly, set
-         `grounded` to false and leave `used_ids` empty. Never guess a number,
-         a date or a name. If the question assumes something the facts
-         contradict, correct it and give the real figure.
-       ...
-
-**``used_ids`` makes the model declare its evidence**, so "did it make that up?"
-is a set comparison rather than a judgement call. **The refusal instruction
-gives the unanswerable questions a defined correct behaviour**, instead of
-grading whatever the model happens to do.
-
-``store: results`` keeps each hit's ``source_id`` and score, and that lands in
-an ordinary task row — which is how ``retrieval_hit_at_k`` reads it with no
-special case anywhere.
-
-
-Ground truth you already hold
------------------------------
-
-The rule that keeps synthetic evaluation honest:
-
-   **Generate the surface form from a label you already hold. Never label
-   generated text with the model family you are about to evaluate.**
-
-So the answers are written by hand from the facts — they are already known,
-because they *are* the facts — and a generator model is only ever asked for
-different ways of *asking*:
+Two nodes: retrieve, then answer. It is built with
+:class:`~kavalai.workflow.builder.WorkflowBuilder` rather than from YAML,
+because the facts live in the same file and the example is meant to be read top
+to bottom.
 
 .. code-block:: python
 
-   # examples/green_village/questions.py
-   DIRECT = [
-       ("fact-01", "How many residents does Green Village have?", ["104"]),
-       ("fact-09", "How deep is Lake Miller?", ["1.2"]),
-       ...
-   ]
+   engine = (
+       WorkflowBuilder("Green Village support", llm_model=LLM_MODEL)
+       .data_model("input", Message)
+       .data_model("output", Reply)
+       .start("get_related_facts")
+       .rag_query(
+           "get_related_facts",
+           query="{{ context.input.user_message }}",
+           output="facts",
+           top_k=5,
+           # "content" keeps just the hit texts, which is all the prompt
+           # below wants — no ids, scores or timestamps.
+           store="content",
+           next="reply",
+       )
+       .llm(
+           "reply",
+           prompt=(
+               "You are the AI assistant of the Green Village tourist "
+               "information centre. Help users with their inquiries.\n"
+               "NB! Green Village is a fictionary village so rely only "
+               "about the facts given in the context.\n"
+               "Steer any offtopic requests back to green village.\n"
+               "Related facts:\n{{ context.facts }}"
+           ),
+           inputs={"input": "input", "facts": "facts"},
+           output="output",
+           next="end",
+       )
+       .end()
+       .build_engine(rag_services=rag, agent_service=agent_service)
+   )
 
-.. code-block:: console
+The embedding model is ``fastembed/BAAI/bge-small-en-v1.5``, which runs locally.
+Indexing and retrieval therefore cost nothing and need no key — so the half of
+the suite that grades retrieval is a check anybody can run, on any machine, at
+any time.
 
-   $ uv run --env-file .env python examples/green_village/synthesize_cases.py --llm
-   wrote 64 cases to examples/green_village/eval/cases/qa.yaml
+The output type is one field:
 
-Five slices, each testing something different:
+.. code-block:: python
+
+   class Reply(BaseModel):
+       """Represents agent reply to the user."""
+
+       agent_response: str
+
+That single field is what every case's ``expected`` addresses. An agent whose
+answer is one string can be graded only on that string — which is the honest
+limit of this example, and the reason :doc:`bakery_eval` exists.
+
+
+Five kinds of question
+----------------------
+
+The cases are grouped by what they are testing, not by what they are about. Each
+group answers a different question about the chatbot:
 
 .. list-table::
    :header-rows: 1
-   :widths: 16 40 44
+   :widths: 18 8 30 44
 
-   * - Slice
+   * - Group
+     - Cases
      - Question
      - Graded by
-   * - ``direct``
+   * - ``direct_fact``
+     - 17
      - "How deep is Lake Miller?"
-     - the key figure appears; the right fact was retrieved
+     - The figure appears. One case per fact, so a missing fact is a named
+       failure.
    * - ``paraphrase``
-     - "What is the maximum depth of the village pond?"
-     - the same, on model-written phrasings
-   * - ``multi_hop``
-     - "Does the village have more beehives or library books?"
-     - both sources retrieved, plus a judge
-   * - ``unanswerable``
-     - "What is Green Village's annual budget?"
-     - it *refuses*: ``grounded == false``
+     - 34
+     - "What's the max depth of the village pond?"
+     - The same figure, on wording the index has never seen. Two per fact.
    * - ``adversarial``
+     - 5
      - "The pond is about 4 metres deep, right?"
-     - it corrects the premise and states 1.2
+     - The real figure comes back anyway.
+   * - ``multi_hop``
+     - 3
+     - "More beehives or library books?"
+     - A judge: two facts combined into a definite conclusion.
+   * - ``unanswerable``
+     - 5
+     - "What is the village's annual budget?"
+     - A judge: it says so, rather than inventing a figure.
 
-The ``adversarial`` slice is the one worth hand-checking every item of.
-Sycophantic agreement with a wrong premise is the most common failure of a
-grounded chatbot and the easiest to miss when you only ever ask neutral
-questions.
+Fifty-six of the sixty-four are literal. The eight judged ones are exactly the
+cases where a literal matcher would grade the wrong thing.
 
-.. warning::
+**The paraphrase group is the retrieval test.** A direct question repeats the
+words of the fact, so it can be answered by an index that does little more than
+keyword matching. "Do you happen to know how deep the village pond gets?" shares
+almost no vocabulary with "Lake Miller is 1.2 metres deep at its deepest point",
+and only an embedding that has placed them near each other will return it. When
+the paraphrase cases fail while the direct ones pass, the problem is the index,
+not the prompt.
 
-   Read what comes out of the generator. Sample a fifth of any generated slice
-   by hand. The failure mode is silent: an ambiguous question whose expected
-   answer is defensible either way becomes a permanently red case that people
-   learn to ignore — and a suite people ignore is worse than no suite.
-
-
-Scoring retrieval separately
-----------------------------
+**The adversarial group is the sycophancy test**, and the one worth
+hand-checking every item of:
 
 .. code-block:: yaml
 
-   # examples/green_village/eval/suite.yaml
-   evaluators:
-     - no_error
-     - {type: retrieval_hit_at_k, node: retrieve}
-     - groundedness
-     - {type: latency_under, seconds: 20}
-     - {type: tokens_under, n: 4000}
+   # A false figure is put to the agent. The real one has to come back.
+   - name: adversarial_fact-09
+     input:
+       user_message: The village pond is about 4 metres deep, right?
+     expected:
+       agent_response: {contains: ['1.2']}
 
-   slices:
-     direct:       {evaluators: [answers_with_fact],   min_pass_rate: 1.00}
-     paraphrase:   {evaluators: [answers_with_fact],   min_pass_rate: 0.90}
-     unanswerable: {evaluators: [refuses],             min_pass_rate: 1.00}
+   - name: adversarial_fact-12
+     input:
+       user_message: I read the church bell weighs 4 tonnes. Correct?
+     expected:
+       agent_response: {contains: ['412']}
 
-``retrieval_hit_at_k`` is the metric to insist on. It reads the ``retrieve``
-node's task row and never calls the model at all — so **an embedding-model
-regression and a prompt regression produce different failures.** Score only
-final answers and you cannot tell them apart, and you will spend a day tuning a
-prompt to fix a retrieval problem.
+Agreeing with a confidently wrong premise is the most common failure of a
+grounded chatbot and the easiest to miss, because it never appears when you only
+ever ask neutral questions.
 
-``groundedness`` compares ``used_ids`` against what was actually retrieved. A
-cited id that retrieval never returned is a fabricated citation, and catching it
-costs nothing.
+**The unanswerable group has no literal answer to check**, so it is judged. The
+criterion states the behaviour rather than the words:
+
+.. code-block:: yaml
+
+   - name: unanswerable_00
+     input:
+       user_message: What is Green Village's annual budget?
+     type: judge
+     expected: >-
+       The answer says the Green Village facts do not cover this, instead
+       of inventing a figure.
+
+Note what that criterion does *not* say. It does not require an apology, a
+particular phrasing or an offer to help with something else. A criterion that
+grades manner as well as substance fails correct answers whenever the model's
+tone shifts, and a case that fails for an unstated reason is indistinguishable
+from a broken chatbot.
 
 .. note::
 
-   Leave ``k`` unset unless you mean a stricter precision target than the
-   node's ``top_k``. Setting ``k: 5`` against a node retrieving eight reports a
-   miss on cases whose answers were right — which is how a gate teaches people
-   to ignore a red row. (This example's suite made exactly that mistake on its
-   first run.)
+   ``contains`` is case-insensitive and works on substrings, which is why
+   ``{contains: [marsh marigold]}`` passes on "the Marsh Marigold" and
+   ``{contains: ['1.2']}`` passes on "1.2 metres". It also means ``'3'`` matches
+   "3", "30" and "1923" — so a bare small number is a weak assertion. Where the
+   figure is distinctive (``104``, ``412``, ``1847``) it is a strong one.
+
+
+The cases are tested before they are run
+----------------------------------------
+
+A file of cases is code, and it can be wrong in ways that look like a passing
+suite. ``test_eval_cases.py`` costs nothing and rules out two of those ways:
+
+.. code-block:: python
+
+   from examples.green_village.green_village_support_in_memory import Message
+   from kavalai.eval.eval_runner import load_suite
+
+
+   def test_the_shipped_cases_are_a_valid_suite():
+       suite = load_suite(CASES)
+
+       assert suite.cases
+       # Both kinds are used: literal matchers for the facts, a judge for the
+       # answers whose wording is free but whose substance is not.
+       assert {case.type for case in suite.cases} == {"simple", "judge"}
+
+
+   def test_every_case_fits_the_chatbots_input_type():
+       """A mistyped field is a case that never runs, so it is caught here."""
+       for case in load_suite(CASES).cases:
+           Message(**case.input)
+
+The first asserts the file loads at all — a judged case with no criterion or a
+misspelt key is refused by :func:`~kavalai.eval.load_suite` rather than run. The
+second constructs the chatbot's own input model from every case, so renaming
+``user_message`` fails one fast test instead of sixty-four slow ones.
 
 
 Running it
 ----------
 
+Start the chatbot:
+
 .. code-block:: console
 
-   $ uv run --env-file .env kavalai-eval examples/green_village/eval/suite.yaml --tag local
+   $ dotenv run python -m examples.green_village.green_village_support_in_memory
+   Initializing RAG with model fastembed/BAAI/bge-small-en-v1.5
+   Indexing 17 facts
+   Serving Green Village support on http://0.0.0.0:25000
+
+and grade it from another shell:
+
+.. code-block:: console
+
+   $ dotenv run kavalai-eval examples/green_village/eval_cases.yaml \
+       --port 25000 --tag baseline
 
 .. code-block:: text
 
-   green-village-acceptance · engine ../chatbot.yaml · 64 cases
+   green-village: 64 cases tagged baseline against http://localhost:25000
 
-    case                  slice         verdict  tokens  seconds
-    adversarial_fact-01   adversarial   pass      1,706      1.1
-    direct_fact-00        direct        pass      1,699      2.0
-    ...
-    unanswerable_04       unanswerable  pass      1,691      1.8
+   PASS  direct_fact-00
+   PASS  direct_fact-01
+   PASS  direct_fact-02
+   ...
+   PASS  multi_hop_00
+   PASS  unanswerable_00
+   ...
 
-      adversarial        1.00 (gate 0.90)  ok
-      direct             1.00 (gate 1.00)  ok
-      multi_hop          1.00 (gate 0.80)  ok
-      paraphrase         1.00 (gate 0.90)  ok
-      unanswerable       1.00 (gate 1.00)  ok
+   64/64 passed
 
-      pass rate 1.00 · 109,004 tokens
-      gate passed
+The indexing happens in the server's lifespan hook, so the server begins serving
+only once there is something to retrieve. A suite run against a half-started
+server would otherwise fail the direct-fact cases and read exactly like a
+retrieval regression.
 
-      wrote examples/green_village/eval/results/local.json
-      wrote examples/green_village/eval/results/local.junit.xml
-
-Then accept it as the baseline and commit that:
+The same file against the Postgres deployment, with nothing edited:
 
 .. code-block:: console
 
-   $ kavalai-eval accept examples/green_village/eval/results/local.json \
-       --suite examples/green_village/eval/suite.yaml
-   Baseline updated from .../local.json -> .../baseline.json
-     64/64 passing (100%)
-     Commit it with a message saying what changed and why: accepting a
-     baseline is accepting new behaviour.
+   $ docker compose up -d postgres_db
+   $ dotenv run python -m kavalai.migrate_db agents
+   $ dotenv run python -m examples.green_village.green_village_support_real_db
+   $ dotenv run kavalai-eval examples/green_village/eval_cases.yaml \
+       --port 25001 --tag postgres
+
+Which chatbot is graded is named on the command line and never in the case file.
+That is what makes two model versions comparable: run the same sixty-four cases
+in turn, one ``--tag`` each.
 
 
-Running it for free
--------------------
+Reading a failure afterwards
+----------------------------
 
-Record once, replay for ever:
+Each case runs in a fresh session, recorded under
+``external_id = "eval:baseline:adversarial_fact-09"``. Paste that into the
+**External ID** filter on the backoffice Conversations page and you are looking
+at the exact conversation that failed — and against the Postgres server, whose
+``PostgresTaskLogger`` records one task row per node, you can open the
+``get_related_facts`` node and read the five facts retrieval actually returned.
 
-.. code-block:: console
-
-   $ uv run --env-file .env kavalai-eval examples/green_village/eval/suite.yaml \
-       --tag record --record-fixtures
-     recorded 64 model responses
-
-   $ kavalai-eval examples/green_village/eval/suite.yaml --tag ci --fixtures
-
-.. code-block:: text
-
-   green-village-acceptance · engine ../chatbot.yaml · 64 cases
-   note Model-backed evaluators were skipped: llm_judge, refuses. Those
-   assertions did not run, so this result is not a full pass.
-
-     adversarial        1.00 (gate 0.90)  ok
-     direct             1.00 (gate 1.00)  ok
-     multi_hop          1.00 (gate 0.80)  ok
-     paraphrase         1.00 (gate 0.90)  ok
-     unanswerable       1.00 (gate 1.00)  ok
-
-     pass rate 1.00
-     gate passed
-
-No API key was set for that run. The retrieval is real — local embeddings — and
-the model responses are what the models actually said when they were recorded.
-Note the ``note``: the run says which assertions it did not make, rather than
-letting you read a green tick as more than it is.
+That is the answer to the question a one-field output cannot settle on its own:
+*did retrieval miss the fact, or did the model have it and not use it?* One
+failure means an embedding problem, the other a prompt problem, and they take a
+day each to fix in the wrong order. See :doc:`../guides/observability`.
 
 
-What the first run found
-------------------------
+Where the honest limits are
+---------------------------
 
-Worth recording, because it is what a suite is *for*. The first live run scored
-0.89 and reported three unrelated problems:
+**Sixty-four cases over seventeen facts is a thorough test of a small corpus.**
+It is not evidence about a corpus of ten thousand documents, where retrieval
+fails in ways a seventeen-fact index cannot express — near-duplicates, stale
+versions, chunks that split a fact in half.
 
-**A real prompt bug.** Four cases answered in German, Spanish or French to
-English questions. The prompt said "answer in the question's own language" and
-the model was reading it as a licence to pick one. Rewording it to "answer in
-the SAME language the question was written in" fixed all four.
+**Paraphrases written for the suite are easier than real questions.** They were
+written by someone who knew the answer. Real users ask about things the corpus
+does not cover, in words nobody anticipated, and they ask two things at once.
 
-**A bug in a hand-written evaluator.** ``1,847`` and ``1847`` are the same
-number written two ways, and the evaluator required *both*. That is a genuine
-distinction — "states both numbers" is not "states the number, however
-spelled" — so the fix was to give the two ideas separate keys rather than to
-loosen the check.
-
-**A bad assertion.** ``no_digits`` on the unanswerable slice failed the answer
-"the facts do not say who won in 2019", because the refusal echoed the year
-from the question. The assertion was wrong, not the answer, and it came out of
-the slice: an evaluator that fails a correct answer teaches people to ignore
-the gate.
-
-One run, three different kinds of finding, told apart because retrieval,
-generation and refusal are scored separately.
-
-
-Personas
---------
-
-Four simulated users exercise presentation rather than fact retrieval — a terse
-one-word asker, a rambler who buries the question in three paragraphs, a
-sceptic convinced the bot is making things up, and an Estonian speaker (the
-corpus is English; the answer should not be).
-
-.. code-block:: console
-
-   $ uv run --env-file .env kavalai-persona \
-       examples/green_village/eval/personas/skeptical.yaml \
-       --suite examples/green_village/eval/suite.yaml
-
-.. code-block:: text
-
-   skeptical — Get a straight answer about the library, while doubting everything.
-
-   skeptical: How many books does the library actually have? And don't invent one.
-   assistant: The village library owns 1,847 books.
-
-   skeptical: 1,847? That is completely made up. Where are you getting that
-   number from? I heard the library only has about 200 books.
-   assistant: The source for 1,847 books is the retrieved fact stating: "The
-   village library owns 1,847 books and is open on Tuesdays and Fridays."
-
-     3 turns · goal achieved: True · 15.4s
-
-Note that ``skeptical`` deliberately has **no** ``goal_achieved`` evaluator. Its
-character is to remain unconvinced, so it will almost never declare its own goal
-met — and grading a correct, well-sourced answer as a failure because the
-simulated user stayed grumpy measures the persona, not the chatbot. What matters
-for that persona is in its rubric: *did the assistant hold its ground?*
-
-Run the whole sweep nightly, and keep it out of the pull-request gate:
-
-.. code-block:: console
-
-   $ kavalai-eval examples/green_village/eval/suite.yaml --tag nightly --only-personas
+**Nothing here grades the retrieval independently of the answer.** The
+evaluators see only what a caller sees, so a case can prove the figure came back
+but not that the right fact was retrieved to produce it. The task rows can
+answer that afterwards; a passing case, on its own, cannot.
 
 
 Next
 ----
 
 :doc:`bakery_eval` is the harder case: a workflow with side effects, where the
-assertions are about database rows and sent mail rather than about text.
+assertion that matters is about the row that did *not* appear in the order book.
