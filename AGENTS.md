@@ -216,6 +216,9 @@ Rules that are load-bearing:
 - [`docs/guides/data_model.rst`](docs/guides/data_model.rst) — the tables and
   what each is for.
 - [`docs/reference/yaml.rst`](docs/reference/yaml.rst) — every workflow key.
+- [`docs/reference/providers.rst`](docs/reference/providers.rst) — the LLM,
+  embedding and RAG providers that ship with Kaval.AI, and how to find out
+  which models each one offers.
 - [`docs/todo.rst`](docs/todo.rst) — open questions and known gaps.
 - <https://docs.kaval.ai/llms.txt> — a machine-readable index of the published
   documentation.

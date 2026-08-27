@@ -42,6 +42,7 @@ Source: https://github.com/Kaval-AI/kaval.ai — Apache-2.0.
 
 - [Workflow YAML reference](https://docs.kaval.ai/reference/yaml.html): every key of the workflow document.
 - [Bundled tools](https://docs.kaval.ai/reference/tools.html): the tools shipped with the library.
+- [Model providers](https://docs.kaval.ai/reference/providers.html): the LLM, embedding and RAG providers that ship with the library, where each one publishes its model names, and how to list them from the SDK.
 - [Configuration](https://docs.kaval.ai/reference/config.html): every environment variable the entry points read.
 - [Python API](https://docs.kaval.ai/api/index.html): generated API documentation.
 - [Cookbook](https://docs.kaval.ai/cookbook/index.html): worked recipes, from retrieval to self-correcting loops.
