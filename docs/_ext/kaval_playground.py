@@ -16,12 +16,20 @@ Copied/staged files are not committed (see ``.gitignore``). If ``dist/`` has no
 wheel, any previously staged one is reused, and failing that the playground
 falls back to plain-Python (Pyodide stdlib) mode. Build a wheel with
 ``uv build --wheel``.
+
+The staged wheel's version is checked against ``pyproject.toml``. A wheel left
+over from an earlier version installs *its* modules in the browser, so the docs
+would run their own examples against code that no longer exists — the failure
+surfaces as a ``ModuleNotFoundError`` in the page, far from its cause. That is a
+build warning here instead (the docs build with ``-W``), so the fix is to run
+``uv build --wheel`` rather than to debug the browser.
 """
 
 from __future__ import annotations
 
 import json
 import shutil
+import tomllib
 from pathlib import Path
 
 from sphinx.application import Sphinx
@@ -39,6 +47,24 @@ WIDGET_FILES = (
     "kaval-chat.css",
     "kaval-chat.js",
 )
+
+
+def _project_version(repo_root: Path) -> str | None:
+    """Return the version declared in ``pyproject.toml``, if it can be read."""
+    pyproject = repo_root / "pyproject.toml"
+    if not pyproject.is_file():
+        return None
+    try:
+        return tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"][
+            "version"
+        ]
+    except (tomllib.TOMLDecodeError, KeyError, OSError):
+        return None
+
+
+def _wheel_version(wheel_name: str) -> str:
+    """Return the version part of a ``kavalai-<version>-py3-none-any.whl`` name."""
+    return wheel_name.split("-")[1]
 
 
 def _newest_wheel(directory: Path) -> Path | None:
@@ -94,6 +120,16 @@ def _stage_assets(app: Sphinx) -> None:
                 "the playground will run plain Python only. Build one with "
                 "`uv build --wheel`."
             )
+
+    expected = _project_version(repo_root)
+    if wheel_name and expected and _wheel_version(wheel_name) != expected:
+        logger.warning(
+            "[kaval-playground] staged wheel %s is not the current version (%s). "
+            "The docs' in-browser examples would run against stale modules — "
+            "rebuild it with `uv build --wheel`.",
+            wheel_name,
+            expected,
+        )
 
     config = {
         "wheelName": wheel_name,

@@ -15,9 +15,9 @@ Before the details, here is the artefact itself: a complete Kaval.AI workflow �
 one-node chatbot with structured output and memory — running entirely in your
 browser. No server, no API key, nothing sent anywhere.
 
-The code on the right is what the chat on the left is running; edit it and press
-run. The first load downloads the model (or takes it from the browser cache),
-so give it a moment.
+The workflow on top is what the chat below it runs: press **Run ▶** to build it,
+then talk to it — edit the code and run again to change the bot. The first load
+downloads the model (or takes it from the browser cache), so give it a moment.
 
 .. raw:: html
    :file: ../_includes/chatbot-demo.html

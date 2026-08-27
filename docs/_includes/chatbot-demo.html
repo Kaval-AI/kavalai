@@ -1,6 +1,11 @@
 <!--
-  Interactive chatbot demo for the docs landing page: the chat widget (left)
-  talks to the WorkflowBuilder chatbot defined in the playground (right).
+  Interactive chatbot demo for the docs landing page: the chat widget (below)
+  talks to the WorkflowBuilder chatbot defined in the playground (above).
+
+  The playground comes first on purpose: the workflow is what the chat runs, so
+  the reader sees (and can Run ▶) the definition before talking to it. Sending a
+  message without running builds the workflow first anyway (the bridge's
+  ensureWorkflow), but that hides the step the page is about.
 
   Single source for the demo: index.rst pulls it in with
   `.. raw:: html :file: _includes/chatbot-demo.html`, and
@@ -15,25 +20,25 @@
     display: flex;
     flex-direction: column;
     gap: 0.9rem;
-    height: 840px;
+    height: 1000px;
     margin: 1rem 0 1.5rem;
   }
   .kaval-chatbot-demo > div { min-width: 0; min-height: 0; }
-  /* The playground (code) is the larger pane on desktop. */
-  .kaval-chatbot-demo .demo-chat { flex: 1 1 36%; }
-  .kaval-chatbot-demo .demo-code { flex: 1 1 64%; }
+  /* The workflow definition sits on top; the chat that runs it below. */
+  .kaval-chatbot-demo .demo-code { flex: 1 1 58%; }
+  .kaval-chatbot-demo .demo-chat { flex: 1 1 42%; min-height: 22rem; }
   .kaval-chatbot-demo .kaval-chat,
   .kaval-chatbot-demo .kaval-pg-embed { border-radius: 0.6rem; }
-  /* Stack on narrow viewports so neither pane gets squeezed. */
+  /* Let each pane keep its natural size when the viewport is short/narrow. */
   @media (max-width: 820px) {
-    .kaval-chatbot-demo { flex-direction: column; height: auto; }
+    .kaval-chatbot-demo { height: auto; }
     .kaval-chatbot-demo > div { flex: 1 1 auto; min-height: 26rem; }
   }
 </style>
 
 <div class="kaval-chatbot-demo">
-  <div class="demo-chat" id="chatbot-chat"></div>
   <div class="demo-code" id="chatbot-code"></div>
+  <div class="demo-chat" id="chatbot-chat"></div>
 </div>
 
 <script>
@@ -91,7 +96,7 @@ workflow = (
         agent_service=AgentService(db_manager.get_sqlite_compat_sessionmaker())
     )
 )
-print("Chatbot ready — say hi in the chat on the left.")
+print("Chatbot ready — say hi in the chat below.")
 `;
 
   function whenReady(cb) {
@@ -108,15 +113,16 @@ print("Chatbot ready — say hi in the chat on the left.")
   }
 
   whenReady(function () {
-    // Right: the chatbot workflow (read it, tweak it, Run ▶ to rebuild).
+    // Top: the chatbot workflow (read it, tweak it, Run ▶ to rebuild).
     var pg = KavalPlayground.mount("#chatbot-code", {
       title: "Chatbot workflow — WorkflowBuilder + Pydantic models",
       code: CHATBOT_CODE,
       showPackages: false,
     });
 
-    // Left: the chat. The bot's input is a Message, so the bridge sends each
-    // turn as {message: ...}; its Reply.choices show up as quick-reply chips.
+    // Below it: the chat. The bot's input is a Message, so the bridge sends
+    // each turn as {message: ...}; its Reply.choices show up as quick-reply
+    // chips. ensureWorkflow builds the workflow if Run ▶ has not been pressed.
     var bridge = KavalPlayground.workflowBridge({
       inputKey: "message",
       ensureWorkflow: function () { return pg.run(); },
@@ -125,10 +131,11 @@ print("Chatbot ready — say hi in the chat on the left.")
       title: "Chat with your bot",
       placeholder: "Say something…",
       greeting:
-        "Hi! I'm a tiny chatbot running entirely in your browser. Ask me " +
-        "anything — my reply is a structured Reply, so the suggestions under " +
-        "it come straight from its choices field. Your first message downloads " +
-        "a small model, so give it a moment.",
+        "Hi! I'm the workflow above, running entirely in your browser. Press " +
+        "Run ▶ on it first (or just send a message and I'll build it myself). " +
+        "My reply is a structured Reply, so the suggestions under it come " +
+        "straight from its choices field. The first turn downloads a small " +
+        "model, so give it a moment.",
       send: bridge.send,
       onReset: bridge.reset,
     });
