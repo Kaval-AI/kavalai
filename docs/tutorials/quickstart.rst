@@ -1,8 +1,9 @@
 Quickstart
 ==========
 
-Five minutes, three steps: call a model, get structured data back, then wrap it
-in a workflow that remembers the conversation. Every output below is real.
+Four steps: call a model, get structured data back, wrap it in a workflow
+that remembers the conversation, then keep that memory in Postgres. Every
+output below is real.
 
 Readers wanting the full tour should start at :doc:`llm_clients`. Readers new
 to language models
@@ -104,7 +105,7 @@ a one-node graph buys you validation, persistence and a recorded conversation.
 
 
    async def main():
-       # In-memory tables here; PostgreSQL in production.
+       # In-memory tables here; Postgres in step 4.
        await db_manager.init_sqlite()
 
        workflow = (
@@ -167,12 +168,96 @@ Read that back a piece at a time:
    Validates the graph and returns a ready :class:`~kavalai.WorkflowEngine`.
    Passing an :class:`~kavalai.agent_service.AgentService` gives the bot
    **memory**: LLM nodes replay the session's history by default, so the next
-   turn sees this one. Here that history lives in in-memory SQLite; in
-   production the same service points at Postgres and nothing else changes.
+   turn sees this one. Here that history lives in in-memory SQLite; step 4
+   points the same service at Postgres and nothing else changes.
 
 Every run returns a :class:`~kavalai.WorkflowState` — the status, the ``trace``
 of visited nodes, the full context, the output and the token usage. It is
 JSON-serialisable and persisted, so you can reload and inspect it later.
+
+4. Store the runs in Postgres
+-----------------------------
+
+In-memory SQLite is fine for a first look, but it is gone when the process
+exits. Anything you intend to keep — chat history, runs, token usage — belongs
+in Postgres. Two things change: the tables have to exist, and the service has
+to point at them.
+
+**Start a database.** The repository's ``docker-compose.yml`` ships a
+development one, on the ``pgvector`` image so RAG works against it too:
+
+.. code-block:: bash
+
+   docker compose up -d postgres_db
+
+It listens on ``localhost:6543``, with ``kavalai_dev`` as user, password and
+database name.
+
+**Create the tables.** The schema is managed with Alembic; the agent runtime
+tables are the ``app`` set:
+
+.. code-block:: bash
+
+   python -m kavalai.migrate_db app \
+       --uri postgresql://kavalai_dev:kavalai_dev@localhost:6543/kavalai_dev \
+       --schema agents
+
+.. code-block:: text
+
+   INFO | Running 'agents' migrations (schema=agents).
+   INFO | 'agents' migrations completed successfully.
+
+The runner waits for the database to accept connections, creates the schema if
+it is missing, and upgrades to head. It is idempotent — run it again after
+every upgrade, before starting the service that uses it. Without ``--uri`` and
+``--schema`` it reads ``KAVALAI_DB_URI`` and ``KAVALAI_DB_SCHEMA``, which is
+how the Docker images are configured.
+
+Right after the migration the schema holds the runtime data model, and nothing
+else:
+
+.. code-block:: bash
+
+   docker compose exec postgres_db \
+       psql -U kavalai_dev -d kavalai_dev -c "\dt agents.*"
+
+.. code-block:: text
+
+                   List of relations
+    Schema |       Name       | Type  |    Owner
+   --------+------------------+-------+-------------
+    agents | agents           | table | kavalai_dev
+    agents | alembic_version  | table | kavalai_dev
+    agents | chat_messages    | table | kavalai_dev
+    agents | model_call_stats | table | kavalai_dev
+    agents | runs             | table | kavalai_dev
+    agents | sessions         | table | kavalai_dev
+    agents | tasks            | table | kavalai_dev
+   (7 rows)
+
+**Point the workflow at it.** Drop the ``await db_manager.init_sqlite()`` line
+from step 3 and build the session maker from the same URI instead:
+
+.. code-block:: python
+
+   session_maker = db_manager.get_sessionmaker(
+       uri="postgresql://kavalai_dev:kavalai_dev@localhost:6543/kavalai_dev",
+       schema="agents",
+   )
+   agent_service = AgentService(session_maker)
+
+Then pass that to the builder in place of the SQLite one, as
+``.build_engine(agent_service=agent_service)``.
+
+Nothing else moves — the graph, the models and the ``run()`` call are
+unchanged. The agent, the session, every run and every model call are now rows
+you can query, and the next turn of the conversation picks up the history from
+there.
+
+The backoffice keeps its own tables in a second, independent set
+(``python -m kavalai.migrate_db backoffice``, reading ``KAVALAI_BO_DB_URI``
+and ``KAVALAI_BO_DB_SCHEMA``); the two may share one Postgres instance or not.
+See :doc:`../deploy/index`.
 
 Where to next
 -------------
@@ -185,3 +270,4 @@ Pick whichever matches what you are building:
 * :doc:`rag` — answer from your own documents.
 * :doc:`serving` — put it behind an HTTP endpoint.
 * :doc:`run_in_browser` — run the whole stack client-side, no API key.
+* :doc:`observability_storage` — what is stored, and how to read it back.
