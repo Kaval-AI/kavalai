@@ -171,11 +171,11 @@ input and output types from its OpenAPI spec (`kavalai/client.py`).
   API key.
 - `eval_runner.py` — a YAML file of cases (`type: simple` or `type: judge`),
   run in order against one server. `kavalai-eval <cases.yaml> --host … --port …
-  --auth user:password`.
+  --tag … --auth user:password`.
 
 ```bash
 uv run --env-file .env kavalai-eval \
-    examples/green_village/eval_cases.yaml --port 25000
+    examples/green_village/eval_cases.yaml --port 25000 --tag gpt-5.4-mini
 ```
 
 Exit `0` every case passed, `1` a case failed, `2` the run never reached a
@@ -194,9 +194,15 @@ Rules that are load-bearing:
   not, because judging against nothing passes on any answer at all.
 - A failing agent call fails its case with a reason instead of raising, so one
   broken case cannot end a run — but a malformed *suite* refuses to start.
-- Each case runs in its own session, and is recorded under
-  `external_id = "eval:{case}"`. `eval:` is reserved; the backoffice sessions
-  page filters on it.
+- **A case file never names the server it grades.** No `base_url` key,
+  `--port` required, no default base URL on the evaluators: the agent under
+  evaluation is a property of the run, not of the cases.
+- Each case runs in its own session, recorded under
+  `external_id = "eval:{tag}:{case}"` — `eval:{case}` when no `--tag` is
+  given. The tag names the run (model version, prompt variant, build) and is
+  what makes two runs comparable afterwards; `eval:` is reserved, and the
+  backoffice sessions page filters on it. Nothing is written when the agent
+  server has no `AgentService`.
 
 ## Where things usually belong
 

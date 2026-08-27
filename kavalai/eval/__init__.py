@@ -28,7 +28,7 @@ by :func:`~kavalai.eval.eval_runner.run_suite`, or from the command line with
 ``kavalai-eval``.
 """
 
-from kavalai.eval.base import DEFAULT_BASE_URL, AgentEvaluator, EvalResult
+from kavalai.eval.base import AgentEvaluator, EvalResult
 from kavalai.eval.eval_runner import (
     EvalCase,
     EvalSuite,
@@ -45,7 +45,6 @@ from kavalai.eval.simple_evaluator import SimpleEvaluator, check_output
 __all__ = [
     "AgentEvaluator",
     "EvalResult",
-    "DEFAULT_BASE_URL",
     "SimpleEvaluator",
     "check_output",
     "JudgeEvaluator",

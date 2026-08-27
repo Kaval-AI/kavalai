@@ -6,7 +6,11 @@
 #
 # then run the cases against it:
 #
-#     dotenv run kavalai-eval examples/green_village/eval_cases.yaml --port 25000
+#     dotenv run kavalai-eval examples/green_village/eval_cases.yaml --port 25000 --tag baseline
+#
+# Which agent is evaluated is named on the command line, never here, so the
+# same cases can be pointed at another deployment -- or at two model versions
+# in turn, one `--tag` each, to be compared afterwards in the agent database.
 #
 # A case is `simple` unless it says otherwise: its `expected` names output
 # fields and the values they must carry, and no model decides anything.
@@ -14,7 +18,6 @@
 # reasoned out, a refusal -- are `judge` cases, and say in words what the
 # answer has to do.
 name: green-village
-base_url: http://localhost:25000
 
 cases:
 

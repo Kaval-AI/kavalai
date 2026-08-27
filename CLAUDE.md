@@ -190,10 +190,14 @@ cd frontend && npm test -- --watch=false --code-coverage
   API key.
 - `eval_runner.py` reads a YAML file of cases (`type: simple` or
   `type: judge`) and runs them in order:
-  `uv run --env-file .env kavalai-eval <cases.yaml> --host … --port … --auth
-  user:password`. Exit `0` all passed, `1` a case failed, `2` the run never
-  reached a verdict — CI needs the third to tell "the suite is broken" from
-  "the agent is wrong".
+  `uv run --env-file .env kavalai-eval <cases.yaml> --host … --port … --tag …
+  --auth user:password`. Exit `0` all passed, `1` a case failed, `2` the run
+  never reached a verdict — CI needs the third to tell "the suite is broken"
+  from "the agent is wrong".
+- **A case file never names the server it grades.** There is no `base_url`
+  key, `--port` is required and `AgentEvaluator` has no default base URL: the
+  agent under evaluation belongs to the run, so the same cases can be pointed
+  at a laptop, at staging, or at two model versions in turn.
 - **`kavalai.eval` reads no environment variables** — only
   `eval_runner.py:main()` does. Everything else is an argument.
 - Both evaluators are meant to be called straight from a unit test:
@@ -205,7 +209,12 @@ cd frontend && npm test -- --watch=false --code-coverage
   that never ran.
 - A failing agent call fails its case with a reason rather than raising, so one
   broken case cannot end a run. Each case runs in a fresh session, recorded
-  under `external_id = "eval:{case}"`.
+  under `external_id = "eval:{tag}:{case}"` (`eval:{case}` without `--tag`).
+  `--tag` names the run — a model version, a prompt variant, a build — and is
+  what makes two runs comparable in the agent database afterwards; the `eval:`
+  prefix is what the backoffice sessions page filters on. Sessions are written
+  only when the agent server has an `AgentService`, and the evaluators behave
+  identically when it does not.
 - `examples/green_village/eval_cases.yaml` is the worked example: 64 cases,
   literal ones for the facts and judged ones for the comparisons and refusals.
 

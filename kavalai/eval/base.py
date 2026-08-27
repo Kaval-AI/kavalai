@@ -22,8 +22,6 @@ from pydantic import BaseModel
 
 from kavalai.client import AgentClient
 
-DEFAULT_BASE_URL = "http://localhost:10000"
-
 
 class EvalResult(BaseModel):
     """The verdict on a single case.
@@ -56,23 +54,30 @@ class AgentEvaluator:
     use. Subclasses only have to decide whether an answer is good.
 
     Args:
-        base_url: Where the agent server listens.
+        base_url: Where the agent server listens. There is no default: the
+            agent under evaluation is named on the command line, never in a
+            case file, so a suite cannot quietly grade the wrong server.
         username: HTTP Basic Auth user, if the server requires one.
         password: HTTP Basic Auth password.
         timeout: Seconds to wait for one agent run.
+        tag: Names this evaluation run inside the ``external_id`` each case
+            is recorded under — a model version, a prompt variant, a build.
+            It is what tells one run's sessions from another's afterwards.
         transport: Optional httpx transport — in tests, this serves the
             requests without a network.
     """
 
     def __init__(
         self,
-        base_url: str = DEFAULT_BASE_URL,
+        base_url: str,
         username: Optional[str] = None,
         password: Optional[str] = None,
         timeout: float = 120.0,
+        tag: Optional[str] = None,
         transport: Optional[httpx.AsyncBaseTransport] = None,
     ):
         self.base_url = base_url
+        self.tag = tag
         self.client = AgentClient(
             base_url,
             username=username,
@@ -80,6 +85,16 @@ class AgentEvaluator:
             timeout=timeout,
             transport=transport,
         )
+
+    def external_id(self, name: str) -> str:
+        """The identifier one case's session is recorded under.
+
+        ``eval:`` is the reserved prefix the backoffice sessions page filters
+        on; the tag, when there is one, separates this run's sessions from
+        the next run's, which is what makes two variants comparable after the
+        fact.
+        """
+        return ":".join(part for part in ("eval", self.tag, name) if part)
 
     async def run_agent(
         self, inputs: dict[str, Any], external_id: Optional[str] = None

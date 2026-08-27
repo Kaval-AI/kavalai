@@ -129,6 +129,21 @@ async def test_the_case_name_is_sent_as_the_external_id():
     assert json.loads(runs[0].content)["external_id"] == "eval:greeting"
 
 
+async def test_the_tag_names_the_run_inside_the_external_id():
+    """What lets a data scientist tell one run's sessions from another's."""
+    requests = []
+    evaluator = SimpleEvaluator(
+        "http://testserver",
+        tag="variant-b",
+        transport=agent_transport(requests=requests),
+    )
+
+    await evaluator.evaluate({"user_message": "Hi"}, name="greeting")
+
+    runs = [r for r in requests if r.url.path == "/run_agent"]
+    assert json.loads(runs[0].content)["external_id"] == "eval:variant-b:greeting"
+
+
 async def test_input_is_validated_against_the_agents_own_input_type(transport):
     """A mistyped input field fails the case, and says which one."""
     evaluator = SimpleEvaluator("http://testserver", transport=transport)

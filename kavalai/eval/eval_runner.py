@@ -17,7 +17,6 @@ limitations under the License.
 The file looks like this::
 
     name: green-village
-    base_url: http://localhost:25000   # optional; --host/--port override it
     judge_model: openai/gpt-5.4-mini   # optional
     cases:
       - name: president
@@ -29,9 +28,11 @@ The file looks like this::
         input: {user_message: What is the village's annual budget?}
         expected: The answer says it does not know instead of inventing one.
 
-Run it against a server that is already up::
+The file says nothing about which server to run against — that is named on
+the command line, so the same cases can be pointed at a laptop, a staging
+deployment or two model versions in turn without being edited::
 
-    uv run --env-file .env kavalai-eval cases.yaml --host localhost --port 25000
+    uv run --env-file .env kavalai-eval cases.yaml --port 25000 --tag gpt-5.4-mini
 """
 
 import argparse
@@ -43,7 +44,7 @@ from typing import Any, Callable, Literal, Optional, Union
 import yaml
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from kavalai.eval.base import DEFAULT_BASE_URL, EvalResult
+from kavalai.eval.base import EvalResult
 from kavalai.eval.judge_evaluator import DEFAULT_JUDGE_MODEL, JudgeEvaluator
 from kavalai.eval.simple_evaluator import SimpleEvaluator
 
@@ -96,12 +97,15 @@ class EvalCase(BaseModel):
 
 
 class EvalSuite(BaseModel):
-    """A named list of cases, plus the defaults they run under."""
+    """A named list of cases, and the model that judges the judged ones.
+
+    Deliberately no ``base_url``: which agent a suite is run against is a
+    property of the run, not of the cases.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     name: str
-    base_url: Optional[str] = None
     judge_model: str = DEFAULT_JUDGE_MODEL
     cases: list[EvalCase]
 
@@ -124,11 +128,12 @@ def load_suite(path: Union[str, Path]) -> EvalSuite:
 
 async def run_suite(
     suite: EvalSuite,
-    base_url: Optional[str] = None,
+    base_url: str,
     username: Optional[str] = None,
     password: Optional[str] = None,
     timeout: float = 120.0,
     judge_model: Optional[str] = None,
+    tag: Optional[str] = None,
     transport: Optional[Any] = None,
     on_result: Optional[Callable[[EvalResult], None]] = None,
 ) -> list[EvalResult]:
@@ -139,12 +144,14 @@ async def run_suite(
 
     Args:
         suite: The cases to run.
-        base_url: Where the agent server listens; falls back to the suite's
-            own ``base_url``, then to ``http://localhost:10000``.
+        base_url: Where the agent server listens.
         username: HTTP Basic Auth user, if the server requires one.
         password: HTTP Basic Auth password.
         timeout: Seconds to wait for one agent run.
         judge_model: ``provider/model`` of the judge, overriding the suite's.
+        tag: Names this run inside each case's ``external_id``, so the
+            sessions of two runs — two model versions, two prompts — can be
+            told apart in the agent database afterwards.
         transport: Optional httpx transport, used by tests.
         on_result: Called with each result as it arrives, for progress
             output.
@@ -152,12 +159,12 @@ async def run_suite(
     Returns:
         One :class:`~kavalai.eval.base.EvalResult` per case, in file order.
     """
-    target = base_url or suite.base_url or DEFAULT_BASE_URL
     connection = dict(
-        base_url=target,
+        base_url=base_url,
         username=username,
         password=password,
         timeout=timeout,
+        tag=tag,
         transport=transport,
     )
     evaluators = {
@@ -199,10 +206,22 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument("suite", help="Path to the YAML file of cases.")
     parser.add_argument(
-        "--host", help="Agent server host (default: taken from the suite file)."
+        "--host",
+        default="localhost",
+        help="Agent server host (default: %(default)s).",
     )
     parser.add_argument(
-        "--port", type=int, help="Agent server port (default: taken from the suite)."
+        "--port",
+        type=int,
+        required=True,
+        help="Agent server port. Required: which agent is being evaluated is "
+        "never left to a default.",
+    )
+    parser.add_argument(
+        "--tag",
+        help="Names this run in each case's external_id, e.g. the model "
+        "version or prompt variant under test. Without it the sessions of "
+        "two runs cannot be told apart afterwards.",
     )
     parser.add_argument(
         "--auth",
@@ -222,15 +241,9 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def resolve_base_url(host: Optional[str], port: Optional[int]) -> Optional[str]:
-    """Build a base URL from the host and port flags.
-
-    Returns ``None`` when neither was given, so the suite's own ``base_url``
-    still applies.
-    """
-    if host is None and port is None:
-        return None
-    return f"http://{host or 'localhost'}:{port or 10000}"
+def resolve_base_url(host: str, port: int) -> str:
+    """Build a base URL from the host and port flags."""
+    return f"http://{host}:{port}"
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -252,10 +265,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     username, _, password = (args.auth or "").partition(":")
     base_url = resolve_base_url(args.host, args.port)
 
-    print(
-        f"{suite.name}: {len(suite.cases)} cases against "
-        f"{base_url or suite.base_url or DEFAULT_BASE_URL}\n"
-    )
+    tagged = f" tagged {args.tag}" if args.tag else ""
+    print(f"{suite.name}: {len(suite.cases)} cases{tagged} against {base_url}\n")
     try:
         results = asyncio.run(
             run_suite(
@@ -265,6 +276,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 password=password or None,
                 timeout=args.timeout,
                 judge_model=args.judge_model,
+                tag=args.tag,
                 on_result=lambda result: print(format_result(result)),
             )
         )

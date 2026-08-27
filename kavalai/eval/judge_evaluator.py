@@ -21,7 +21,7 @@ from typing import Any, Optional
 import httpx
 from pydantic import BaseModel
 
-from kavalai.eval.base import DEFAULT_BASE_URL, AgentEvaluator, EvalResult
+from kavalai.eval.base import AgentEvaluator, EvalResult
 from kavalai.llm_clients.base_client import BaseLlmClient
 from kavalai.workflow.clients import make_client
 
@@ -70,6 +70,7 @@ class JudgeEvaluator(AgentEvaluator):
         username: HTTP Basic Auth user, if the server requires one.
         password: HTTP Basic Auth password.
         timeout: Seconds to wait for one agent run.
+        tag: Names this run inside each case's ``external_id``.
         transport: Optional httpx transport, used by tests.
         model: ``provider/model`` of the judge.
         llm_client: A ready-made judge client, overriding ``model``.
@@ -90,10 +91,11 @@ class JudgeEvaluator(AgentEvaluator):
 
     def __init__(
         self,
-        base_url: str = DEFAULT_BASE_URL,
+        base_url: str,
         username: Optional[str] = None,
         password: Optional[str] = None,
         timeout: float = 120.0,
+        tag: Optional[str] = None,
         transport: Optional[httpx.AsyncBaseTransport] = None,
         model: str = DEFAULT_JUDGE_MODEL,
         llm_client: Optional[BaseLlmClient] = None,
@@ -104,6 +106,7 @@ class JudgeEvaluator(AgentEvaluator):
             username=username,
             password=password,
             timeout=timeout,
+            tag=tag,
             transport=transport,
         )
         self.model = model
@@ -165,7 +168,7 @@ class JudgeEvaluator(AgentEvaluator):
 
         try:
             output = (
-                await self.run_agent(inputs, external_id=f"eval:{name}")
+                await self.run_agent(inputs, external_id=self.external_id(name))
             ).model_dump()
         except Exception as e:
             return EvalResult(

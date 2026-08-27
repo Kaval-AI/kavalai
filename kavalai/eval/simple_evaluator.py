@@ -153,7 +153,7 @@ class SimpleEvaluator(AgentEvaluator):
         """
         try:
             output = (
-                await self.run_agent(inputs, external_id=f"eval:{name}")
+                await self.run_agent(inputs, external_id=self.external_id(name))
             ).model_dump()
         except Exception as e:
             return EvalResult(
