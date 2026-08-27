@@ -31,7 +31,7 @@ from kavalai.workflow import WorkflowBuilder
 
 # See https://qdrant.github.io/fastembed/examples/Supported_Models/ for list of models
 EMBEDDING_MODEL = "fastembed/BAAI/bge-small-en-v1.5"
-LLM_MODEL = "openai/gpt-5.4-mini"
+LLM_MODEL = "openai/gpt-5.6-luna"
 
 # Host and port to serve the agent
 HOST = "0.0.0.0"
