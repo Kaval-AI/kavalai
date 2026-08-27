@@ -172,8 +172,6 @@ cd frontend && npm test -- --watch=false
     application viewport — never ship a desktop or IDE capture.
 - Keep code blocks within roughly 80 characters so the rendered page needs no
   horizontal scrollbar.
-- Anything that needs a code change rather than a documentation fix goes in
-  `docs/todo.rst`.
 
 ## Evaluation & acceptance testing
 
@@ -288,6 +286,5 @@ needed.
 - [`docs/reference/providers.rst`](docs/reference/providers.rst) — the LLM,
   embedding and RAG providers that ship with Kaval.AI, and how to find out
   which models each one offers.
-- [`docs/todo.rst`](docs/todo.rst) — open questions and known gaps.
 - <https://docs.kaval.ai/llms.txt> — a machine-readable index of the published
   documentation.

@@ -372,7 +372,7 @@ belongs.
 
 .. note::
 
-   The gaps listed here are tracked in :doc:`../todo`, and the reasoning
-   behind the design that produces them is set out in :doc:`architecture`. A
+   The reasoning behind the design that produces the gaps listed here is
+   set out in :doc:`architecture`. A
    gap that is blocking should be checked against those pages before it is
    assumed to be permanent.

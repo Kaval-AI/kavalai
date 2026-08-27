@@ -261,5 +261,4 @@ Where to start
    :hidden:
    :caption: Project
 
-   todo
    genindex

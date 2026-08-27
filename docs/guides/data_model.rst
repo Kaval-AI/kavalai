@@ -151,8 +151,7 @@ to an ``end`` node.
 
 The row is written when the run begins (``initialize_workflow_run``) and
 completed when it ends (``update_run``). There is no intermediate checkpoint,
-which is the reason durable resume is listed as an open capability in
-:doc:`../todo`.
+which is why durable resume is not offered: a crashed process loses the run.
 
 ``tasks``
 ---------

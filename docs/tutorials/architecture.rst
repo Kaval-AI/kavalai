@@ -343,8 +343,7 @@ no mid-execution checkpoint, so a crashed process loses the run; there is no
 primitive for pausing a run pending human approval; there is no agent-to-agent
 handoff, delegation or group-chat pattern; there is no evaluation harness for
 prompt changes; and observability is Kaval.AI's own tables rather than
-OpenTelemetry. Each is discussed in :doc:`comparison` and tracked in
-:doc:`../todo`.
+OpenTelemetry. Each is discussed in :doc:`comparison`.
 
 Where to next
 =============
