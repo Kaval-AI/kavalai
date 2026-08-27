@@ -36,7 +36,8 @@ Provider credentials
      - Ollama endpoint. Default ``http://localhost:11434``. No key needed.
 
 Each client also accepts ``api_key=`` (or ``host=``) directly, which wins over
-the environment.
+the environment. :doc:`providers` lists every provider these credentials belong
+to, and how to find out which models each one offers.
 
 Models
 ------

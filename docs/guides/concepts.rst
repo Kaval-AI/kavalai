@@ -157,7 +157,8 @@ know my data":
 No retraining, and the answer is grounded in text you control — you can even cite
 which passages were used. The usual failure mode is retrieval, not generation:
 if the right passage was not retrieved, no prompt will save the answer. See
-:doc:`../tutorials/rag`.
+:doc:`../tutorials/rag`, and :doc:`../reference/providers` for the embedding
+providers to choose between and how to see which models each one offers.
 
 Where to next
 -------------
