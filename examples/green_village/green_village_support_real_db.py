@@ -2,7 +2,7 @@
 
 Bring up the docker postgres database
     docker compose up -d postgres_db
-    dotenv run python -m kavalai.migrate_db app
+    dotenv run python -m kavalai.migrate_db agents
     dotenv run python -m examples.green_village.green_village_support_real_db
 
 Then talk to it from the terminal chat client::

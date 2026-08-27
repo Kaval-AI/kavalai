@@ -28,7 +28,7 @@ Usage::
         --company "Spotify" --no-db
 
 Needs the Crawl4AI service (``docker compose up -d crawl4ai``). Persistence
-needs a migrated agent database (``python -m kavalai.migrate_db app``) reachable
+needs a migrated agent database (``python -m kavalai.migrate_db agents``) reachable
 via ``KAVALAI_DB_URI`` / ``KAVALAI_DB_SCHEMA``; without ``KAVALAI_DB_URI`` the
 example just runs the workflow and prints the results.
 """
