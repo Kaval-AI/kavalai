@@ -186,22 +186,43 @@ appear that should not have?* — is answered by reading a Python list:
 What ``bakery_real_db.py`` puts in Postgres is something else entirely: the
 **agent database** — sessions, runs, tasks and model-call statistics — which is
 Kaval.AI's own, and whose tables come from ``python -m kavalai.migrate_db
-agents``. That is the whole difference between the two servers:
+agents``. Where the two servers differ is where they record and how much:
 
 .. code-block:: python
 
    # examples/bakery/bakery_in_memory.py
    session_maker = db_manager.get_sqlite_sessionmaker(db_path=":memory:")
+   agent_service = AgentService(session_maker)
 
 .. code-block:: python
 
    # examples/bakery/bakery_real_db.py
    session_maker = db_manager.get_sessionmaker(uri=DB_URI, schema=DB_SCHEMA)
+   agent_service = AgentService(session_maker)
+   task_logger = PostgresTaskLogger(agent_service)
+
+The ``AgentService`` records the session and the run; the ``PostgresTaskLogger``
+records what happened *inside* the run — one ``tasks`` row per node, with its
+inputs, prompt, output and duration, and the ``model_call_stats`` rows the
+engine's token accumulator forwards to it. Both are passed to the engine:
+
+.. code-block:: python
+
+   WorkflowEngine.from_yaml_path(
+       str(WORKFLOW_PATH),
+       agent_service=agent_service,
+       task_logger=task_logger,
+   )
 
 Run the Postgres one and every graded case is a session you can open in the
-backoffice afterwards. Note what it does *not* do: it does not run migrations
-at startup. A server that migrates on startup is a server that migrates from
+backoffice afterwards — and, because the task logger is wired in, one you can
+step through node by node in the task debugger rather than only reading its
+final answer. Note what the server does *not* do: it does not run migrations at
+startup. A server that migrates on startup is a server that migrates from
 several replicas at once.
+
+Task writes are fire-and-forget, so the shutdown half of the lifespan hook
+drains them; without that, the last run before a restart can be missing rows.
 
 
 The cases

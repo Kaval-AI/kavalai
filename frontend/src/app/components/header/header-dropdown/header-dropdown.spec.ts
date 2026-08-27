@@ -121,7 +121,12 @@ describe('HeaderDropdown', () => {
     // Other section (4th column)
     const otherMenu = menus[3].querySelectorAll('li');
     expect(otherMenu[0].querySelector('.menu-title').textContent).toBe('Other');
-    const docsLink = otherMenu[1].querySelector('a');
+    const homeLink = otherMenu[1].querySelector('a');
+    expect(homeLink.getAttribute('href')).toBe('https://kaval.ai/');
+    expect(homeLink.getAttribute('target')).toBe('_blank');
+    expect(homeLink.getAttribute('rel')).toBe('noopener noreferrer');
+    expect(homeLink.textContent).toBe('Kaval.AI home');
+    const docsLink = otherMenu[2].querySelector('a');
     expect(docsLink.getAttribute('href')).toBe('https://docs.kaval.ai/');
     expect(docsLink.getAttribute('target')).toBe('_blank');
     expect(docsLink.textContent).toBe('Documentation');

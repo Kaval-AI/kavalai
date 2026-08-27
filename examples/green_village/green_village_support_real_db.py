@@ -18,6 +18,15 @@ or straight over HTTP::
 The reply carries a ``session_id``; send it back on the next request and the
 two turns are one conversation — the same as the in-memory example, except this
 one still remembers it tomorrow.
+
+Recording a run takes two pieces. The ``AgentService`` records the session and
+the run; a ``PostgresTaskLogger`` records what happened inside it — one row per
+node with its inputs, prompt, output and duration, plus the model calls the
+engine's token accumulator forwards to it. The second one is what the
+backoffice task debugger reads, so a conversation served here can be opened in
+the frontend and inspected node by node. The embedding calls the RAG service
+makes are written by ``PostgresRagService`` itself, into the same
+``model_call_stats`` table.
 """
 
 import os
@@ -33,6 +42,7 @@ from kavalai.agent_service import AgentService
 from kavalai.rag import PostgresRagService
 from kavalai.server import create_agent_router, mask_db_uri
 from kavalai.workflow import WorkflowBuilder
+from kavalai.workflow.tasklog import PostgresTaskLogger
 
 # See https://qdrant.github.io/fastembed/examples/Supported_Models/ for list of models
 EMBEDDING_MODEL = "fastembed/BAAI/bge-small-en-v1.5"
@@ -101,6 +111,12 @@ session_maker = db_manager.get_sessionmaker(
 )
 agent_service = AgentService(session_maker)
 
+# Per-node debugging data: one `tasks` row per node, and the `model_call_stats`
+# rows the engine's token accumulator forwards here. Both land in the same
+# database as the sessions, which is what the backoffice needs to show a run's
+# full result.
+task_logger = PostgresTaskLogger(agent_service)
+
 # The same sessionmaker serves the index: one database, one pool. The RAG
 # tables are not part of the Alembic set — this backend owns its own DDL and
 # provisions a collection on first index, taking the vector dimension from the
@@ -146,7 +162,11 @@ engine = (
         next="end",
     )
     .end()
-    .build_engine(rag_services=rag, agent_service=agent_service)
+    .build_engine(
+        rag_services=rag,
+        agent_service=agent_service,
+        task_logger=task_logger,
+    )
 )
 
 
@@ -172,10 +192,14 @@ def create_app() -> FastAPI:
         """Lifespan of the app.
 
         During startup, rebuild the fact index, so the server only starts
-        serving once there is something to retrieve.
+        serving once there is something to retrieve. On shutdown, drain the
+        task logger: its writes are fire-and-forget, so the last conversation
+        before a restart is only complete in the backoffice if they are
+        awaited.
         """
         await index_facts()
         yield
+        await task_logger.close()
 
     app = FastAPI(
         title=engine.graph.name,
