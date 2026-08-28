@@ -6,10 +6,10 @@ Kaval.AI is an opinionated and elegant Python library for building production-gr
 
 
 Features:
-- Support for commercial (OpenAI, Google, Anthropic) and open-source LLM
+- Supports commercial (OpenAI, Google, Anthropic) and open-source LLM
   providers
   (see [LLM clients](https://docs.kaval.ai/tutorials/llm_clients.html)).
-- Client-side execution in the browser through WebLLM and Pyodide
+- Runs directly in the browser using via WebLLM and Pyodide
   (see [running in the browser](https://docs.kaval.ai/tutorials/run_in_browser.html)).
 - Retrieval-augmented generation (RAG) over several storage engines
   (see [RAG](https://docs.kaval.ai/tutorials/rag.html)).
@@ -22,7 +22,7 @@ Features:
   tool calling
   (see [workflows tutorial](https://docs.kaval.ai/tutorials/workflow.html),
   [workflow concepts](https://docs.kaval.ai/guides/workflows.html)).
-- Python tools, REST server endpoints (with basic authentication) and MCP
+- Python tools, REST server endpoints with basic authentication and MCP
   support
   (see [tools](https://docs.kaval.ai/guides/tools.html),
   [agent server API](https://docs.kaval.ai/api/server.html)).
