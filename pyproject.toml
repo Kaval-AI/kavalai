@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kavalai"
-version = "1.0.2"
+version = "1.0.3"
 description = "Kaval.AI is an open source Python SDK for writing AI agents and workflow automation pipelines. Suitable for conversational agents and generic workflow automation."
 readme = "README.md"
 requires-python = ">=3.12"
