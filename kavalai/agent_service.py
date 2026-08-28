@@ -24,6 +24,32 @@ from kavalai.resolvers import resolve_path, find_key_recursive
 from kavalai.utils import clean_text, to_plain
 
 
+def _update_agent(
+    agent: Agent,
+    description: Optional[str],
+    input_schema: Optional[Dict],
+    output_schema: Optional[Dict],
+    workflow: Optional[Dict],
+) -> bool:
+    """Apply the non-``None`` values to ``agent``; return whether any changed.
+
+    ``None`` means "not supplied", so a caller that knows only the name never
+    blanks the description or workflow another caller recorded.
+    """
+    updates = {
+        "description": description,
+        "input_schema": input_schema,
+        "output_schema": output_schema,
+        "workflow": workflow,
+    }
+    changed = False
+    for field, value in updates.items():
+        if value is not None and getattr(agent, field) != value:
+            setattr(agent, field, value)
+            changed = True
+    return changed
+
+
 class AgentService:
     """Database operations for the agent runtime.
 
@@ -64,23 +90,11 @@ class AgentService:
                 session.add(agent)
                 await session.commit()
                 await session.refresh(agent)
-            else:
-                # Update existing agent if description, schemas or workflow have changed
-                # We only update if the new value is not None to avoid accidental overwrites
-                updates = {
-                    "description": description,
-                    "input_schema": input_schema,
-                    "output_schema": output_schema,
-                    "workflow": workflow,
-                }
-                changed = False
-                for field, value in updates.items():
-                    if value is not None and getattr(agent, field) != value:
-                        setattr(agent, field, value)
-                        changed = True
-                if changed:
-                    await session.commit()
-                    await session.refresh(agent)
+            elif _update_agent(
+                agent, description, input_schema, output_schema, workflow
+            ):
+                await session.commit()
+                await session.refresh(agent)
 
             return agent
 
@@ -90,13 +104,13 @@ class AgentService:
         session_id: Optional[UUID] = None,
         external_id: Optional[str] = None,
     ) -> Optional[Session]:
+        """Look up a session by id, or create a new one when no id is given."""
         async with self.session_maker() as session:
             if session_id:
                 stmt = select(Session).where(Session.id == session_id)
                 result = await session.execute(stmt)
                 return result.scalar_one_or_none()
 
-            # No session_id provided? Create a new one.
             new_session = Session(agent_id=agent_id, external_id=external_id)
             session.add(new_session)
             await session.commit()
@@ -134,8 +148,8 @@ class AgentService:
     ) -> tuple[Agent, Session, Run]:
         """Initialize agent, session, and run in a single database transaction.
 
-        This is an optimized batch operation that reduces 3 DB roundtrips to 1,
-        improving performance especially for remote databases.
+        One session and one commit instead of three, which matters against a
+        remote database.
 
         ``session_id`` selects an existing session by primary id (raises
         ``ValueError`` if absent). Without it, ``external_id`` reuses the
@@ -163,16 +177,9 @@ class AgentService:
                 db_session.add(agent)
                 await db_session.flush()  # Get agent.id for session creation
             else:
-                # Update existing agent if schemas or workflow have changed
-                updates = {
-                    "description": agent_description,
-                    "input_schema": input_schema,
-                    "output_schema": output_schema,
-                    "workflow": workflow,
-                }
-                for field, value in updates.items():
-                    if value is not None and getattr(agent, field) != value:
-                        setattr(agent, field, value)
+                _update_agent(
+                    agent, agent_description, input_schema, output_schema, workflow
+                )
 
             # 2. Get or create session
             if session_id:
@@ -250,9 +257,8 @@ class AgentService:
 
         Returns the most recent value found for the given key.
         """
-        is_path = "." in key
+        resolve = resolve_path if "." in key else find_key_recursive
 
-        # Fetch recent contexts for the session, newest first, and scan for the key.
         async with self.session_maker() as session:
             stmt = (
                 select(Run.context)
@@ -260,18 +266,12 @@ class AgentService:
                 .order_by(Run.created_at.desc())
             )
             result = await session.execute(stmt)
-            rows = list(result.scalars().all())
-
-            for row in rows:
-                if not row:
+            for context in result.scalars():
+                if not context:
                     continue
-                if is_path:
-                    val = resolve_path(row, key)
-                else:
-                    val = find_key_recursive(row, key)
+                val = resolve(context, key)
                 if val is not None:
                     return val
-
             return None
 
     # -- chat history ----------------------------------------------------------

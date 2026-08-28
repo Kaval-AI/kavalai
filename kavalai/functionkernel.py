@@ -251,15 +251,13 @@ class FunctionKernel:
             f"{server_name}_{tool_name}_output", output_schema
         )
 
+        # The HTTP method rides along in the description as JSON; ``to_dict``
+        # and ``_rest_method`` unpack it.
         self.rest_tool_definitions[server_name][tool_name] = ToolDefinition(
             name=tool_name,
-            description=description,
+            description=json.dumps({"method": method, "description": description}),
             input_model=InputModel,
             output_model=OutputModel,
-        )
-        # Store method in a way it can be retrieved
-        self.rest_tool_definitions[server_name][tool_name].description = json.dumps(
-            {"method": method, "description": description}
         )
 
     def register_mcp_server(self, server: McpServer):
@@ -310,7 +308,7 @@ class FunctionKernel:
     async def call_tool(
         self,
         tool_uri: str,
-        arguments: Dict[str, Any] = None,
+        arguments: Optional[Dict[str, Any]] = None,
         output_type: Optional[type] = None,
         **kwargs,
     ) -> Any:
@@ -319,15 +317,13 @@ class FunctionKernel:
         Format: protocol://[name|module].function_name
         Example: python://kavalai.mytool.myfunc or rest://myrestserver.restfunction
         """
-        if arguments is None:
-            arguments = {}
-        arguments = _strip_metadata(arguments)
+        arguments = _strip_metadata(arguments or {})
         protocol, path = _parse_tool_uri(tool_uri)
 
         if protocol == "python":
             return await self._call_python_tool(path, arguments, output_type)
 
-        if protocol == "rest" or protocol == "mcp":
+        if protocol in ("rest", "mcp"):
             if "." not in path:
                 raise FunctionKernelException(
                     f"Invalid tool path format: '{path}'. Expected [name|module].function_name"
@@ -341,10 +337,9 @@ class FunctionKernel:
                 return await self._handle_rest_call(
                     name_or_module, function_name, arguments, output_type, **kwargs
                 )
-            if protocol == "mcp":
-                return await self._call_mcp_tool(
-                    name_or_module, function_name, arguments, output_type
-                )
+            return await self._call_mcp_tool(
+                name_or_module, function_name, arguments, output_type
+            )
 
         raise FunctionKernelException(f"Unsupported protocol: '{protocol}'")
 
@@ -358,38 +353,27 @@ class FunctionKernel:
     ) -> Any:
         """Handle REST tool calls with validation if definition exists."""
         method = kwargs.get("method", "get")
-        if (
-            server_name in self.rest_tool_definitions
-            and tool_name in self.rest_tool_definitions[server_name]
-        ):
-            definition = self.rest_tool_definitions[server_name][tool_name]
-            try:
-                desc_data = json.loads(definition.description)
-                method = desc_data.get("method", method)
-            except Exception:
-                pass
-
-            # Validate input
-            validated_args = Validator.validate_arguments(
-                definition.input_model, arguments
-            )
+        definition = self.rest_tool_definitions.get(server_name, {}).get(tool_name)
+        if definition is None:
             return await self._call_rest_tool(
-                server_name,
-                tool_name,
-                validated_args,
-                method,
-                output_type or definition.output_model,
+                server_name, tool_name, arguments, method, output_type
             )
 
+        validated_args = Validator.validate_arguments(definition.input_model, arguments)
         return await self._call_rest_tool(
-            server_name, tool_name, arguments, method, output_type
+            server_name,
+            tool_name,
+            validated_args,
+            _rest_method(definition, method),
+            output_type or definition.output_model,
         )
 
     async def close(self):
         """Cleanup all MCP sessions."""
+        # Transports and ClientSessions alike were entered by hand in
+        # ``_open_mcp_session``, so they are exited in reverse order here.
         for session in reversed(self.mcp_cleanups):
             try:
-                # Some are async context managers, some are ClientSessions
                 if hasattr(session, "__aexit__"):
                     await session.__aexit__(None, None, None)
             except Exception as e:
@@ -537,13 +521,11 @@ class FunctionKernel:
             tools_result = await session.list_tools()
             definitions = {}
             for tool in tools_result.tools:
-                # MCP tool input schema is usually a JSON Schema
-                # For now, we store the raw schema and we could dynamically create a Pydantic model
-                # But to stay consistent with the "Pydantic models for everything" requirement:
                 input_model = Validator.create_model_from_schema(
                     f"{server_name}_{tool.name}_input", tool.inputSchema
                 )
-                # MCP doesn't strictly define output schema in tool list, so we use a generic one
+                # The tool list carries no output schema, so results are
+                # wrapped as ``.result``.
                 output_model = create_model(
                     f"{server_name}_{tool.name}_output", result=(Any, ...)
                 )
@@ -572,12 +554,8 @@ class FunctionKernel:
     ) -> Any:
         session = await self._get_mcp_session(server_name)
 
-        # Validate arguments if definition exists
-        if (
-            server_name in self.mcp_tool_definitions
-            and tool in self.mcp_tool_definitions[server_name]
-        ):
-            definition = self.mcp_tool_definitions[server_name][tool]
+        definition = self.mcp_tool_definitions.get(server_name, {}).get(tool)
+        if definition is not None:
             try:
                 arguments = Validator.validate_arguments(
                     definition.input_model, arguments
@@ -604,14 +582,9 @@ class FunctionKernel:
                     result_data = content.text
                 break
 
-        # Convert output using output_type or definition's output_model
-        target_output_type = output_type
-        if not target_output_type and server_name in self.mcp_tool_definitions:
-            if tool in self.mcp_tool_definitions[server_name]:
-                target_output_type = self.mcp_tool_definitions[server_name][
-                    tool
-                ].output_model
-
+        target_output_type = output_type or (
+            definition.output_model if definition is not None else None
+        )
         return Validator.cast_result(
             result_data, target_output_type, f"MCP tool '{server_name}.{tool}'"
         )
@@ -622,15 +595,14 @@ class FunctionKernel:
         arguments: Dict[str, Any],
         output_type: Optional[type] = None,
     ) -> Any:
-        if python_tool in self.python_tools:
-            func = self.python_tools[python_tool]
-            definition = self.python_tool_definitions.get(python_tool)
-        else:
+        if python_tool not in self.python_tools:
             raise FunctionKernelException(
                 f"Python tool '{python_tool}' not registered."
             )
+        func = self.python_tools[python_tool]
+        definition = self.python_tool_definitions[python_tool]
+        sig = inspect.signature(func)
 
-        # Validate arguments using input model
         try:
             call_args = Validator.validate_arguments(definition.input_model, arguments)
 
@@ -639,7 +611,7 @@ class FunctionKernel:
             # legitimately be absent still wants the model when it is present,
             # and leaving it a dict fails later, inside the tool, with a
             # confusing error about the dict's own methods.
-            for param_name, p in inspect.signature(func).parameters.items():
+            for param_name, p in sig.parameters.items():
                 model = _model_annotation(p.annotation)
                 if model is not None and call_args.get(param_name) is not None:
                     value = call_args[param_name]
@@ -650,7 +622,6 @@ class FunctionKernel:
                 f"Python tool '{python_tool}' argument validation failed: {e}"
             )
 
-        sig = inspect.signature(func)
         try:
             bound_args = sig.bind(**call_args)
         except TypeError as e:
@@ -738,13 +709,7 @@ class FunctionKernel:
         # REST tools
         for server_name, tools in self.rest_tool_definitions.items():
             for tool_name, definition in tools.items():
-                method = "GET"
-                try:
-                    desc_data = json.loads(definition.description)
-                    method = desc_data.get("method", "GET").upper()
-                except Exception:
-                    pass
-
+                method = _rest_method(definition, "GET").upper()
                 tool_uri = f"rest://{server_name}.{tool_name} [{method}]"
                 if _is_tool_allowed(tool_uri, allowed_tools):
                     tools_list.append(definition.to_dict(name_override=tool_uri))
@@ -764,6 +729,14 @@ def _strip_metadata(arguments: Dict[str, Any]) -> Dict[str, Any]:
     return {
         k: v for k, v in arguments.items() if k not in ("__line__", "__file_path__")
     }
+
+
+def _rest_method(definition: ToolDefinition, default: str) -> str:
+    """The HTTP method ``register_rest_tool`` packed into the description."""
+    try:
+        return json.loads(definition.description).get("method", default)
+    except Exception:
+        return default
 
 
 def _parse_tool_uri(tool_uri: str) -> tuple[str, str]:
@@ -848,21 +821,3 @@ def _model_annotation(annotation: Any) -> Optional[Type[BaseModel]]:
             if isinstance(arg, type) and issubclass(arg, BaseModel):
                 return arg
     return None
-
-
-def _add_tool_to_list(
-    tools_list: List[Dict[str, Any]],
-    name: str,
-    description: str,
-    input_model: Type[BaseModel],
-    allowed_tools: Optional[List[str]],
-):
-    """Add tool to list if it's allowed."""
-    if _is_tool_allowed(name, allowed_tools):
-        tools_list.append(
-            {
-                "name": name,
-                "description": description,
-                "inputSchema": _get_schema(input_model),
-            }
-        )

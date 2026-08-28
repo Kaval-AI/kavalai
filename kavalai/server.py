@@ -15,13 +15,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-from loguru import logger
 import asyncio
+import importlib
+import importlib.util
 import secrets
-from pathlib import Path
+import sys
 from contextlib import asynccontextmanager
-from typing import Annotated, AsyncGenerator, AsyncIterable, Callable
-from typing import Optional, Union
+from pathlib import Path
+from typing import Annotated, AsyncGenerator, AsyncIterable, Callable, Optional, Union
 from uuid import UUID
 
 import uvicorn
@@ -30,6 +31,7 @@ from fastapi import Depends
 from fastapi import HTTPException, status, FastAPI, Response, APIRouter
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from loguru import logger
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -360,8 +362,6 @@ def create_agent_app(
     workflow's schema and provides endpoints to run the agent and retrieve
     its configuration.
 
-    This function now uses create_agent_router() internally for better composability.
-
     Args:
         engine: The :class:`~kavalai.WorkflowEngine` instance to serve.
         session_provider: An optional SQLAlchemy async_sessionmaker to provide
@@ -396,7 +396,6 @@ def create_agent_app(
     )
     app.state.engine = engine
 
-    # Use the router factory to create all endpoints
     router = create_agent_router(
         engine=engine,
         session_provider=session_provider,
@@ -451,8 +450,6 @@ def load_provider_modules(module_names: str) -> list[str]:
         ImportError: A named module could not be imported.
         RegistryError: A registration names a path that cannot be resolved.
     """
-    import importlib
-
     from kavalai.llm_clients.registry import verify_registrations
 
     names = [name.strip() for name in module_names.split(",") if name.strip()]
@@ -470,7 +467,6 @@ def create_app_from_env_conf(
     pool_size: Optional[int] = None,
     max_overflow: Optional[int] = None,
     sql_echo: Optional[bool] = None,
-    openai_service_tier: Optional[str] = None,
 ) -> FastAPI:
     """Create Kavalai server application from environment configuration.
 
@@ -487,7 +483,6 @@ def create_app_from_env_conf(
     - KAVALAI_DB_POOL_SIZE: Database connection pool size (optional, default: 0).
     - KAVALAI_DB_MAX_OVERFLOW: Database connection pool max overflow (optional, default: 0).
     - KAVALAI_SQL_ECHO: Whether to log SQL queries (optional, default: False).
-    - KAVALAI_OPENAI_SERVICE_TIER: The service tier to use for OpenAI API calls (optional, e.g. "priority").
     - KAVALAI_PROVIDER_MODULES: Comma-separated modules to import before the
       workflow loads, so their backend registrations exist (optional).
 
@@ -498,7 +493,6 @@ def create_app_from_env_conf(
         pool_size: Database connection pool size.
         max_overflow: Database connection pool max overflow.
         sql_echo: Whether to log SQL queries.
-        openai_service_tier: The service tier to use for OpenAI API calls.
 
     Returns:
         A FastAPI application instance.
@@ -512,7 +506,6 @@ def create_app_from_env_conf(
     # library discovers nothing on its own.
     load_provider_modules(env.str("KAVALAI_PROVIDER_MODULES", ""))
 
-    # Log database connection info
     if db_uri is None:
         db_uri = env("KAVALAI_DB_URI")
     if db_schema is None:
@@ -532,14 +525,6 @@ def create_app_from_env_conf(
     logger.info(f"Database Max Overflow: {max_overflow}")
     logger.info(f"SQL Echo: {sql_echo}")
 
-    # Log OpenAI service tier
-    if openai_service_tier is None:
-        openai_service_tier = env.str("KAVALAI_OPENAI_SERVICE_TIER", "")
-
-    if openai_service_tier:
-        logger.info(f"OpenAI Service Tier: {openai_service_tier}")
-
-    # Log basic auth info
     auth_user = env.str("KAVALAI_AGENT_BASIC_AUTH_USER", "")
     auth_password = env.str("KAVALAI_AGENT_BASIC_AUTH_PASSWORD", "")
 
@@ -556,7 +541,6 @@ def create_app_from_env_conf(
             "before exposing this to a network you do not control."
         )
 
-    # Specify the connection to the KavalAI agent server.
     session_provider = db_manager.get_sessionmaker(
         uri=db_uri,
         schema=db_schema,
@@ -565,7 +549,6 @@ def create_app_from_env_conf(
         max_overflow=max_overflow,
     )
 
-    # Create the shared agent service and the write-behind task logger.
     agent_service = AgentService(session_provider)
     task_logger = PostgresTaskLogger(agent_service)
 
@@ -598,12 +581,8 @@ def _import_setup_module(reference: str) -> None:
     The file's own directory goes on ``sys.path`` first, so the module can
     import its siblings.
     """
-    import importlib
-    import importlib.util
-    import sys
-
     path = Path(reference)
-    if not path.suffix == ".py":
+    if path.suffix != ".py":
         importlib.import_module(reference)
         return
     path = path.resolve()
@@ -621,7 +600,6 @@ def _import_setup_module(reference: str) -> None:
 
 def run_agent_server():
     """Start the Kaval.AI agent server using environment configuration."""
-    # Create FastAPI app.
     app = create_app_from_env_conf()
     logger.info(f"Starting agent <{app.state.engine.graph.name}>.")
     uvicorn.run(

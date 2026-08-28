@@ -116,9 +116,6 @@ class Normalizer:
         with open(path, "r") as f:
             return cls.from_yaml(f.read())
 
-    # NOTE: centering-vector learning from stored embeddings moved to the RAG
-    # backends (``BaseRagService.learn_normalizer``) — storage is backend-owned.
-
 
 _default_normalizer = None
 

@@ -370,7 +370,6 @@ def env_configured_agent(tmp_path, monkeypatch):
     monkeypatch.setenv("KAVALAI_DB_SCHEMA", "agents")
     monkeypatch.setenv("KAVALAI_AGENT_BASIC_AUTH_USER", "u")
     monkeypatch.setenv("KAVALAI_AGENT_BASIC_AUTH_PASSWORD", "p")
-    monkeypatch.setenv("KAVALAI_OPENAI_SERVICE_TIER", "priority")
     return workflow_path
 
 
@@ -385,7 +384,6 @@ def test_create_app_from_env_conf_arguments_override_the_environment(
 ):
     monkeypatch.delenv("KAVALAI_AGENT_BASIC_AUTH_USER", raising=False)
     monkeypatch.delenv("KAVALAI_AGENT_BASIC_AUTH_PASSWORD", raising=False)
-    monkeypatch.delenv("KAVALAI_OPENAI_SERVICE_TIER", raising=False)
 
     app = create_app_from_env_conf(
         workflow_path=str(env_configured_agent),
@@ -394,7 +392,6 @@ def test_create_app_from_env_conf_arguments_override_the_environment(
         pool_size=1,
         max_overflow=2,
         sql_echo=True,
-        openai_service_tier="",
     )
 
     assert app.state.engine.graph.name == "srv"

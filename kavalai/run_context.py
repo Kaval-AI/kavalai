@@ -14,14 +14,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-from loguru import logger
+import json
 import re
 from typing import Optional, Any, Dict
 from uuid import UUID
 
+from loguru import logger
 from pydantic import BaseModel, ConfigDict
 
 from kavalai.resolvers import resolve_path
+from kavalai.utils import to_plain
 from kavalai.workflow.models import ArgumentInfo
 
 
@@ -105,21 +107,17 @@ class RunContext(BaseModel):
                 raise ValueError(f"Could not resolve {prefix}.{path}")
 
             if isinstance(val, (dict, list, BaseModel)):
-                from kavalai.utils import to_plain
-                import json
-
                 try:
-                    plain = to_plain(val)
-                    return json.dumps(plain, ensure_ascii=False)
+                    return json.dumps(to_plain(val), ensure_ascii=False)
                 except Exception as e:
-                    logger.warning(
-                        f"Error serializing template value {path}: {e}", exc_info=True
+                    logger.opt(exception=True).warning(
+                        f"Error serializing template value {path}: {e}"
                     )
                     return str(val)
 
             return str(val)
 
-        # Since re.sub doesn't support async, we do it manually
+        # re.sub cannot take an async replacement, so splice by hand.
         last_pos = 0
         pieces = []
         for match in pattern.finditer(prompt):
@@ -131,22 +129,13 @@ class RunContext(BaseModel):
         return "".join(pieces)
 
     async def resolve_input_info(self, info: ArgumentInfo):
-        """Resolve a TypeInputInfo to its actual value."""
+        """Resolve an :class:`ArgumentInfo` to its actual value."""
         if info.type == "literal":
             return info.value
-        if info.type == "history":
-            path = info.value or info.name
-            if not self.agent_service or not self.session_id:
-                logger.error(
-                    f"Cannot load from history for {path}: agent_service or session_id not set"
-                )
-                return None
-            return await self.agent_service.get_history_value(
-                self.session_id, str(path)
-            )
-
-        # For context type, use info.value (the path) or info.name
+        # ``value`` is the path; ``name`` is the fallback.
         path = info.value or info.name
+        if info.type == "history":
+            return await self.resolve_history_value(str(path))
         if path:
             return self.resolve_context_value(str(path))
         return None

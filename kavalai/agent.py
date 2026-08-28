@@ -43,7 +43,7 @@ class ToolCall(BaseModel):
     )
 
 
-def get_step_output_type(ResponseModel=Type[BaseModel]):
+def get_step_output_type(ResponseModel: Type[BaseModel]):
     class StepOutput(BaseModel):
         """Data structure that helps passing around information between consecutive agent runs."""
 
@@ -51,7 +51,7 @@ def get_step_output_type(ResponseModel=Type[BaseModel]):
             description="Briefly describe the goal of this step (what you intend to achieve with these tool calls).",
         )
         tool_calls: list[ToolCall] = Field(
-            default=[],
+            default_factory=list,
             description="Add tool call requests here, their output will be available via `call_id` key for next steps.",
         )
         output: Optional[ResponseModel] = None
@@ -352,9 +352,7 @@ class Agent:
                 "index": step_idx,
                 "instructions": step_output.instructions,
                 "tool_calls": [],
-                "output": to_plain(step_output.output)
-                if step_output.output is not None
-                else None,
+                "output": to_plain(step_output.output),
             }
 
             if step_output.tool_calls and self.kernel:

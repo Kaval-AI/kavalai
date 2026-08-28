@@ -61,18 +61,6 @@ def json_column():
     return JSONB().with_variant(JSON(), "sqlite")
 
 
-def parse_db_uri(uri: str) -> dict:
-    """Parses a database URI into tokens."""
-    url = make_url(uri)
-    return {
-        "user": url.username,
-        "password": url.password,
-        "host": url.host,
-        "port": url.port,
-        "db_name": url.database,
-    }
-
-
 class VectorType(TypeDecorator):
     impl = TEXT
     cache_ok = True
@@ -500,9 +488,7 @@ class Agent(Base):
     description: Mapped[str | None] = mapped_column(TEXT)
     input_schema: Mapped[dict | None] = mapped_column(json_column())
     output_schema: Mapped[dict | None] = mapped_column(json_column())
-    workflow: Mapped[dict | None] = mapped_column(
-        json_column()
-    )  # Updated to match SQL 'workflow'
+    workflow: Mapped[dict | None] = mapped_column(json_column())
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -612,7 +598,7 @@ class Run(Base):
     run belongs to a session and owns the tasks executed during it.
     """
 
-    __tablename__ = "runs"  # Renamed from 'interactions'
+    __tablename__ = "runs"
 
     id: Mapped[UUID] = mapped_column(uuid_column(), primary_key=True, default=uuid4)
     session_id: Mapped[UUID] = mapped_column(

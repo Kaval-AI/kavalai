@@ -17,16 +17,11 @@ limitations under the License.
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from kavalai.db import (
-    Run,
-    Session,
-    ChatMessage,
-    ModelCallStat,
-)
+from kavalai.db import Agent, ChatMessage, ModelCallStat, Run, Session, Task
 
 
 async def get_summary_stats(session: AsyncSession, agent_id: str | None = None):
-    # Calculate the start date (30 days ago)
+    """Totals over the last 30 days, optionally for one agent."""
     end_date = datetime.now(timezone.utc)
     start_date = end_date - timedelta(days=30)
 
@@ -66,8 +61,6 @@ async def get_summary_stats(session: AsyncSession, agent_id: str | None = None):
         )
 
     # Get total tasks
-    from kavalai.db import Task
-
     stmt_tasks = (
         select(func.count(Task.id))
         .select_from(Task)
@@ -122,7 +115,8 @@ async def get_summary_stats(session: AsyncSession, agent_id: str | None = None):
 async def get_daily_stats(
     session: AsyncSession, days: int = 7, agent_id: str | None = None
 ):
-    # Calculate the start date (midnight of N days ago)
+    """Per-day series over the last ``days`` days, optionally for one agent."""
+    # Midnight of N days ago.
     end_date = datetime.now(timezone.utc)
     start_date = (end_date - timedelta(days=days - 1)).replace(
         hour=0, minute=0, second=0, microsecond=0
@@ -132,11 +126,7 @@ async def get_daily_stats(
     dates = [(start_date + timedelta(days=i)).date() for i in range(days)]
 
     async def get_counts_for_model(model):
-        from kavalai.db import Run, Session, Agent
-
-        # func.date(model.created_at) might depend on DB type,
-        # for Postgres it works to get the date part.
-        if model == Run:
+        if model is Run:
             stmt = (
                 select(
                     func.date(model.created_at).label("date"),
@@ -160,21 +150,19 @@ async def get_daily_stats(
         stmt = stmt.where(model.created_at >= start_date)
 
         if agent_id:
-            if model == Run:
-                # Run doesn't have agent_id, it belongs to a Session
+            if model is Run:
+                # Already joined to Session above; Run has no agent_id.
                 stmt = stmt.where(Session.agent_id == agent_id)
-            elif str(model.__name__) == "Task":
+            elif model is Task:
                 stmt = (
                     stmt.join(Run, model.run_id == Run.id)
                     .join(Session, Run.session_id == Session.id)
                     .where(Session.agent_id == agent_id)
                 )
-            elif model == ChatMessage:
-                stmt = stmt.where(model.agent_id == agent_id)
             else:
                 stmt = stmt.where(model.agent_id == agent_id)
 
-        if model == Run:
+        if model is Run:
             stmt = stmt.group_by(func.date(model.created_at), Agent.name).order_by(
                 func.date(model.created_at)
             )
@@ -183,12 +171,10 @@ async def get_daily_stats(
                 func.date(model.created_at)
             )
         result = await session.execute(stmt)
-        if model == Run:
+        if model is Run:
             runs_by_agent = {}
             for row in result.all():
-                if row.agent_name not in runs_by_agent:
-                    runs_by_agent[row.agent_name] = {}
-                runs_by_agent[row.agent_name][row.date] = {
+                runs_by_agent.setdefault(row.agent_name, {})[row.date] = {
                     "count": row.count,
                     "duration_seconds": float(row.duration_seconds or 0),
                 }
@@ -220,9 +206,7 @@ async def get_daily_stats(
 
         stats_by_model = {}
         for row in result.all():
-            if row.model_name not in stats_by_model:
-                stats_by_model[row.model_name] = {}
-            stats_by_model[row.model_name][row.date] = {
+            stats_by_model.setdefault(row.model_name, {})[row.date] = {
                 "count": row.count,
                 "duration_seconds": float(row.duration_seconds or 0),
                 "prompt_tokens": int(row.prompt_tokens or 0),
@@ -237,8 +221,6 @@ async def get_daily_stats(
     runs_counts = await get_counts_for_model(Run)
     sessions_counts = await get_counts_for_model(Session)
     messages_counts = await get_counts_for_model(ChatMessage)
-    from kavalai.db import Task
-
     tasks_counts = await get_counts_for_model(Task)
     llm_stats = await get_model_stats("llm")
     embedding_stats = await get_model_stats("embedding")

@@ -88,7 +88,7 @@ class SchemaParser:
                 # Inline object definition, create a nested model
                 nested_fields = {
                     k: self._json_type_to_python(v, context=f"{context}.{k}")
-                    for k, v in prop_def.get("properties", {}).items()
+                    for k, v in prop_def["properties"].items()
                 }
                 python_type = create_model(
                     "InlineModel",
@@ -138,7 +138,7 @@ class SchemaParser:
         if "$ref" in schema:
             ref_name = schema["$ref"]
             ref_model = self.parse_type(ref_name)
-            # Create a subclass or alias? Subclass with the new name is better for clarity.
+            # A subclass rather than an alias, so the model carries its own name.
             model = create_model(
                 type_name,
                 __base__=ref_model,
@@ -147,14 +147,12 @@ class SchemaParser:
             self.models[type_name] = model
             return model
 
-        properties = schema.get("properties", {})
-        fields = {}
-
-        for field_name, field_def in properties.items():
-            # Now returns (type, FieldInfo)
-            fields[field_name] = self._json_type_to_python(
+        fields = {
+            field_name: self._json_type_to_python(
                 field_def, context=f"property '{field_name}'"
             )
+            for field_name, field_def in schema.get("properties", {}).items()
+        }
 
         model = create_model(type_name, __config__=ConfigDict(extra="forbid"), **fields)
         self.models[type_name] = model

@@ -109,19 +109,9 @@ class AgentClient:
         Returns:
             An instance of the agent's output schema with the run's result.
         """
-        if self.input_schema is None or self.output_schema is None:
-            await self.discover_schemas()
-
-        payload = {
-            "session_id": self.session_id,
-            "external_id": external_id,
-            "data": data.model_dump(),
-        }
-
-        url = f"{self.base_url}/run_agent"
-
+        payload = await self._payload(data, external_id)
         async with self._http_client() as client:
-            resp = await client.post(url, json=payload)
+            resp = await client.post(f"{self.base_url}/run_agent", json=payload)
             resp.raise_for_status()
             response_json = resp.json()
 
@@ -144,24 +134,21 @@ class AgentClient:
         Yields:
             str: Successive content chunks from the streamed response.
         """
-        if self.input_schema is None or self.output_schema is None:
-            await self.discover_schemas()
-
-        payload = {
-            "session_id": self.session_id,
-            "external_id": external_id,
-            "data": data.model_dump(),
-        }
-
+        payload = await self._payload(data, external_id)
         url = f"{self.base_url}/stream_agent"
-
         async with self._http_client() as client:
             async with client.stream("POST", url, json=payload) as response:
                 response.raise_for_status()
                 async for line in response.aiter_lines():
-                    async for chunk in self._process_stream_line(line):
-                        yield chunk
+                    if line.startswith("data: "):
+                        yield line[len("data: ") :]
 
-    async def _process_stream_line(self, line: str):
-        if line.startswith("data: "):
-            yield line[6:]
+    async def _payload(self, data: BaseModel, external_id: Optional[str]) -> dict:
+        """Build a request body, discovering the schemas on first use."""
+        if self.input_schema is None or self.output_schema is None:
+            await self.discover_schemas()
+        return {
+            "session_id": self.session_id,
+            "external_id": external_id,
+            "data": data.model_dump(),
+        }
