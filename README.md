@@ -208,6 +208,82 @@ against a PostgreSQL/`pgvector` index. A RAG index can also be pre-built and
 shipped to the browser — see
 [Running in the browser](https://docs.kaval.ai/tutorials/run_in_browser.html).
 
+### Building a workflow
+
+The retrieval-then-answer loop above is two steps with a hand-written glue
+line between them. A **workflow** makes those steps explicit nodes of a graph
+that Kaval.AI executes, records and serves. The graph below reuses the `rag`
+index from the previous section: a `rag_query` node fetches the closest facts
+for the user's message, and an `llm` node writes the reply from them. Input and
+output are Pydantic models, so a run is typed end to end.
+
+```python
+from pydantic import BaseModel
+
+from kavalai.workflow import WorkflowBuilder
+
+
+class Message(BaseModel):
+    user_message: str
+
+
+class Reply(BaseModel):
+    agent_response: str
+
+
+engine = (
+    WorkflowBuilder("Green Village support", llm_model="openai/gpt-5.4-mini")
+    .data_model("input", Message)
+    .data_model("output", Reply)
+    .start("get_related_facts")
+    .rag_query(
+        "get_related_facts",
+        query="{{ context.input.user_message }}",
+        output="facts",
+        top_k=5,
+        store="content",
+        next="reply",
+    )
+    .llm(
+        "reply",
+        prompt=(
+            "You are the assistant of the Green Village tourist "
+            "information centre. Answer using only these facts:\n"
+            "{{ context.facts }}"
+        ),
+        inputs={"input": "input", "facts": "facts"},
+        output="output",
+        next="end",
+    )
+    .end()
+    .build_engine(rag_services=rag)
+)
+
+state = await engine.run(
+    {"user_message": "Who runs the bakery, and where can I get a pint?"}
+)
+print(state.output_data)
+print(state.status, state.token_usage)
+```
+
+Response:
+```
+{'agent_response': 'The bakery is run by Greta Lindqvist. You can get a pint at Green Village’s only pub, The Rusty Anchor.'}
+completed {'model_calls': 1, 'prompt_tokens': 278, 'completion_tokens': 39, 'total_tokens': 317}
+```
+
+`store="content"` keeps only the hit texts in `context.facts`, which is all
+the prompt needs; the `{{ … }}` references are Kaval.AI's own expression
+language, not Jinja2. The same graph can be written as YAML and loaded with
+`WorkflowEngine.from_yaml_path`, and served over REST with
+`create_agent_router` — `examples/green_village/` is exactly this workflow as
+a chatbot on port 25000, with 64 evaluation cases beside it. Conditional
+routing, parallel fan-out, function and agent nodes and the task logger are
+covered in the
+[workflows tutorial](https://docs.kaval.ai/tutorials/workflow.html); serving
+and evaluation in [Serving](https://docs.kaval.ai/tutorials/serving.html) and
+[Evaluation](https://docs.kaval.ai/guides/evaluation.html).
+
 
 ## The backoffice UI
 
