@@ -239,8 +239,10 @@ print(state.status, state.token_usage)
 
 Response:
 ```
-{'agent_response': 'The bakery is run by Greta Lindqvist. You can get a pint at Green Village’s only pub, The Rusty Anchor.'}
-completed {'model_calls': 1, 'prompt_tokens': 278, 'completion_tokens': 39, 'total_tokens': 317}
+{'agent_response': 'The bakery is run by Greta Lindqvist. You can get a pint '
+                   'at Green Village’s only pub, The Rusty Anchor.'}
+completed {'model_calls': 1, 'prompt_tokens': 278,
+           'completion_tokens': 39, 'total_tokens': 317}
 ```
 
 The same graph can be written as YAML, served over REST with one call, and
