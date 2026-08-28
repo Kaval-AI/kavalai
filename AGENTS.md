@@ -156,6 +156,30 @@ cd frontend && npm test -- --watch=false
 - Do not edit `README.md` unless asked; it deep-links to documentation anchors,
   so renaming a heading in the tutorials breaks it.
 
+## README style
+
+`README.md` is the shop window, not the documentation, and is edited only
+when asked. When it is, keep to the pattern it already follows:
+
+- Each example is one short lead sentence saying what the snippet does
+  ("Index the data", "Query the dataset"), then the code, then the real
+  output under `Response:`. No commentary after the output — the code and the
+  result make the point.
+- No parameter explanations, internals or design rationale (`store="content"`,
+  "not Jinja2", the missing cost column). They belong in the docs; the README
+  says what a thing does, not how.
+- One link per section, at the end, in the form "See [X](…) for more" — not a
+  list of sub-topic anchors.
+- The intro is one sentence and a bulleted feature list, each bullet a bold
+  phrase, an em dash, and one clause. Install, backoffice and licence are a
+  line each.
+- Every output is genuine: run the snippet against the named model and paste
+  what it printed, wrapped to 80 columns so it reads on a phone. Examples
+  build on each other (the RAG index feeds the workflow), so a later section
+  may reuse a name defined earlier without redefining it.
+- It deep-links to documentation anchors, so renaming a tutorial heading
+  breaks it.
+
 ## Documentation
 
 - `sphinx-build -b html docs docs/_build/html` must finish with **zero

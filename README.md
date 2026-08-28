@@ -5,10 +5,6 @@
 Kaval.AI is an opinionated Python library for building well-defined, testable and robust
 agentic workflows, chatbots and tools.
 
-One small interface for every model
-provider, typed inputs and outputs everywhere, and a workflow engine that
-records every run in a database you own.
-
 - **Any model, one interface** — OpenAI, Google, Anthropic, Ollama and
   in-browser WebLLM
   ([LLM clients](https://docs.kaval.ai/tutorials/llm_clients.html),
@@ -28,8 +24,7 @@ records every run in a database you own.
   and browsable in the backoffice UI
   ([data model](https://docs.kaval.ai/guides/data_model.html)).
 
-The design, and the reasoning behind it, is set out in
-[Architecture](https://docs.kaval.ai/tutorials/architecture.html).
+Check out [docs.kaval.ai](https://docs.kaval.ai/) for examples and in-depth tutorials.
 
 ## Install
 
@@ -37,9 +32,9 @@ The design, and the reasoning behind it, is set out in
 pip install "kavalai[common]"
 ```
 
-`common` brings the provider SDKs, RAG, MCP and the servers. The bare
-`kavalai` package stays small enough to run in the browser. See
-[Installation](https://docs.kaval.ai/tutorials/installation.html).
+`common` brings the provider SDKs, RAG, MCP and the servers.
+See
+[Installation](https://docs.kaval.ai/tutorials/installation.html) for more details.
 
 ## Getting started
 
@@ -59,19 +54,18 @@ os.environ["ANTHROPIC_API_KEY"] = '...'
 ```python
 from kavalai import make_client
 
-client = make_client("openai/gpt-5.4-mini")
+client = make_client("openai/gpt-5.6-luna")
 answer = await client.prompt("What is the capital of Estonia?")
 print (answer)
 ```
 
 Response:
 ```
-The capital of Estonia is Tallinn.
+The capital of Estonia is **Tallinn**.
 ```
 
-Ask for a [Pydantic](https://pydantic.dev/docs/validation/latest/get-started/)
-model and you get a validated object back, not a string to parse — with any
-provider:
+Use structured responses by passing a [Pydantic](https://pydantic.dev/docs/validation/latest/get-started/)
+model:
 
 ```python
 from pydantic import BaseModel
@@ -88,22 +82,70 @@ print(city)
 
 Response:
 ```
-name='Tallinn' country='Estonia' fun_fact='Medieval Old Town of Tallinn is one of the best-preserved in Northern Europe.'
+name='Tallinn' country='Estonia'
+fun_fact='Tallinn’s remarkably well-preserved medieval Old Town is a UNESCO
+          World Heritage Site, and the city is widely regarded as one of the
+          world’s most digitally advanced capitals.'
 ```
 
-[Streaming](https://docs.kaval.ai/tutorials/llm_clients.html#streaming-responses),
-[timeouts and retries](https://docs.kaval.ai/tutorials/llm_clients.html#timeouts-and-retries)
-and [token statistics](https://docs.kaval.ai/tutorials/llm_clients.html#model-statistics-and-observability)
-come with the same client. Tool calling and multi-step loops are in
-[Agents & tools](https://docs.kaval.ai/tutorials/agents.html).
+### Tools and agents
+
+Kaval.AI has built-in agent loop that supports tool calling:
+
+```python
+from datetime import date
+
+from pydantic import BaseModel
+
+from kavalai import Agent, FunctionKernel, make_client, pythontool
+from kavalai.tools.webtools.crawl4ai import web_search
+
+
+@pythontool
+def today() -> str:
+    """Return today's date in ISO format."""
+    return date.today().isoformat()
+
+
+class Answer(BaseModel):
+    answer: str
+    sources: list[str]
+
+
+kernel = FunctionKernel()
+kernel.register_python_tool("today", today)
+kernel.register_python_tool("web_search", web_search)
+
+agent = Agent(llm_client=make_client("openai/gpt-5.6-luna"), kernel=kernel)
+result = await agent.prompt(
+    "When is the next Tallinn Marathon, and how many days away is it?",
+    response_model=Answer,
+    max_steps=5,
+)
+print(result.answer)
+for url in result.sources:
+    print(url)
+```
+
+Response:
+```
+The next Tallinn Marathon is scheduled for **Sunday, September 13, 2026**.
+From today, **August 28, 2026**, it is **16 days away**.
+
+Sources:
+- https://marathonscout.com/races/swedbank-tallinn-marathon
+- https://www.jooks.ee/en/tallinn-marathon/
+https://marathonscout.com/races/swedbank-tallinn-marathon
+https://www.jooks.ee/en/tallinn-marathon/
+```
+
+See using [Agents & tools](https://docs.kaval.ai/tutorials/agents.html) for more.
 
 ### Using retrieval-augmented generation (RAG)
 
-RAG lets a model answer from your own data: index it once, retrieve the
-closest passages for each question, and put them in the prompt. Kaval.AI
-ships a `RagService` that does the indexing and the retrieval.
+Retrieval-agumented generation allows the model to operate with data
+it was not trained with:
 
-Take some facts about a fictional village:
 ```python
 FACTS = """\
 Green Village has 104 residents.
@@ -117,9 +159,7 @@ Green Village's only pub, The Rusty Anchor, has been operating since 1923.
 """.splitlines()
 ```
 
-Index them in SQLite — in production, the same code runs on
-PostgreSQL/pgvector. The embedding model is named `provider/model` too, and
-`fastembed` runs locally with no API key:
+Index the data the way you want
 
 ```python
 from kavalai.rag import SqliteRagService
@@ -132,7 +172,7 @@ await rag.index_batch(
 )
 ```
 
-Query it and the closest facts come back, ranked by similarity:
+Query the dataset
 
 ```python
 question = "How old was the Green Village's oldest resident on 2025 Turnip Festival?"
@@ -151,42 +191,13 @@ for hit in hits:
 0.62  The annual Turnip Festival takes place every year on the third Saturday of October.
 ```
 
-Put the hits in a prompt and the model answers from them:
-
-```python
-PROMPT = """Answer the question using only the facts below.
-
-Facts:
-{context}
-
-Question: {question}
-"""
-
-context = "\n".join(f"- {hit.content}" for hit in hits)
-client = make_client("openai/gpt-5.4-mini")
-print(await client.prompt(PROMPT.format(context=context, question=question)))
-```
-
-Response:
-```
-Agnes Whitlow was born on 02.06.1929.
-The Turnip Festival in 2025 took place on the third Saturday of October, which was **18 October 2025**.
-
-So her age on that date was **96 years old**.
-```
-
-The [RAG tutorial](https://docs.kaval.ai/tutorials/rag.html) goes on to
-[chunked documents](https://docs.kaval.ai/tutorials/rag.html#chunked-documents-and-keep-best),
-[batched queries](https://docs.kaval.ai/tutorials/rag.html#batched-queries) and
-[similarity matrices](https://docs.kaval.ai/tutorials/rag.html#similarity-matrix),
-and an index can even be pre-built and shipped to the browser.
+Check out the [RAG tutorial](https://docs.kaval.ai/tutorials/rag.html).
 
 ### Building a workflow
 
-The loop above is two steps and a line of glue. A **workflow** turns those
-steps into a graph that Kaval.AI executes, records and serves. This one
-retrieves the closest facts for the user's message, then writes the reply from
-them — typed at both ends by Pydantic models:
+Turn the Green Village index above into a chatbot: a `rag_query` node
+fetches the closest facts for the user's message, and an `llm` node answers
+from them.
 
 ```python
 from pydantic import BaseModel
@@ -203,7 +214,7 @@ class Reply(BaseModel):
 
 
 engine = (
-    WorkflowBuilder("Green Village support", llm_model="openai/gpt-5.4-mini")
+    WorkflowBuilder("Green Village support", llm_model="openai/gpt-5.6-luna")
     .data_model("input", Message)
     .data_model("output", Reply)
     .start("get_related_facts")
@@ -230,56 +241,31 @@ engine = (
     .build_engine(rag_services=rag)
 )
 
-state = await engine.run(
-    {"user_message": "Who runs the bakery, and where can I get a pint?"}
-)
+state = await engine.run({"user_message": question})
 print(state.output_data)
 print(state.status, state.token_usage)
 ```
 
 Response:
 ```
-{'agent_response': 'The bakery is run by Greta Lindqvist. You can get a pint '
-                   'at Green Village’s only pub, The Rusty Anchor.'}
-completed {'model_calls': 1, 'prompt_tokens': 278,
-           'completion_tokens': 39, 'total_tokens': 317}
+{'agent_response': 'Agnes Whitlow was 96 years old at the 2025 Turnip '
+                   'Festival, held on 18 October 2025.'}
+completed {'model_calls': 1, 'prompt_tokens': 239,
+           'completion_tokens': 109, 'total_tokens': 348}
 ```
 
-The same graph can be written as YAML, served over REST with one call, and
-evaluated against a file of test cases — `examples/green_village/` is exactly
-this workflow as a chatbot, with 64 evaluation cases beside it. Conditional
-routing, parallel fan-out, agents and tools are in the
-[workflows tutorial](https://docs.kaval.ai/tutorials/workflow.html);
-[Serving](https://docs.kaval.ai/tutorials/serving.html) and
-[Evaluation](https://docs.kaval.ai/guides/evaluation.html) cover the rest.
+See [Workflows tutorial](https://docs.kaval.ai/tutorials/workflow.html) for more info.
 
 
 ## The backoffice UI
 
-Everything a workflow does is recorded, and the backoffice UI lets you see
-it: sessions, runs and model-call statistics, a step-by-step task debugger,
-and a RAG explorer for browsing your indexes.
+Use the [Backoffice UI](https://docs.kaval.ai/ui/index.html). to observe and debug chat sessions, workflow runs and inspect RAG.
 
 <a href="https://raw.githubusercontent.com/Kaval-AI/kaval.ai/main/docs/ui/projectinfopage.png">
   <img src="https://raw.githubusercontent.com/Kaval-AI/kaval.ai/main/docs/ui/projectinfopage.png" alt="Kaval.AI backoffice project page with database details and activity charts" width="400px"/>
 </a>
 
-For details, see
-[Using the backoffice UI](https://docs.kaval.ai/ui/index.html).
-
-## Documentation
-
-The full documentation is at [docs.kaval.ai](https://docs.kaval.ai/) — every
-tutorial is a runnable notebook.
 
 ## License
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+[Apache 2.0](http://www.apache.org/licenses/LICENSE-2.0)
