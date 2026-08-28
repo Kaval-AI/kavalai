@@ -170,11 +170,10 @@ class SqliteTaskLogger(TaskLogger):
         await conn.commit()
 
     async def get_tasks(self, run_id: Optional[str] = None) -> list[dict]:
-        """Return logged node executions, newest table order, as plain dicts.
+        """Return logged node executions, in table order, as plain dicts.
 
         ``inputs``, ``output`` and ``errors`` come back decoded rather than as
-        JSON strings. Reading these used to mean reaching for ``_connect()``
-        and writing SQL by hand, which the observability tutorial had to teach.
+        JSON strings.
 
         Args:
             run_id: Restrict to one run. ``None`` returns every logged task.
@@ -182,11 +181,11 @@ class SqliteTaskLogger(TaskLogger):
         return await self._select("tasks", run_id, ("inputs", "output", "errors"))
 
     async def get_model_calls(self, run_id: Optional[str] = None) -> list[dict]:
-        """Return logged model calls as plain dicts.
+        """Return every logged model call as a plain dict.
 
-        Note that ``model_call_stats`` rows carry no ``run_id`` — the stats
-        arrive from the LLM client, which knows the agent but not the run — so
-        ``run_id`` filters by agent only when the tasks table can resolve it.
+        ``model_call_stats`` rows carry no ``run_id`` — the stats arrive from
+        the LLM client, which knows the agent but not the run — so ``run_id``
+        is accepted for symmetry with :meth:`get_tasks` and ignored.
         """
         return await self._select("model_call_stats", None, ())
 

@@ -14,10 +14,14 @@ def test_to_orm_stat_converts_and_passes_through():
         prompt_tokens=3,
         completion_tokens=2,
         total_tokens=5,
+        cached_prompt_tokens=1,
+        reasoning_tokens=1,
     )
     orm = _to_orm_stat(pyd)
     assert isinstance(orm, ModelCallStat)
     assert orm.model == "openai/x" and orm.total_tokens == 5
+    # The token-detail columns must survive the conversion too.
+    assert orm.cached_prompt_tokens == 1 and orm.reasoning_tokens == 1
     # An ORM stat is returned unchanged.
     assert _to_orm_stat(orm) is orm
 

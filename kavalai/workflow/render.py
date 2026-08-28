@@ -60,11 +60,10 @@ def _esc(value: Any) -> str:
 
 
 def _truncate(value: str, limit: int = 26) -> str:
-    value = str(value)
     return value if len(value) <= limit else value[: limit - 1] + "…"
 
 
-def _as_dict(workflow: Union["Any", dict]) -> dict:
+def _as_dict(workflow: Union[Any, dict]) -> dict:
     """Normalise a WorkflowGraph or its JSON into a plain dict."""
     if isinstance(workflow, dict):
         return workflow
@@ -230,7 +229,7 @@ def _edge_path(
     return path, (bow - 6, (s_y + t_y) / 2), bow
 
 
-def render_workflow_svg(workflow: Union["Any", dict]) -> str:
+def render_workflow_svg(workflow: Union[Any, dict]) -> str:
     """Render a workflow to a standalone SVG string.
 
     Args:
@@ -278,12 +277,16 @@ def render_workflow_svg(workflow: Union["Any", dict]) -> str:
                 )
 
     parts: list[str] = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width:.0f}" '
-        f'height="{height:.0f}" viewBox="0 0 {width:.0f} {height:.0f}" '
-        'font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif">',
-        '<defs><marker id="kv-arrow" viewBox="0 0 10 10" refX="9" refY="5" '
-        'markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
-        '<path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker></defs>',
+        (
+            f'<svg xmlns="http://www.w3.org/2000/svg" width="{width:.0f}" '
+            f'height="{height:.0f}" viewBox="0 0 {width:.0f} {height:.0f}" '
+            'font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif">'
+        ),
+        (
+            '<defs><marker id="kv-arrow" viewBox="0 0 10 10" refX="9" refY="5" '
+            'markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
+            '<path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker></defs>'
+        ),
         f'<rect width="{width:.0f}" height="{height:.0f}" fill="#1e1e2e"/>',
     ]
     parts.extend(edge_parts)

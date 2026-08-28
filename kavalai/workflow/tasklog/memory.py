@@ -16,7 +16,7 @@ limitations under the License.
 
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from kavalai.llm_clients.base_client import ModelCallStat
 from kavalai.workflow.tasklog.base import TaskLogger

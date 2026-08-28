@@ -20,8 +20,9 @@ import itertools
 import json
 import os
 import time
+from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass
-from typing import Any, AsyncGenerator, Callable, Optional, Type, Union
+from typing import Any, Optional, Union
 from uuid import UUID, uuid4
 
 import yaml
@@ -210,8 +211,7 @@ class WorkflowEngine:
         # the service itself is built on first use.
         self._validate_rag_services()
 
-        # Build the function kernel and register declared servers / tools, reusing
-        # the v1 registration approach.
+        # The kernel is engine state: registered once, shared by every run.
         self.kernel = FunctionKernel()
         for server in graph.rest_servers:
             self.kernel.register_rest_server(server)
@@ -229,12 +229,8 @@ class WorkflowEngine:
     @classmethod
     def from_yaml(cls, yaml_string: str, **kwargs) -> "WorkflowEngine":
         """Build an engine from a YAML workflow definition string."""
-        try:
-            data = yaml.load(yaml_string, Loader=yaml.SafeLoader)  # nosec B506
-            graph = WorkflowGraph(**data)
-        except ValidationError as e:
-            raise WorkflowException(f"Workflow validation failed: {e}") from e
-        return cls(graph, **kwargs)
+        data = yaml.load(yaml_string, Loader=yaml.SafeLoader)  # nosec B506
+        return cls.from_dict(data, **kwargs)
 
     @classmethod
     def from_yaml_path(cls, yaml_path: str, **kwargs) -> "WorkflowEngine":
@@ -290,10 +286,8 @@ class WorkflowEngine:
         await self.aclose()
 
     # ------------------------------------------------------------------- helpers
-    def get_data_type(self, name: Optional[str]):
-        if not name:
-            return None
-        return self.models.get(name)
+    def get_data_type(self, name: Optional[str]) -> Optional[type[BaseModel]]:
+        return self.models.get(name) if name else None
 
     def _resolve_model(self, node_model: Optional[str]) -> str:
         model = (
@@ -356,8 +350,7 @@ class WorkflowEngine:
         self, node_model: Optional[str], llm_kwargs: dict, run_context: RunContext
     ) -> BaseLlmClient:
         model = self._resolve_model(node_model)
-        merged = dict(self.graph.llm_kwargs)
-        merged.update(llm_kwargs or {})
+        merged = {**self.graph.llm_kwargs, **(llm_kwargs or {})}
         parameters = client_factory_module.build_parameters(merged)
         # The accumulator belongs to the run, not the engine: one engine serves
         # many concurrent runs (see ``kavalai.server``), and a shared counter
@@ -366,7 +359,8 @@ class WorkflowEngine:
         return self.client_factory(model, parameters, run_context.token_stats)
 
     # --------------------------------------------------------------------- nodes
-    def _scoped_event(self, node: Node, chunk: StreamContent) -> WorkflowStreamEvent:
+    @staticmethod
+    def _scoped_event(node: Node, chunk: StreamContent) -> WorkflowStreamEvent:
         """Rename a client stream chunk to node scope.
 
         The main ``response`` stream takes the node's name; any other stream
@@ -378,7 +372,7 @@ class WorkflowEngine:
 
     @staticmethod
     def _parse_streamed_output(
-        output_type: Optional[Type[BaseModel]], raw: Optional[str], *, raw_text: bool
+        output_type: Optional[type[BaseModel]], raw: Optional[str], *, raw_text: bool
     ):
         """Parse a completed stream's value into the node's output type.
 
@@ -404,8 +398,9 @@ class WorkflowEngine:
         messages = [ChatMessage(role="system", content=text)]
         if node.use_history and self.agent_service and run_context.session_id:
             history = await self.agent_service.get_chat_history(run_context.session_id)
-            for msg in history:
-                messages.append(ChatMessage(role=msg.role, content=msg.content))
+            messages.extend(
+                ChatMessage(role=msg.role, content=msg.content) for msg in history
+            )
 
         client = self._make_llm_client(node.llm_model, node.llm_kwargs, run_context)
         output_type = self.get_data_type(node.output)
@@ -436,12 +431,11 @@ class WorkflowEngine:
         response = self._parse_streamed_output(
             output_type, response_value, raw_text=node.stream_delta
         )
-        run_context.data[node.output] = response
-        self._log_node(
+        self._store_output(
             run_context,
             node,
+            response,
             inputs=input_data,
-            output=response,
             prompt=text,
             duration=duration,
         )
@@ -488,12 +482,11 @@ class WorkflowEngine:
         duration = time.perf_counter() - start
 
         result = self._parse_streamed_output(output_type, result_value, raw_text=False)
-        run_context.data[node.output] = result
-        self._log_node(
+        self._store_output(
             run_context,
             node,
+            result,
             inputs=input_data,
-            output=result,
             prompt=rendered_prompt,
             duration=duration,
         )
@@ -550,15 +543,14 @@ class WorkflowEngine:
         )
         duration = time.perf_counter() - start
 
-        run_context.data[node.output] = result
         # ``tool_uri`` on a function node's own row is what makes one predicate
         # find every call to a tool, whether a human wired it into the YAML or
         # an agent chose it at step 3.
-        self._log_node(
+        self._store_output(
             run_context,
             node,
+            result,
             inputs=inputs,
-            output=result,
             duration=duration,
             tool_uri=node.tool,
         )
@@ -593,13 +585,35 @@ class WorkflowEngine:
         else:
             value = hits
 
+        self._store_output(
+            run_context,
+            node,
+            value,
+            inputs={"query": query, "collection": collection},
+            duration=duration,
+        )
+
+    def _store_output(
+        self,
+        run_context: RunContext,
+        node: Union[LLMNode, AgentNode, FunctionNode, RagQueryNode],
+        value: Any,
+        *,
+        inputs: Optional[dict],
+        prompt: Optional[str] = None,
+        duration: float,
+        tool_uri: Optional[str] = None,
+    ) -> None:
+        """Store a node's result under ``node.output`` and write its task row."""
         run_context.data[node.output] = value
         self._log_node(
             run_context,
             node,
-            inputs={"query": query, "collection": collection},
+            inputs=inputs,
             output=value,
+            prompt=prompt,
             duration=duration,
+            tool_uri=tool_uri,
         )
 
     def _log_task(
@@ -712,7 +726,7 @@ class WorkflowEngine:
         node: Node,
         run_context: RunContext,
         state: WorkflowState,
-        budget: "_VisitBudget",
+        budget: _VisitBudget,
     ) -> AsyncGenerator[WorkflowStreamEvent, None]:
         """Run a side-effecting node (branch nodes are pure routing)."""
         if isinstance(node, LLMNode):
@@ -782,7 +796,7 @@ class WorkflowEngine:
         node: ParallelNode,
         run_context: RunContext,
         state: WorkflowState,
-        budget: "_VisitBudget",
+        budget: _VisitBudget,
     ) -> AsyncGenerator[WorkflowStreamEvent, None]:
         """Walk every branch concurrently and rejoin at ``node.next``.
 
@@ -822,8 +836,8 @@ class WorkflowEngine:
                 raise
             except Exception as exc:  # surfaced to the driver below
                 queue.put_nowait(("error", exc))
-                return
-            queue.put_nowait(("done", None))
+            else:
+                queue.put_nowait(("done", None))
 
         tasks = [
             asyncio.create_task(walk_branch(i, entry), name=f"{node.name}:{entry}")
@@ -847,11 +861,11 @@ class WorkflowEngine:
                 elif kind == "done":
                     remaining -= 1
                 else:
-                    # One branch failed: stop the siblings before propagating,
-                    # so a long-running branch cannot outlive the run.
-                    await self._cancel_all(tasks)
                     raise payload
         finally:
+            # Also the failure path: the siblings of a failed branch are
+            # cancelled before the error propagates, so a long-running branch
+            # cannot outlive the run.
             await self._cancel_all(tasks)
 
         for trace in traces:
@@ -998,7 +1012,13 @@ class WorkflowEngine:
                     session_id=state.session_id,
                     run_id=state.run_id,
                 )
-                async for event in self._walk(run_context, state):
+                async for event in self._walk_from(
+                    self.graph.start,
+                    run_context,
+                    state,
+                    _VisitBudget(self.max_node_visits),
+                    trace=state.trace,
+                ):
                     yield event
                 state.token_usage = token_stats.summary()
                 yield WorkflowStreamEvent(
@@ -1044,10 +1064,9 @@ class WorkflowEngine:
                 )
                 raise WorkflowException(e) from e
             finally:
-                # The kernel is engine state — tool servers outlive the run and
-                # are released by :meth:`aclose`. Closing it here would tear
-                # down MCP sessions that other runs are still using.
-                # Record and report token usage regardless of success or failure.
+                # The kernel is deliberately not closed here: it is engine
+                # state, released by :meth:`aclose`, and other runs may still be
+                # using its MCP sessions.
                 state.token_usage = token_stats.summary()
                 if run_logger:
                     await run_logger.flush()
@@ -1061,25 +1080,12 @@ class WorkflowEngine:
             f"(prompt={s.prompt_tokens}, completion={s.completion_tokens})"
         )
 
-    async def _walk(
-        self, run_context: RunContext, state: WorkflowState
-    ) -> AsyncGenerator[WorkflowStreamEvent, None]:
-        """Walk the whole graph, from the start node to an end node."""
-        async for event in self._walk_from(
-            self.graph.start,
-            run_context,
-            state,
-            _VisitBudget(self.max_node_visits),
-            trace=state.trace,
-        ):
-            yield event
-
     async def _walk_from(
         self,
         start: str,
         run_context: RunContext,
         state: WorkflowState,
-        budget: "_VisitBudget",
+        budget: _VisitBudget,
         *,
         trace: list[str],
         stop_at: Optional[str] = None,

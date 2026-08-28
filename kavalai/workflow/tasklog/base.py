@@ -135,7 +135,7 @@ class TaskLogger(ABC):
     async def flush(self) -> None:
         """Await all pending background writes."""
         if self._background_tasks:
-            await asyncio.gather(*list(self._background_tasks), return_exceptions=True)
+            await asyncio.gather(*self._background_tasks, return_exceptions=True)
 
     async def close(self) -> None:
         """Flush and release backend resources. Override to add cleanup."""
@@ -171,8 +171,9 @@ class TaskLogger(ABC):
 class StatsBridge(ModelStatsReceiver):
     """Adapter forwarding LLM ``ModelCallStat`` events to a :class:`TaskLogger`.
 
-    Wired into v2 LLM clients via their ``model_stats_receiver`` so every model
-    call made during a workflow is logged against the run's agent.
+    Pass it as an LLM client's ``model_stats_receiver`` to log every call the
+    client makes against ``agent_id``. The engine itself uses
+    :class:`TokenAccumulator`, which also forwards to a logger.
     """
 
     def __init__(self, task_logger: TaskLogger, agent_id: Optional[str] = None):

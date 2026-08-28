@@ -19,6 +19,7 @@ declarations and the workflow exception) and the v2 workflow graph (nodes and
 """
 
 import json
+from itertools import combinations
 from typing import Optional, Literal, Union, Annotated, Any, ClassVar
 
 from loguru import logger
@@ -646,7 +647,6 @@ class WorkflowGraph(BaseModel):
                 f"found {sorted(end_outputs)}."
             )
 
-        # Validate every transition target references an existing node.
         for node in self.nodes:
             for target in self._transition_targets(node):
                 if target not in name_set:
@@ -732,36 +732,33 @@ class WorkflowGraph(BaseModel):
 
         # Disjoint subgraphs: a node shared by two branches would execute twice,
         # concurrently, against two different contexts.
-        entries = list(node.branches)
-        for i, left in enumerate(entries):
-            for right in entries[i + 1 :]:
-                shared = sorted(set(reach[left]) & set(reach[right]))
-                if shared:
-                    raise ValueError(
-                        f"Parallel node '{node.name}': branches '{left}' and "
-                        f"'{right}' share node(s) {shared}. Branch subgraphs "
-                        f"must be disjoint."
-                    )
+        for left, right in combinations(node.branches, 2):
+            shared = sorted(set(reach[left]) & set(reach[right]))
+            if shared:
+                raise ValueError(
+                    f"Parallel node '{node.name}': branches '{left}' and "
+                    f"'{right}' share node(s) {shared}. Branch subgraphs "
+                    f"must be disjoint."
+                )
 
         # Disjoint writes: two branches writing one context variable is a race
         # whose winner depends on which branch finishes last.
         writes = {
             entry: {
-                getattr(node_map[n], "output")
+                output
                 for n in names
-                if getattr(node_map[n], "output", None) is not None
+                if (output := getattr(node_map[n], "output", None)) is not None
             }
             for entry, names in reach.items()
         }
-        for i, left in enumerate(entries):
-            for right in entries[i + 1 :]:
-                clash = sorted(writes[left] & writes[right])
-                if clash:
-                    raise ValueError(
-                        f"Parallel node '{node.name}': branches '{left}' and "
-                        f"'{right}' both write {clash}. Each branch must write "
-                        f"its own output variable."
-                    )
+        for left, right in combinations(node.branches, 2):
+            clash = sorted(writes[left] & writes[right])
+            if clash:
+                raise ValueError(
+                    f"Parallel node '{node.name}': branches '{left}' and "
+                    f"'{right}' both write {clash}. Each branch must write "
+                    f"its own output variable."
+                )
 
     def _reachable(
         self, entry: str, *, stop_at: str, node_map: dict[str, "Node"]
@@ -779,7 +776,7 @@ class WorkflowGraph(BaseModel):
 
     @staticmethod
     def _transition_targets(node: "Node") -> list[str]:
-        """Return the set of node names a node may transition to."""
+        """Return the node names a node may transition to."""
         if isinstance(node, IfNode):
             return [node.then, node.else_]
         if isinstance(node, SwitchNode):

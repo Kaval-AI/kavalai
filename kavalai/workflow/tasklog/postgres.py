@@ -30,7 +30,7 @@ def _uuid(value: Optional[str]) -> Optional[UUID]:
 
 
 def _to_orm_stat(stats: ModelCallStat) -> DbModelCallStat:
-    """Convert a v2 (Pydantic) ModelCallStat into the persistable ORM row."""
+    """Convert a Pydantic ModelCallStat into the persistable ORM row."""
     if isinstance(stats, DbModelCallStat):
         return stats
     return DbModelCallStat(
@@ -42,6 +42,8 @@ def _to_orm_stat(stats: ModelCallStat) -> DbModelCallStat:
         prompt_tokens=stats.prompt_tokens,
         completion_tokens=stats.completion_tokens,
         total_tokens=stats.total_tokens,
+        cached_prompt_tokens=stats.cached_prompt_tokens,
+        reasoning_tokens=stats.reasoning_tokens,
         batch_size=stats.batch_size,
         duration_seconds=stats.duration_seconds,
     )
@@ -51,8 +53,8 @@ class PostgresTaskLogger(TaskLogger):
     """Postgres-backed :class:`TaskLogger` delegating to :class:`AgentService`.
 
     Node executions become ``tasks`` rows (with their ``node_type``) and model
-    calls become ``model_call_stats`` rows, keeping the backoffice dashboards
-    populated for v2 runs.
+    calls become ``model_call_stats`` rows, which is what the backoffice
+    dashboards read.
     """
 
     def __init__(self, agent_service: AgentService):
