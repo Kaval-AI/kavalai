@@ -41,7 +41,11 @@ browsable in the bundled backoffice: projects and their agents, whole
 conversations, a per-node task debugger, model-call statistics and a RAG
 explorer with a PCA view of the embedding space.
 
-<img src="https://raw.githubusercontent.com/Kaval-AI/kaval.ai/main/docs/ui/projectinfopage.png" alt="Kaval.AI backoffice project page with database details and activity charts" width="100%"/>
+A glimpse of the project page — click for full size:
+
+<a href="https://raw.githubusercontent.com/Kaval-AI/kaval.ai/main/docs/ui/projectinfopage.png">
+  <img src="https://raw.githubusercontent.com/Kaval-AI/kaval.ai/main/docs/ui/projectinfopage.png" alt="Kaval.AI backoffice project page with database details and activity charts" width="100%"/>
+</a>
 
 Setup and a tour of every page are in
 [Using the backoffice UI](https://docs.kaval.ai/ui/index.html).
