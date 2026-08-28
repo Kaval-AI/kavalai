@@ -2,37 +2,34 @@
 
 [![CI](https://github.com/Kaval-AI/kaval.ai/actions/workflows/ci.yml/badge.svg)](https://github.com/Kaval-AI/kaval.ai/actions/workflows/ci.yml)
 
-Kaval.AI is an opinionated and elegant Python library for building production-grade agentic workflows, chatbots and tools.
+Kaval.AI is an opinionated Python library for building well-defined, testable and robust
+agentic workflows, chatbots and tools.
 
+One small interface for every model
+provider, typed inputs and outputs everywhere, and a workflow engine that
+records every run in a database you own.
 
-Features:
-- Supports commercial (OpenAI, Google, Anthropic) and open-source LLM
-  providers
-  (see [LLM clients](https://docs.kaval.ai/tutorials/llm_clients.html)).
-- Runs directly in the browser using via WebLLM and Pyodide
-  (see [running in the browser](https://docs.kaval.ai/tutorials/run_in_browser.html)).
-- Retrieval-augmented generation (RAG) over several storage engines
-  (see [RAG](https://docs.kaval.ai/tutorials/rag.html)).
-- Structured inputs, outputs, tool calls and responses expressed with Pydantic
-  semantics
-  (see [typed inputs and outputs](https://docs.kaval.ai/tutorials/agents.html#typed-inputs-and-outputs)).
-- Streaming responses
-  (see [streaming](https://docs.kaval.ai/tutorials/streamer.html)).
-- A complete workflow engine with conditional routing, parallel fan-out and
-  tool calling
-  (see [workflows tutorial](https://docs.kaval.ai/tutorials/workflow.html),
-  [workflow concepts](https://docs.kaval.ai/guides/workflows.html)).
-- Python tools, REST server endpoints with basic authentication and MCP
-  support
-  (see [tools](https://docs.kaval.ai/guides/tools.html),
-  [agent server API](https://docs.kaval.ai/api/server.html)).
-- Every session, run, node and model call recorded in a database you own
-  (see [architecture](https://docs.kaval.ai/tutorials/architecture.html),
-  [data model](https://docs.kaval.ai/guides/data_model.html)).
+- **Any model, one interface** — OpenAI, Google, Anthropic, Ollama and
+  in-browser WebLLM
+  ([LLM clients](https://docs.kaval.ai/tutorials/llm_clients.html),
+  [running in the browser](https://docs.kaval.ai/tutorials/run_in_browser.html)).
+- **Typed end to end** — inputs, outputs and tool calls are Pydantic models
+  ([typed inputs and outputs](https://docs.kaval.ai/tutorials/agents.html#typed-inputs-and-outputs)).
+- **Retrieval built in** — RAG over SQLite or PostgreSQL/pgvector, with local
+  or hosted embeddings ([RAG](https://docs.kaval.ai/tutorials/rag.html)).
+- **Workflows as graphs** — conditional routing, parallel fan-out, agents and
+  tool calls, in Python or YAML
+  ([workflows](https://docs.kaval.ai/tutorials/workflow.html)).
+- **Tools your way** — Python functions, REST endpoints and MCP servers
+  ([tools](https://docs.kaval.ai/guides/tools.html)).
+- **Streaming** from a single model call to a whole workflow
+  ([streaming](https://docs.kaval.ai/tutorials/streamer.html)).
+- **Full observability** — every session, run, node and model call is recorded
+  and browsable in the backoffice UI
+  ([data model](https://docs.kaval.ai/guides/data_model.html)).
 
-See the [full documentation](https://docs.kaval.ai) for a more detailed
-reference. The design of the library, and the reasoning behind it, is set out
-in [Architecture](https://docs.kaval.ai/tutorials/architecture.html).
+The design, and the reasoning behind it, is set out in
+[Architecture](https://docs.kaval.ai/tutorials/architecture.html).
 
 ## Install
 
@@ -40,23 +37,16 @@ in [Architecture](https://docs.kaval.ai/tutorials/architecture.html).
 pip install "kavalai[common]"
 ```
 
-`common` is the normal install: the provider SDKs, RAG and embeddings, the
-Postgres drivers, MCP and the REST/SSE servers. The bare `kavalai` package stays
-small and Pyodide-compatible, and `kavalai[common_web]` is its browser
-counterpart. See
-[Installation](https://docs.kaval.ai/tutorials/installation.html) for the full
-table and provider configuration.
+`common` brings the provider SDKs, RAG, MCP and the servers. The bare
+`kavalai` package stays small enough to run in the browser. See
+[Installation](https://docs.kaval.ai/tutorials/installation.html).
 
 ## Getting started
 
 ### Call a model
 
-Every provider sits behind one small async interface. `make_client` builds the
-right client from a `provider/model` id and reads the matching API key
-(`OPENAI_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, …) from the
-environment — see
-[Provider clients](https://docs.kaval.ai/tutorials/llm_clients.html#provider-clients-openai-gemini-anthropic-and-ollama)
-for the full list, Ollama included:
+Name a model as `provider/model` and `make_client` does the rest, reading the
+API key from the environment:
 
 ```python
 import os
@@ -79,8 +69,9 @@ Response:
 The capital of Estonia is Tallinn.
 ```
 
-Pass a [Pydantic](https://pydantic.dev/docs/validation/latest/get-started/) `response_model` and you get a validated object back instead of
-a string to parse — with any provider:
+Ask for a [Pydantic](https://pydantic.dev/docs/validation/latest/get-started/)
+model and you get a validated object back, not a string to parse — with any
+provider:
 
 ```python
 from pydantic import BaseModel
@@ -100,26 +91,19 @@ Response:
 name='Tallinn' country='Estonia' fun_fact='Medieval Old Town of Tallinn is one of the best-preserved in Northern Europe.'
 ```
 
-More on calling models: the
-[LLM clients tutorial](https://docs.kaval.ai/tutorials/llm_clients.html) covers
-[streaming responses](https://docs.kaval.ai/tutorials/llm_clients.html#streaming-responses),
+[Streaming](https://docs.kaval.ai/tutorials/llm_clients.html#streaming-responses),
 [timeouts and retries](https://docs.kaval.ai/tutorials/llm_clients.html#timeouts-and-retries)
-and [token usage statistics](https://docs.kaval.ai/tutorials/llm_clients.html#model-statistics-and-observability),
-with a browser playground you can run without an API key. Tool calling and
-multi-step loops live in [Agents & tools](https://docs.kaval.ai/tutorials/agents.html).
+and [token statistics](https://docs.kaval.ai/tutorials/llm_clients.html#model-statistics-and-observability)
+come with the same client. Tool calling and multi-step loops are in
+[Agents & tools](https://docs.kaval.ai/tutorials/agents.html).
 
 ### Using retrieval-augmented generation (RAG)
 
-RAG is a technique for injecting relevant information in the context of an LLM
-so it could answer questions or perform tasks dependent on information external
-from its training dataset.  A common way this is done involves embedding the information in a vector space and later
-querying it using similarity search.
+RAG lets a model answer from your own data: index it once, retrieve the
+closest passages for each question, and put them in the prompt. Kaval.AI
+ships a `RagService` that does the indexing and the retrieval.
 
-Kaval.AI provides a `RagService` that can index (embed) this information and also query it.
-The [RAG tutorial](https://docs.kaval.ai/tutorials/rag.html) is a runnable
-notebook that walks through the same loop in depth.
-
-For instance, let's define some "facts" about a fictional Green Village
+Take some facts about a fictional village:
 ```python
 FACTS = """\
 Green Village has 104 residents.
@@ -133,12 +117,9 @@ Green Village's only pub, The Rusty Anchor, has been operating since 1923.
 """.splitlines()
 ```
 
-Then, we'll use a in-memory Sqlite database backend to index these facts.
-In production, you can use PostgreSQL pgvector extension or other
-supported vector search databases. The embedding model is named
-`provider/model` too — `fastembed` runs locally with no API key, `openai`,
-`gemini` and `ollama` are also supported; see
-[Choosing an embedding model](https://docs.kaval.ai/tutorials/rag.html#choosing-an-embedding-model).
+Index them in SQLite — in production, the same code runs on
+PostgreSQL/pgvector. The embedding model is named `provider/model` too, and
+`fastembed` runs locally with no API key:
 
 ```python
 from kavalai.rag import SqliteRagService
@@ -151,7 +132,7 @@ await rag.index_batch(
 )
 ```
 
-RagService can be used independently to query the closest matches for a query string.
+Query it and the closest facts come back, ranked by similarity:
 
 ```python
 question = "How old was the Green Village's oldest resident on 2025 Turnip Festival?"
@@ -170,8 +151,7 @@ for hit in hits:
 0.62  The annual Turnip Festival takes place every year on the third Saturday of October.
 ```
 
-In prompt engineering, you would then inject these results in the prompt to give LLM
-
+Put the hits in a prompt and the model answers from them:
 
 ```python
 PROMPT = """Answer the question using only the facts below.
@@ -195,27 +175,18 @@ The Turnip Festival in 2025 took place on the third Saturday of October, which w
 So her age on that date was **96 years old**.
 ```
 
-Every hit is a `RagServiceResult` carrying `content`, `similarity`, `source_id`
-and the `rag_metadata` you indexed it with, so retrieval can be filtered
-(`collection_name=`, `source_ids=`) or inspected on its own — the model call is
-optional.
-
-From here the [RAG tutorial](https://docs.kaval.ai/tutorials/rag.html) covers
-[collapsing chunks of one document with `keep_best`](https://docs.kaval.ai/tutorials/rag.html#chunked-documents-and-keep-best),
+The [RAG tutorial](https://docs.kaval.ai/tutorials/rag.html) goes on to
+[chunked documents](https://docs.kaval.ai/tutorials/rag.html#chunked-documents-and-keep-best),
 [batched queries](https://docs.kaval.ai/tutorials/rag.html#batched-queries) and
-[similarity matrices](https://docs.kaval.ai/tutorials/rag.html#similarity-matrix)
-against a PostgreSQL/`pgvector` index. A RAG index can also be pre-built and
-shipped to the browser — see
-[Running in the browser](https://docs.kaval.ai/tutorials/run_in_browser.html).
+[similarity matrices](https://docs.kaval.ai/tutorials/rag.html#similarity-matrix),
+and an index can even be pre-built and shipped to the browser.
 
 ### Building a workflow
 
-The retrieval-then-answer loop above is two steps with a hand-written glue
-line between them. A **workflow** makes those steps explicit nodes of a graph
-that Kaval.AI executes, records and serves. The graph below reuses the `rag`
-index from the previous section: a `rag_query` node fetches the closest facts
-for the user's message, and an `llm` node writes the reply from them. Input and
-output are Pydantic models, so a run is typed end to end.
+The loop above is two steps and a line of glue. A **workflow** turns those
+steps into a graph that Kaval.AI executes, records and serves. This one
+retrieves the closest facts for the user's message, then writes the reply from
+them — typed at both ends by Pydantic models:
 
 ```python
 from pydantic import BaseModel
@@ -272,27 +243,20 @@ Response:
 completed {'model_calls': 1, 'prompt_tokens': 278, 'completion_tokens': 39, 'total_tokens': 317}
 ```
 
-`store="content"` keeps only the hit texts in `context.facts`, which is all
-the prompt needs; the `{{ … }}` references are Kaval.AI's own expression
-language, not Jinja2. The same graph can be written as YAML and loaded with
-`WorkflowEngine.from_yaml_path`, and served over REST with
-`create_agent_router` — `examples/green_village/` is exactly this workflow as
-a chatbot on port 25000, with 64 evaluation cases beside it. Conditional
-routing, parallel fan-out, function and agent nodes and the task logger are
-covered in the
-[workflows tutorial](https://docs.kaval.ai/tutorials/workflow.html); serving
-and evaluation in [Serving](https://docs.kaval.ai/tutorials/serving.html) and
-[Evaluation](https://docs.kaval.ai/guides/evaluation.html).
+The same graph can be written as YAML, served over REST with one call, and
+evaluated against a file of test cases — `examples/green_village/` is exactly
+this workflow as a chatbot, with 64 evaluation cases beside it. Conditional
+routing, parallel fan-out, agents and tools are in the
+[workflows tutorial](https://docs.kaval.ai/tutorials/workflow.html);
+[Serving](https://docs.kaval.ai/tutorials/serving.html) and
+[Evaluation](https://docs.kaval.ai/guides/evaluation.html) cover the rest.
 
 
 ## The backoffice UI
 
-Kaval.AI has a UI for debugging sessions and workflows.
-
-* Session, run, node and model call stats.
-* Projects/agents overview
-* Detailed task debugger
-* RAG explorer
+Everything a workflow does is recorded, and the backoffice UI lets you see
+it: sessions, runs and model-call statistics, a step-by-step task debugger,
+and a RAG explorer for browsing your indexes.
 
 <a href="https://raw.githubusercontent.com/Kaval-AI/kaval.ai/main/docs/ui/projectinfopage.png">
   <img src="https://raw.githubusercontent.com/Kaval-AI/kaval.ai/main/docs/ui/projectinfopage.png" alt="Kaval.AI backoffice project page with database details and activity charts" width="400px"/>
@@ -303,9 +267,8 @@ For details, see
 
 ## Documentation
 
-For full documentation, please visit [Kaval.AI Documentation](https://docs.kaval.ai/) —
-streaming, tool calling, agents, MCP servers, observability and running in the
-browser are all covered there with runnable examples.
+The full documentation is at [docs.kaval.ai](https://docs.kaval.ai/) — every
+tutorial is a runnable notebook.
 
 ## License
 
