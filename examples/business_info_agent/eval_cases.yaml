@@ -91,10 +91,12 @@ cases:
     input:
       business_query: Kaval.AI (kaval.ai)
     expected: >-
-      Every non-null field reads like something copied off a web page rather
-      than composed: no placeholder text ("N/A", "unknown", "not provided"),
-      no invented-looking phone number or address, and no field padded out
-      into a sentence of marketing prose. `website` is a bare URL.
+      A null field is fine — it means the agent found nothing. Any field that
+      is not null holds no placeholder text ("N/A", "unknown", "not provided")
+      and no invented-looking phone number or address; `website` is a bare
+      URL; `address`, `phone`, `owners` and `industry` are values, not
+      sentences. `description` is one brief sentence saying what the company
+      does, and `summary` is written prose — those two are composed by design.
 
   # ------------------------------------------------- the ones that must fail
   # The research prompt says to leave a field null rather than guess at it,

@@ -145,7 +145,7 @@ Check it works
 
 
    async def main():
-       client = make_client("openai/gpt-5.4-mini")
+       client = make_client("openai/gpt-5.6-luna")
        print(await client.prompt("Say hello in Estonian."))
 
 

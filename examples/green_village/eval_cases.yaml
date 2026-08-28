@@ -293,7 +293,7 @@ cases:
   # Two facts have to be combined, so a judge grades the answer.
   - name: multi_hop_00
     input:
-      user_message: Which is older, the village bakery's owner's business or the pub?
+      user_message: Which is older, the church bell or the pub?
     type: judge
     expected: >-
       The answer compares both things the question asks about and

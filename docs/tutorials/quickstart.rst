@@ -29,7 +29,7 @@ finds the matching API key in your environment.
 
    from kavalai import make_client
 
-   client = make_client("openai/gpt-5.4-mini")
+   client = make_client("openai/gpt-5.6-luna")
 
    answer = await client.prompt(
        "What is the capital of Estonia? Answer in one sentence."
@@ -70,9 +70,9 @@ Pass a Pydantic model and you get a validated object instead of text to parse:
 .. code-block:: text
 
    Estonia
-   450000
-   Tallinn's UNESCO-listed Old Town is one of the best-preserved
-   medieval city centres in Europe.
+   461000
+   Tallinn’s medieval Old Town is one of Europe’s best-preserved medieval
+   city centers and has been a UNESCO World Heritage Site since 1997.
 
 ``city.population`` is an ``int``. Declare the shape once and every field arrives
 typed — with any provider.
@@ -108,7 +108,7 @@ a one-node graph buys you validation, persistence and a recorded conversation.
        await db_manager.init_sqlite()
 
        workflow = (
-           WorkflowBuilder("Village greeter", llm_model="openai/gpt-5.4-mini")
+           WorkflowBuilder("Village greeter", llm_model="openai/gpt-5.6-luna")
            .data_model("input", Message)
            .data_model("output", Reply)
            .start("reply")
@@ -143,8 +143,8 @@ a one-node graph buys you validation, persistence and a recorded conversation.
 
 .. code-block:: text
 
-   Welcome to Green Village—so lovely to have you here from Tallinn!
-   choices: ['Thanks!', 'What's nearby?', 'Tell me about the pub']
+   Welcome to Green Village from Tallinn—we’re delighted to have you here!
+   choices: ['Find the pub', 'What can I see?', 'Meet the locals']
    path   : start → reply → end
    tokens : 165
 

@@ -185,7 +185,7 @@ the validated result is stored under ``output``.
      output: classification
      next: route
      use_history: false
-     llm_model: openai/gpt-5.4-mini
+     llm_model: openai/gpt-5.6-luna
      stream_output: true
      stream_delta: true
 

@@ -1,16 +1,13 @@
 Cookbook
 ========
 
-Short, self-contained recipes for the tasks practitioners most often build. Each is
-complete enough to paste into a file and run once you have set a provider key,
-and each was executed while writing this page.
+Short, self-contained recipes for common tasks. Each runs as written once a
+provider key is set, and every output on this page is real.
 
 Several are the standard use cases other agent frameworks demonstrate —
 structured extraction, routing, evaluator–optimizer loops, batch classification
-— written the Kaval.AI way, so you can judge the fit. See
-:doc:`../tutorials/comparison` for where that fit ends.
-
-For the reasoning behind them, follow the links into the tutorials.
+— written the Kaval.AI way. See :doc:`../tutorials/comparison` for where that
+fit ends, and the linked tutorials for the reasoning behind each recipe.
 
 Two longer walkthroughs have pages of their own — grading a chatbot and grading
 a workflow with side effects:
@@ -51,7 +48,7 @@ engine replays that conversation's history into each ``llm`` node.
        await db_manager.init_sqlite()
 
        bot = (
-           WorkflowBuilder("Village guide", llm_model="openai/gpt-5.4-mini")
+           WorkflowBuilder("Village guide", llm_model="openai/gpt-5.6-luna")
            .data_model("input", Message)
            .data_model("output", Reply)
            .start("reply")
@@ -75,6 +72,14 @@ engine replays that conversation's history into each ``llm`` node.
 
 
    asyncio.run(main())
+
+.. code-block:: text
+
+   > I'm Agnes, visiting on Friday.
+     Welcome, Agnes! We look forward to seeing you at Green Village on
+     Friday. How can I help you prepare for your visit?
+   > What did I say my name was?
+     You said your name was Agnes.
 
 Drop the ``external_id`` and each call starts a fresh session — which is what you
 want for one-off, stateless invocations. See
@@ -137,7 +142,7 @@ SQLite index.
        await db_manager.init_sqlite()
 
        engine = (
-           WorkflowBuilder("Village FAQ", llm_model="openai/gpt-5.4-mini")
+           WorkflowBuilder("Village FAQ", llm_model="openai/gpt-5.6-luna")
            .data_model("input", Question)
            .data_model("passages", Passages)
            .data_model("output", Answer)
@@ -177,7 +182,7 @@ SQLite index.
 
 .. code-block:: text
 
-   The library is open on Tuesdays and Fridays.
+   The village library is open on Tuesdays and Fridays.
 
 Note ``{{ context.passages.context }}`` in the prompt: the retrieved passages are
 interpolated straight from the run context. See :doc:`../tutorials/rag`.
@@ -191,7 +196,7 @@ prompt, or even an agent with tools.
 .. code-block:: yaml
 
    name: Council desk
-   llm_model: openai/gpt-5.4-mini
+   llm_model: openai/gpt-5.6-luna
    data_types:
      input:
        type: object
@@ -242,6 +247,14 @@ prompt, or even an agent with tools.
        next: end
      - {name: end, type: end, output: output}
 
+Three messages, three traces:
+
+.. code-block:: text
+
+   start → classify → route → repair_reply → end
+   start → classify → route → permit_reply → end
+   start → classify → route → general_reply → end
+
 Give the classifier a small, closed set of labels and tell it to answer with one
 word — that is what makes ``switch`` reliable. See :doc:`../tutorials/workflow`.
 
@@ -264,7 +277,7 @@ to the model nor callable.
    kernel.register_python_tool("db.delete_customer", delete_customer)
 
    researcher = Agent(
-       llm_client=make_client("openai/gpt-5.4-mini"),
+       llm_client=make_client("openai/gpt-5.6-luna"),
        kernel=kernel,
        allowed_tools=["python://web.search", "python://web.crawl"],
    )
@@ -319,8 +332,9 @@ becomes deterministic and free.
        assert state.trace == ["start", "classify", "route", "repair_reply", "end"]
 
 The engine drives clients through ``_run_chat_completions``, so that is the
-method a stub implements — not ``chat_completions``. See
-:doc:`../guides/safety`.
+method a stub implements — not ``chat_completions``. The test is a coroutine,
+so run it with ``pytest-asyncio`` (``asyncio_mode = "auto"`` or the
+``@pytest.mark.asyncio`` marker). See :doc:`../guides/safety`.
 
 Using a provider Kaval.AI does not ship
 ---------------------------------------
@@ -492,7 +506,7 @@ what is wanted for long answers.
 .. code-block:: python
 
    engine = (
-       WorkflowBuilder("Village guide", llm_model="openai/gpt-5.4-mini")
+       WorkflowBuilder("Village guide", llm_model="openai/gpt-5.6-luna")
        .data_model("input", Message)
        .data_model("output", Reply)
        .start("reply")
@@ -553,7 +567,7 @@ Nested models and lists work, so one call can return a whole document.
 
 
    async def main():
-       client = make_client("openai/gpt-5.4-mini")
+       client = make_client("openai/gpt-5.6-luna")
        minutes = await client.prompt(
            f"Extract the minutes from these notes:\n{NOTES}", response_model=Minutes
        )
@@ -590,7 +604,7 @@ node decides whether to go round again, and a counter keeps the loop finite.
 
    name: Notice writer
    description: Drafts a village notice, critiques it, and revises until it passes.
-   llm_model: openai/gpt-5.4-mini
+   llm_model: openai/gpt-5.6-luna
    data_types:
      input:
        type: object
@@ -629,7 +643,8 @@ node decides whether to go round again, and a counter keeps the loop finite.
        prompt: |
          You are a strict village clerk. Review this notice:
          {{ context.draft.text }}
-         Approve only if it states what, when and where. Set approved and give feedback.
+         Approve only if it states what, when and where, and names
+         Greta Lindqvist as the contact. Set approved and give feedback.
        inputs: {draft: {type: context, value: draft}}
        output: review
        next: count
@@ -684,7 +699,22 @@ The counter is an ordinary tool. Note the ``Optional`` — on the first pass
        """Increment the revision counter."""
        return Attempts(count=(current or 0) + 1)
 
-The trace records the loop, so you can see exactly how many rounds it took:
+The clerk's house rule — a named contact — is one the writer is not told, so
+the first draft is sent back once. The trace records the loop, and
+``state.data`` holds every intermediate value:
+
+.. code-block:: python
+
+   engine = WorkflowEngine.from_yaml_path("notice_writer.yaml")
+   engine.kernel.register_python_tool("bump", bump)
+
+   state = await engine.run(
+       {"topic": "the bake sale at the village hall, Saturday 18 October, 10 am"}
+   )
+   print("trace   :", " → ".join(state.trace))
+   print("attempts:", state.data["attempts"])
+   print("approved:", state.data["review"]["approved"])
+   print("notice  :", state.output_data["agent_response"])
 
 .. code-block:: text
 
@@ -692,6 +722,12 @@ The trace records the loop, so you can see exactly how many rounds it took:
              → critique → count → decide → finish → end
    attempts: {'count': 2}
    approved: True
+   notice  : GREEN VILLAGE BAKE SALE
+
+   Join us at the Village Hall on Saturday 18 October from 10 am. Enjoy
+   delicious homemade treats and support our community!
+
+   Contact: Greta Lindqvist
 
 Always bound the loop. ``max_node_visits`` (1000 by default) will stop a runaway
 graph, but a stuck critique burns real tokens until it does — the explicit
@@ -734,7 +770,7 @@ workflows at once. This is how you fan out today.
 
    def build(service):
        return (
-           WorkflowBuilder("Noticeboard triage", llm_model="openai/gpt-5.4-mini")
+           WorkflowBuilder("Noticeboard triage", llm_model="openai/gpt-5.6-luna")
            .data_model("input", Note)
            .data_model("output", Tagged)
            .start("tag")
@@ -794,13 +830,13 @@ the figures stay per-run no matter how much they overlap:
 .. code-block:: text
 
    {'model_calls': 1, 'prompt_tokens': 119,
-    'completion_tokens': 29, 'total_tokens': 148}
+    'completion_tokens': 53, 'total_tokens': 172}
    {'model_calls': 1, 'prompt_tokens': 122,
-    'completion_tokens': 37, 'total_tokens': 159}
+    'completion_tokens': 67, 'total_tokens': 189}
    {'model_calls': 1, 'prompt_tokens': 120,
-    'completion_tokens': 34, 'total_tokens': 154}
+    'completion_tokens': 57, 'total_tokens': 177}
    {'model_calls': 1, 'prompt_tokens': 116,
-    'completion_tokens': 30, 'total_tokens': 146}
+    'completion_tokens': 31, 'total_tokens': 147}
 
 Sharing the engine is in fact the better shape: it parses the workflow once and
 keeps one set of tool-server connections, which matters when the workflow
@@ -841,18 +877,41 @@ mid-graph — the second run starts at ``start`` again. For approval steps in th
 Watching what a run used
 ------------------------
 
-Token usage is aggregated per run, and every individual call is recorded.
+Token usage is aggregated on the returned state. The individual calls are
+written to ``model_call_stats`` by a task logger, so pass one to the engine —
+the ``AgentService`` alone records sessions, runs and chat history, not calls.
 
 .. code-block:: python
 
+   from kavalai.workflow.tasklog import PostgresTaskLogger
+
+   tasklog = PostgresTaskLogger(service)
+   engine = (
+       WorkflowBuilder("Village guide", llm_model="openai/gpt-5.6-luna")
+       .data_model("input", Message)
+       .data_model("output", Reply)
+       .start("reply")
+       .llm("reply", prompt="You are a warm, concise guide to Green Village.",
+            inputs={"message": "input"}, output="output", next="end")
+       .end()
+       .build_engine(agent_service=service, task_logger=tasklog)
+   )
+
    state = await engine.run({"user_message": "Is the pub open on Sundays?"})
-
    print(state.token_usage)
-   # {'model_calls': 2, 'prompt_tokens': 181,
-   #  'completion_tokens': 121, 'total_tokens': 302}
 
+   await tasklog.flush()
    for call in await service.get_model_call_stats(call_type="llm", limit=5):
        print(call.model, call.total_tokens, f"{call.duration_seconds:.2f}s")
+
+.. code-block:: text
+
+   {'model_calls': 1, 'prompt_tokens': 77,
+    'completion_tokens': 76, 'total_tokens': 153}
+   openai/gpt-5.6-luna 153 3.17s
+
+The logger writes behind the run; ``flush()`` waits for the queue to drain,
+which a long-running server does in its shutdown hook instead.
 
 Multiply by your provider's published prices to turn tokens into money — and
 subtract ``cached_prompt_tokens`` from ``prompt_tokens`` first, because cached

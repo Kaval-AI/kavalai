@@ -19,7 +19,7 @@
 #   print(state.output_data)
 name: Support agent
 description: Routes a support request and produces a tailored response.
-llm_model: openai/gpt-5.4-mini
+llm_model: openai/gpt-5.6-luna
 
 data_types:
   input:

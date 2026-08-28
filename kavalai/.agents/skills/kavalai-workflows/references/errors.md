@@ -10,7 +10,7 @@ message, make one edit, reload. Do not guess-and-retry.
 | `Duplicate node names: …` | Two nodes share a `name` | Rename one. |
 | `Node 'x' transitions to unknown node 'y'` | `next`/`then`/`else`/a case target does not exist | Fix the target or add the node. |
 | `Node 'x' output 'y' is not declared in data_types` | Node writes to an undeclared type | Declare `y` in `data_types`. (`rag_query` is exempt — its shape is ours.) |
-| `… is 'x', which is not in 'provider/model' form.` | Bare model name in `llm_model` | `openai/gpt-5.4-mini`, not `gpt-5.4-mini`. (`make_client` reports the same mistake as `Model must be in 'provider/model' form, got 'x'.`) |
+| `… is 'x', which is not in 'provider/model' form.` | Bare model name in `llm_model` | `openai/gpt-5.6-luna`, not `gpt-5.6-luna`. (`make_client` reports the same mistake as `Model must be in 'provider/model' form, got 'x'.`) |
 | `… names provider 'x'. A workflow names a registered provider, never an importable Python path …` | Provider contains `.` — a Python path was given | Register the provider and name the registration. |
 | `Node 'x' service 'y' looks like a connection string` | `service:` contains `://` or `@` | Name a registered RAG service, never a URI. |
 | `Node 'x' needs RAG service 'y', which is neither passed to the engine … nor …` | Service not passed nor registered | Pass `rag_services=` or call `register_rag_service`, usually from the setup module. |

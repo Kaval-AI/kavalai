@@ -520,7 +520,7 @@ if __name__ == "__main__":  # pragma: no cover - manual demo
     kernel = FunctionKernel()
     kernel.register_python_tool("get_time", get_time)
 
-    llm_client = OpenAIClient("gpt-5.4-mini")
+    llm_client = OpenAIClient("gpt-5.6-luna")
     agent = Agent(llm_client=llm_client, kernel=kernel, debug=True)
     result = asyncio.run(agent.prompt("Greet the user based on current time!"))
     print(result)

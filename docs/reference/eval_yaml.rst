@@ -19,7 +19,7 @@ validated in full before a single case runs.
 .. code-block:: yaml
 
    name: green-village
-   judge_model: openai/gpt-5.4-mini      # optional
+   judge_model: openai/gpt-5.6-luna      # optional
 
    cases:
      - name: president
@@ -47,7 +47,7 @@ validated in full before a single case runs.
    * - ``judge_model``
      - ``provider/model`` grading the judged cases. Defaults to
        :data:`~kavalai.eval.DEFAULT_JUDGE_MODEL`
-       (``openai/gpt-5.4-mini``); ``--judge-model`` overrides it for one run.
+       (``openai/gpt-5.6-luna``); ``--judge-model`` overrides it for one run.
    * - ``cases``
      - The cases, run in the order they are written.
 
@@ -258,7 +258,7 @@ The evaluators
    judge = JudgeEvaluator(
        "http://localhost:25000",
        tag="ci",
-       model="openai/gpt-5.4-mini",
+       model="openai/gpt-5.6-luna",
    )
 
 Both take ``base_url`` (no default), ``username``, ``password``, ``timeout``,

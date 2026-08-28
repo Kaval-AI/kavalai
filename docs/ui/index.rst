@@ -266,7 +266,7 @@ written only when a workflow is run with one configured.
 Model calls
 -----------
 
-The **Model Calls** page lists every LLM and embedding call the runtime made:
+The **Model calls** page lists every LLM and embedding call the runtime made:
 provider and model, status, duration, prompt and completion tokens — cached
 prompt and reasoning tokens among them — and the request and response payloads.
 Each row is a :class:`~kavalai.ModelCallStat`. There is no cost column, and

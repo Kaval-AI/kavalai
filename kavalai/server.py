@@ -598,7 +598,7 @@ def _import_setup_module(reference: str) -> None:
     """Import a setup module, by dotted name or by file path.
 
     A path is accepted because an example (or a customer's workflow directory)
-    is usually not an installed package: ``examples/bakery/eval_setup.py`` is
+    is usually not an installed package: ``myapp/agent_setup.py`` is
     how you would refer to it from a shell, so it is how you refer to it here.
     The file's own directory goes on ``sys.path`` first, so the module can
     import its siblings.

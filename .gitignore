@@ -214,3 +214,7 @@ __marimo__/
 
 google_oauth_client_sercret.json
 .output.txt
+
+# fastembed model cache when FASTEMBED_CACHE_DIR is unset
+models--*/
+CACHEDIR.TAG

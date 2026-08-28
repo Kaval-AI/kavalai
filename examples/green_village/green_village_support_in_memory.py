@@ -61,7 +61,7 @@ FACTS = [
     ),
     "The village pond, Lake Miller, is 1.2 metres deep at its deepest point.",
     "Green Village's oldest resident is Agnes Whitlow (born 02.06.1929).",
-    "The village has 3 streets: Main Road, Willow Lane, and Cobbler's Path.",
+    "Green Village has 3 streets: Main Road, Willow Lane, and Cobbler's Path.",
     "The local church bell weighs 412 kilograms and was cast in 1901.",
     "Green Village produces 8 tons of honey per year from its 26 beehives.",
     "The village library owns 1,847 books and is open on Tuesdays and Fridays.",

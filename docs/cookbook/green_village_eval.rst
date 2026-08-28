@@ -53,9 +53,11 @@ suite free to run:
    FACTS = [
        "President of Green Village is Thomas Cook (born 12.04.1994).",
        "Green Village has 104 residents.",
+       "Green Village was founded on 03.09.1887 by shepherd Elias Thornbury.",
+       "The tallest building in Green Village is the Old Grain Tower at 23 metres.",
+       "Green Village's official flower is the marsh marigold.",
        "The village pond, Lake Miller, is 1.2 metres deep at its deepest point.",
        "The local church bell weighs 412 kilograms and was cast in 1901.",
-       "The village library owns 1,847 books and is open on Tuesdays and Fridays.",
    ]
 
 A fact that is a number is a fact a substring match can check. ``104``, ``1.2``,
@@ -93,8 +95,8 @@ to bottom.
            prompt=(
                "You are the AI assistant of the Green Village tourist "
                "information centre. Help users with their inquiries.\n"
-               "NB! Green Village is a fictionary village so rely only "
-               "about the facts given in the context.\n"
+               "NB! Green Village is a fictional village, so rely only "
+               "on the facts given in the context.\n"
                "Steer any offtopic requests back to green village.\n"
                "Related facts:\n{{ context.facts }}"
            ),

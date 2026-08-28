@@ -1,6 +1,6 @@
 ---
 name: kavalai
-description: Kaval.AI agent framework — install and extras, calling a model, structured output, the Agent, and which Kaval.AI skill to load next. Use when working in a project that depends on `kavalai`, when the user mentions Kaval.AI, or when you see `WorkflowEngine`, `@pythontool`, `FunctionKernel`, or a `provider/model` id like `openai/gpt-5.4-mini`.
+description: Kaval.AI agent framework — install and extras, calling a model, structured output, the Agent, and which Kaval.AI skill to load next. Use when working in a project that depends on `kavalai`, when the user mentions Kaval.AI, or when you see `WorkflowEngine`, `@pythontool`, `FunctionKernel`, or a `provider/model` id like `openai/gpt-5.6-luna`.
 ---
 
 # Kaval.AI
@@ -61,7 +61,7 @@ key in the environment.
 ```python
 from kavalai import make_client
 
-client = make_client("openai/gpt-5.4-mini")
+client = make_client("openai/gpt-5.6-luna")
 answer = await client.prompt("What is the capital of Estonia?")
 ```
 
@@ -111,7 +111,7 @@ decide *which* tool to call; call the tool yourself when you already know.
 from kavalai import Agent, FunctionKernel, make_client
 
 agent = Agent(
-    llm_client=make_client("openai/gpt-5.4-mini"),
+    llm_client=make_client("openai/gpt-5.6-luna"),
     kernel=FunctionKernel(),      # optional
     allowed_tools=None,           # None = every registered tool
     debug=False,

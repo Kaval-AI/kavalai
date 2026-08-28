@@ -205,7 +205,7 @@ A ``.env`` for local development against Docker Compose:
 
    # Provider
    OPENAI_API_KEY=sk-...
-   KAVALAI_DEFAULT_LLM_MODEL=openai/gpt-5.4-mini
+   KAVALAI_DEFAULT_LLM_MODEL=openai/gpt-5.6-luna
 
    # Agent database (runtime tables)
    KAVALAI_DB_URI=postgresql://kavalai:kavalai@localhost:5432/kavalai

@@ -16,7 +16,7 @@ One file, one suite, validated in full before a single case runs.
 
 ```yaml
 name: green-village
-judge_model: openai/gpt-5.4-mini      # optional
+judge_model: openai/gpt-5.6-luna      # optional
 
 cases:
   - name: president
@@ -171,7 +171,7 @@ file order.
 from kavalai.eval import SimpleEvaluator, JudgeEvaluator
 
 simple = SimpleEvaluator("http://localhost:25000", tag="ci")
-judge = JudgeEvaluator("http://localhost:25000", tag="ci", model="openai/gpt-5.4-mini")
+judge = JudgeEvaluator("http://localhost:25000", tag="ci", model="openai/gpt-5.6-luna")
 
 result = await simple.evaluate(inputs, expected, name="president")
 assert result.passed, result.reason

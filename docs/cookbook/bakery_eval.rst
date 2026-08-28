@@ -198,7 +198,12 @@ agents``. Where the two servers differ is where they record and how much:
 .. code-block:: python
 
    # examples/bakery/bakery_real_db.py
-   session_maker = db_manager.get_sessionmaker(uri=DB_URI, schema=DB_SCHEMA)
+   session_maker = db_manager.get_sessionmaker(
+       uri=DB_URI,
+       schema=DB_SCHEMA,
+       pool_size=DB_POOL_SIZE,
+       max_overflow=DB_MAX_OVERFLOW,
+   )
    agent_service = AgentService(session_maker)
    task_logger = PostgresTaskLogger(agent_service)
 
@@ -331,15 +336,17 @@ In another shell:
    http://localhost:25100
 
    PASS  order_single_item
+   PASS  order_two_items
+   PASS  order_dotted_date
    PASS  order_names_the_product_loosely
+   PASS  order_phrased_as_enquiry
    PASS  missing_quantity
+   PASS  missing_delivery_date
+   PASS  missing_customer_name
    PASS  people_are_not_a_quantity
-   PASS  unknown_product
-   PASS  below_minimum_batch
-   PASS  too_soon_for_lead_time
-   PASS  complaint_is_not_an_order
-   PASS  injection_claims_payment
    ...
+   PASS  injection_claims_payment
+   PASS  complaint_confirms_nothing
 
    26/26 passed
 
@@ -353,7 +360,7 @@ The same cases against the Postgres deployment, with nothing edited:
 
    $ dotenv run python -m examples.bakery.bakery_real_db
    $ dotenv run kavalai-eval examples/bakery/eval_cases.yaml \
-       --port 25001 --tag postgres
+       --port 25101 --tag postgres
 
 Which agent is graded is named on the command line and never in the case file.
 That is what makes two model versions comparable: run them in turn, one

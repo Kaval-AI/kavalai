@@ -61,9 +61,8 @@ There are only two shapes to remember:
        and unmodified.
 
 A return value that cannot satisfy the model raises
-``FunctionKernelException``. It used to be logged as a warning and the raw
-value handed back instead, which meant a caller could silently receive
-something other than what the tool's own signature promised.
+``FunctionKernelException`` rather than being handed back unvalidated, so a
+caller never receives something other than what the tool's signature promised.
 
 Python tools
 ------------
@@ -106,8 +105,9 @@ Register a server, then its tools:
 MCP tools
 ---------
 
-For MCP, register a server; the kernel starts the process, speaks MCP over
-stdio, discovers the tools it offers and routes calls to them:
+For MCP, register a server; the kernel starts the process (``command``) or
+connects to its ``url``, discovers the tools it offers and routes calls to
+them:
 
 .. code-block:: python
 

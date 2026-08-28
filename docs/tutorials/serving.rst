@@ -80,10 +80,13 @@ Both address a row in the ``sessions`` table; see
 .. code-block:: json
 
    {
-     "session_id": "496e9b1a-7a69-486c-81be-cf30ec3581d6",
+     "session_id": "738e1f1a-1b7e-4c92-b0ba-8ffb8b997372",
      "data": {
-       "agent_response": "I'm sorry to hear that. If you want, I can help
-                          you turn this into a clear report or notice…"
+       "agent_response": "It sounds like the church bell has been out of
+                          order since Tuesday. If you need to report it,
+                          you could say: “The church bell has been stuck
+                          since Tuesday.” If you want, I can also help you
+                          turn that into a clearer maintenance report…"
      }
    }
 
@@ -113,7 +116,13 @@ Streaming a run
 
    event: workflow_started
    data: {"type":"workflow_started","name":"Support agent",
-          "session_id":"79c1636c-…","run_id":"9d8ff6b4-…"}
+          "session_id":"0c4b8f61-…","run_id":"b2f72a1c-…"}
+
+   event: node_started
+   data: {"type":"node_started","name":"begin"}
+
+   event: node_completed
+   data: {"type":"node_completed","name":"begin"}
 
    event: node_started
    data: {"type":"node_started","name":"classify"}
@@ -122,13 +131,26 @@ Streaming a run
    data: {"type":"node_completed","name":"classify"}
 
    event: node_started
+   data: {"type":"node_started","name":"route"}
+
+   event: node_completed
+   data: {"type":"node_completed","name":"route"}
+
+   event: node_started
    data: {"type":"node_started","name":"handle_refund"}
 
-   …
+   event: node_completed
+   data: {"type":"node_completed","name":"handle_refund"}
+
+   event: node_started
+   data: {"type":"node_started","name":"finish"}
+
+   event: node_completed
+   data: {"type":"node_completed","name":"finish"}
 
    event: workflow_completed
    data: {"type":"workflow_completed","name":"Support agent",
-          "output_data":{…},"token_usage":{…}}
+          "session_id":"0c4b8f61-…","output_data":{…},"token_usage":{…}}
 
 Lifecycle events always arrive. Token-by-token content only arrives from nodes
 that opted in with ``stream_output`` — see :doc:`../reference/yaml`.

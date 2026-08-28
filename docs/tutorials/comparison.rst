@@ -338,8 +338,8 @@ work.
 inputs. There is no semantic or summarising memory that persists across
 sessions.
 
-**A considerably smaller ecosystem.** Four LLM providers, four embedding
-providers and four bundled tools, against LangChain's thousand-plus integrations
+**A considerably smaller ecosystem.** Five LLM providers, five embedding
+providers and three bundled tools, against LangChain's thousand-plus integrations
 and n8n's four hundred connectors. Kaval.AI's answer is that a REST endpoint or
 an MCP server is a first-class tool requiring no adapter — which is true, but
 not equivalent to an integration someone else has already tested.

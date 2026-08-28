@@ -60,24 +60,22 @@ The design that produced these properties is set out in
 Call a model
 ------------
 
-A single interface covers OpenAI, Gemini, Anthropic and Ollama. The provider
-is part of the model identifier, so substituting one for another is a
-change of one string.
+A model is named as ``provider/model`` and :func:`~kavalai.make_client`
+does the rest. The same interface covers OpenAI, Gemini, Anthropic and
+Ollama, so substituting one provider for another is a change of one string.
 
 .. code-block:: python
 
    from kavalai import make_client
 
-   client = make_client("openai/gpt-5.4-mini")
+   client = make_client("openai/gpt-5.6-luna")
 
-   answer = await client.prompt(
-       "What is the capital of Estonia? Answer in one sentence."
-   )
+   answer = await client.prompt("What is the capital of Estonia?")
    print(answer)
 
 .. code-block:: text
 
-   The capital of Estonia is Tallinn.
+   The capital of Estonia is **Tallinn**.
 
 Receive data rather than prose
 ------------------------------
@@ -92,17 +90,64 @@ object, with any provider, so that no parsing step is required.
    class City(BaseModel):
        name: str
        country: str
-       population: int
        fun_fact: str
 
    city = await client.prompt("Describe Tallinn.", response_model=City)
-
-   print(city.population, "—", city.fun_fact)
+   print(city)
 
 .. code-block:: text
 
-   450000 — Tallinn's UNESCO-listed Old Town is one of the
-   best-preserved medieval city centres in Europe.
+   name='Tallinn' country='Estonia'
+   fun_fact='Tallinn’s remarkably preserved medieval Old Town is a UNESCO
+             World Heritage Site, and the city is often noted as one of the
+             world’s most digitally advanced capitals.'
+
+Give the model tools
+--------------------
+
+An :class:`~kavalai.Agent` runs the model in a loop: it calls the tools it
+needs — Python functions, REST endpoints or MCP servers, registered on one
+:class:`~kavalai.FunctionKernel` — and returns a typed answer.
+
+.. code-block:: python
+
+   from datetime import date
+
+   from kavalai import Agent, FunctionKernel, pythontool
+   from kavalai.tools.webtools.crawl4ai import web_search
+
+
+   @pythontool
+   def today() -> str:
+       """Return today's date in ISO format."""
+       return date.today().isoformat()
+
+
+   class Answer(BaseModel):
+       answer: str
+       sources: list[str]
+
+
+   kernel = FunctionKernel()
+   kernel.register_python_tool("today", today)
+   kernel.register_python_tool("web_search", web_search)
+
+   agent = Agent(llm_client=client, kernel=kernel)
+   result = await agent.prompt(
+       "When is the next Tallinn Marathon, and how many days away is it?",
+       response_model=Answer,
+       max_steps=5,
+   )
+   print(result.answer)
+   for url in result.sources:
+       print(url)
+
+.. code-block:: text
+
+   The next Tallinn Marathon is on Sunday, September 13, 2026. From today,
+   August 28, 2026, it is 16 days away.
+   https://www.jooks.ee/en/tallinn-marathon/
+   https://marathonscout.com/races/swedbank-tallinn-marathon
 
 Answer from your own documents
 ------------------------------
@@ -113,82 +158,116 @@ Village, a settlement that appears in no model's training data.
 
 .. code-block:: python
 
+   FACTS = """\
+   Green Village has 104 residents.
+   Green Village was founded on 03.09.1887 by shepherd Elias Thornbury.
+   President of Green Village is Thomas Cook (born 12.04.1994).
+   Green Village's oldest resident is Agnes Whitlow (born 02.06.1929).
+   The annual Turnip Festival takes place every year on the third Saturday of October.
+   The village bakery, run by Greta Lindqvist (born 27.11.1968), sells exactly 340 loaves every week.
+   Green Village's football team, FC Green Rovers, has won the regional cup twice (1997 and 2013).
+   Green Village's only pub, The Rusty Anchor, has been operating since 1923.
+   """.splitlines()
+
+Index the facts:
+
+.. code-block:: python
+
    from kavalai.rag import SqliteRagService
 
-   FACTS = [
-       "Green Village's oldest resident is Agnes Whitlow "
-       "(born 02.06.1929).",
-       "Green Village has 104 residents.",
-       "The village pond, Lake Miller, is 1.2 metres deep at its "
-       "deepest point.",
-   ]
-
-   rag = SqliteRagService(
-       ":memory:", model="fastembed/BAAI/bge-small-en-v1.5"
-   )
+   rag = SqliteRagService(":memory:", model="fastembed/BAAI/bge-small-en-v1.5")
    await rag.index_batch(
        texts=FACTS,
-       metadata_list=[{}] * len(FACTS),
+       metadata_list=[{"village": "Green Village"}] * len(FACTS),
        source_ids=[f"fact-{i}" for i in range(len(FACTS))],
    )
 
-   question = "Who has lived in the village the longest?"
-   for hit in await rag.query(question, top_k=2):
-       print(f"{hit.similarity:.3f}  {hit.content}")
+Query them:
+
+.. code-block:: python
+
+   question = (
+       "How old was the Green Village's oldest resident "
+       "on 2025 Turnip Festival?"
+   )
+
+   for hit in await rag.query(question, top_k=5):
+       print(f"{hit.similarity:.2f}  {hit.content}")
 
 .. code-block:: text
 
-   0.676  Green Village's oldest resident is Agnes Whitlow (born 02.06.1929).
-   0.628  Green Village has 104 residents.
+   0.79  Green Village's oldest resident is Agnes Whitlow (born 02.06.1929).
+   0.70  Green Village has 104 residents.
+   0.68  President of Green Village is Thomas Cook (born 12.04.1994).
+   0.67  Green Village was founded on 03.09.1887 by shepherd Elias Thornbury.
+   0.62  The annual Turnip Festival takes place every year on the third Saturday of October.
 
-Retrieval is semantic rather than lexical: the question contains neither
-"oldest" nor "Agnes", yet the correct fact is ranked first. Passing those
-passages to a model yields grounded answers; see :doc:`tutorials/rag`.
+Retrieval is semantic rather than lexical: the question names neither
+"oldest" nor "Agnes", yet the fact that answers it is ranked first.
 
 Compose the parts into a workflow
 ---------------------------------
 
 A workflow is a typed graph: an input enters, an output leaves, and each step
-is one node. The engine validates every boundary, records every run, and gives
-the assistant memory across turns. The persisted structure is described in
-:doc:`guides/data_model`.
+is one node. The index above becomes a chatbot in two nodes — a ``rag_query``
+node fetches the closest facts for the user's message and an ``llm`` node
+answers from them. The engine validates every boundary and records every run;
+the persisted structure is described in :doc:`guides/data_model`.
 
 .. code-block:: python
 
-   workflow = (
-       WorkflowBuilder("Village greeter", llm_model="openai/gpt-5.4-mini")
+   from kavalai.workflow import WorkflowBuilder
+
+
+   class Message(BaseModel):
+       user_message: str
+
+
+   class Reply(BaseModel):
+       agent_response: str
+
+
+   engine = (
+       WorkflowBuilder("Green Village support", llm_model="openai/gpt-5.6-luna")
        .data_model("input", Message)
        .data_model("output", Reply)
-       .start("reply")
+       .start("get_related_facts")
+       .rag_query(
+           "get_related_facts",
+           query="{{ context.input.user_message }}",
+           output="facts",
+           top_k=5,
+           store="content",
+           next="reply",
+       )
        .llm(
            "reply",
-           prompt="You are the greeter of Green Village. Reply warmly in one "
-                  "sentence, and suggest up to 3 quick-reply choices.",
-           inputs={"message": "input"},
+           prompt=(
+               "You are the assistant of the Green Village tourist "
+               "information centre. Answer using only these facts:\n"
+               "{{ context.facts }}"
+           ),
+           inputs={"input": "input", "facts": "facts"},
            output="output",
            next="end",
        )
        .end()
-       .build_engine(
-           agent_service=AgentService(
-               db_manager.get_sqlite_sessionmaker()
-           )
-       )
+       .build_engine(rag_services=rag)
    )
 
-   state = await workflow.run(
-       {"user_message": "Hi, I'm visiting from Tallinn!"}
-   )
+   state = await engine.run({"user_message": question})
+   print(state.output_data)
+   print(state.status, state.token_usage)
 
 .. code-block:: text
 
-   Welcome to Green Village—so lovely to have you here from Tallinn!
-   choices: ['Thanks!', 'What's nearby?', 'Tell me about the pub']
-   path   : start → reply → end
-   tokens : 165
+   {'agent_response': 'Agnes Whitlow was 96 years old on the 2025 Turnip '
+                      'Festival, held on 18 October 2025.'}
+   completed {'model_calls': 1, 'prompt_tokens': 239,
+              'completion_tokens': 89, 'total_tokens': 328}
 
 The same graph is equally expressible in YAML, and the same engine serves it
-over HTTP. The example is developed in full in :doc:`tutorials/quickstart`.
+over HTTP; see :doc:`tutorials/workflow` and :doc:`tutorials/serving`.
 
 Inspect what ran
 ----------------
@@ -261,4 +340,5 @@ Where to start
    :hidden:
    :caption: Project
 
+   versions
    genindex

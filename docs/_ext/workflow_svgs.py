@@ -21,7 +21,7 @@ def _chatbot_graph():
     from kavalai.workflow import WorkflowBuilder
 
     return (
-        WorkflowBuilder("Chatbot", llm_model="openai/gpt-5.4-mini")
+        WorkflowBuilder("Chatbot", llm_model="openai/gpt-5.6-luna")
         .data_type("input", {"message": str})
         .data_type("output", {"agent_response": str})
         .start("reply")

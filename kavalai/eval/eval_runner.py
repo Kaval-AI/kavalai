@@ -17,7 +17,7 @@ limitations under the License.
 The file looks like this::
 
     name: green-village
-    judge_model: openai/gpt-5.4-mini   # optional
+    judge_model: openai/gpt-5.6-luna   # optional
     cases:
       - name: president
         input: {user_message: Who is the president of Green Village?}
@@ -32,7 +32,7 @@ The file says nothing about which server to run against — that is named on
 the command line, so the same cases can be pointed at a laptop, a staging
 deployment or two model versions in turn without being edited::
 
-    uv run --env-file .env kavalai-eval cases.yaml --port 25000 --tag gpt-5.4-mini
+    uv run --env-file .env kavalai-eval cases.yaml --port 25000 --tag gpt-5.6-luna
 """
 
 import argparse

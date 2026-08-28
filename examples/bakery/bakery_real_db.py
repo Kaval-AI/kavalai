@@ -8,7 +8,7 @@ Bring the database up and run it from the repository root::
 
 Then send it an email::
 
-    curl -s http://localhost:25001/run_agent \
+    curl -s http://localhost:25101/run_agent \
         -H 'Content-Type: application/json' \
         -d '{"data": {"email": {
               "sender": "Mari Tamm <mari@example.test>",
@@ -45,7 +45,7 @@ from kavalai.workflow import WorkflowEngine
 from kavalai.workflow.tasklog import PostgresTaskLogger, TaskLogger
 
 HOST = "0.0.0.0"
-PORT = 25001
+PORT = 25101
 
 DB_URI = os.environ["KAVALAI_DB_URI"]
 DB_SCHEMA = os.environ.get("KAVALAI_DB_SCHEMA", "public")

@@ -29,7 +29,7 @@ arguments.
 ```yaml
 name: Support agent
 description: Routes a support request and produces a tailored response.
-llm_model: openai/gpt-5.4-mini
+llm_model: openai/gpt-5.6-luna
 
 data_types:
   input:
@@ -233,7 +233,7 @@ Same graph, same validation, useful when the shape is computed:
 from kavalai.workflow import WorkflowBuilder
 
 workflow = (
-    WorkflowBuilder("Village greeter", llm_model="openai/gpt-5.4-mini")
+    WorkflowBuilder("Village greeter", llm_model="openai/gpt-5.6-luna")
     .data_model("input", Message)        # an existing Pydantic model
     .data_model("output", Reply)
     .start("reply")

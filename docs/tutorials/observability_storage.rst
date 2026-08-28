@@ -26,7 +26,7 @@ A single ``prompt`` sends one message; to hold a conversation you build a
 
    from kavalai import OpenAIClient, ChatHistory, ChatMessage
 
-   client = OpenAIClient("gpt-5.4-mini")
+   client = OpenAIClient("gpt-5.6-luna")
 
    history = ChatHistory(messages=[
        ChatMessage(role="system", content="You are a terse assistant."),
@@ -34,7 +34,7 @@ A single ``prompt`` sends one message; to hold a conversation you build a
        ChatMessage(role="assistant", content="Noted, Ada."),
        ChatMessage(role="user", content="What is my name?"),
    ])
-   print(await client.chat_completions(chat_history=history))  # -> "Ada."
+   print(await client.chat_completions(chat_history=history))
 
 Managing that list by hand gets tedious quickly. Workflows do it for you: the
 engine writes each turn to storage and replays the conversation on the next one,
@@ -67,7 +67,7 @@ node writes its result under its ``output`` name; later nodes read it back by
        agent_response: str
 
    engine = (
-       WorkflowBuilder("Triage", llm_model="openai/gpt-5.4-mini")
+       WorkflowBuilder("Triage", llm_model="openai/gpt-5.6-luna")
        .data_model("input", Email)
        .data_model("analysis", Analysis)
        .data_model("output", Reply)

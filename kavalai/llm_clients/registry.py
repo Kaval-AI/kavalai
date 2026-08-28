@@ -14,7 +14,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
-A workflow names its backends with strings -- ``llm_model: openai/gpt-5.4-mini``
+A workflow names its backends with strings -- ``llm_model: openai/gpt-5.6-luna``
 in YAML, a ``rag_query`` node naming a service -- so resolution has to happen
 from a name. Until this module existed that name could only be one of five
 values hard-coded in an ``if`` chain, which meant adding a backend required

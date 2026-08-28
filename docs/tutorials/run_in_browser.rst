@@ -148,8 +148,8 @@ model. The whole loop — retrieve **and** generate — runs in the page:
 Pre-building and shipping a RAG
 -------------------------------
 
-Embedding a large corpus on every page load is wasteful — so **pre-build the
-index offline and ship it** alongside your page. The one rule: build and query
+Embedding a large corpus on every page load is wasteful, so **pre-build the
+index offline and ship it** alongside the page. The one rule: build and query
 with the **same embedding model** so the vectors are comparable. The browser
 uses ``snowflake-arctic-embed-s``; offline, ``fastembed`` runs the same model
 (``pip install "kavalai[common]"``).
@@ -161,6 +161,7 @@ Run this once, locally, over the song lyrics in ``local_data/``:
    import asyncio
    import csv
    import json
+   from itertools import islice
 
    from kavalai import make_embedding_client
 
@@ -169,7 +170,7 @@ Run this once, locally, over the song lyrics in ``local_data/``:
 
 
    async def build():
-       rows = list(csv.DictReader(open("local_data/song_lyrics.csv")))[:500]
+       rows = list(islice(csv.DictReader(open("local_data/song_lyrics.csv")), 500))
        texts = [r["lyrics"][:2000] for r in rows]
        vectors, _ = await embedder.compute_embeddings(texts, normalize=True)
        index = [
@@ -181,6 +182,10 @@ Run this once, locally, over the song lyrics in ``local_data/``:
 
 
    asyncio.run(build())
+
+.. code-block:: text
+
+   Indexed 500 songs -> lyrics_index.json
 
 Then, in the browser, **fetch** the pre-built index and query it — only the small
 query embedding is computed on the device:

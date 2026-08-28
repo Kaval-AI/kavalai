@@ -40,7 +40,7 @@ Two components:
 | `backoffice/`, `frontend/` | Management API and Angular UI |
 | `tests/` | Pytest suite for the library; mock MCP servers in `tests/helpers/`. An example's tests live beside it under `examples/`, and `testpaths` covers both |
 | `docs/`, `notebooks/` | Sphinx documentation; the five tutorial notebooks are the source of truth |
-| `examples/` | Runnable examples; `green_village/` (RAG chatbot, port 25000), `bakery/` (a YAML workflow with side effects, ports 25100/25001) and `business_info_agent/` (web research: search, crawl, summarise, port 25200) each ship an `eval_cases.yaml`; `support_agent/support_agent.yaml` is the branching-DAG example the docs load |
+| `examples/` | Runnable examples; `green_village/` (RAG chatbot, port 25000), `bakery/` (a YAML workflow with side effects, ports 25100/25101) and `business_info_agent/` (web research: search, crawl, summarise, port 25200) each ship an `eval_cases.yaml`; `support_agent/support_agent.yaml` is the branching-DAG example the docs load |
 
 ## Invariants
 
@@ -236,7 +236,7 @@ input and output types from its OpenAPI spec (`kavalai/client.py`).
 
 ```bash
 uv run --env-file .env kavalai-eval \
-    examples/green_village/eval_cases.yaml --port 25000 --tag gpt-5.4-mini
+    examples/green_village/eval_cases.yaml --port 25000 --tag gpt-5.6-luna
 ```
 
 Exit `0` every case passed, `1` a case failed, `2` the run never reached a

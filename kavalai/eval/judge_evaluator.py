@@ -25,7 +25,7 @@ from kavalai.eval.base import AgentEvaluator, EvalResult
 from kavalai.llm_clients.base_client import BaseLlmClient
 from kavalai.workflow.clients import build_parameters, make_client
 
-DEFAULT_JUDGE_MODEL = "openai/gpt-5.4-mini"
+DEFAULT_JUDGE_MODEL = "openai/gpt-5.6-luna"
 
 JUDGE_PROMPT = """You are grading one response of an AI agent under test.
 

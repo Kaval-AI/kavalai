@@ -2,7 +2,7 @@ Model providers
 ===============
 
 Every model in Kaval.AI is named with a single string, ``provider/model`` — in
-Python (``make_client("openai/gpt-5.4-mini")``), as a workflow's ``llm_model``,
+Python (``make_client("openai/gpt-5.6-luna")``), as a workflow's ``llm_model``,
 in a YAML node, and in the ``model`` argument of a RAG service. The part before
 the first ``/`` selects the client; everything after it is the provider's own
 model name, passed through untouched. ``fastembed/BAAI/bge-small-en-v1.5`` is
@@ -139,7 +139,7 @@ graph says otherwise:
    )
 
 The workflow document then mentions neither a filename nor a connection string
-— see ``examples/green_village/eval_setup.py`` and :doc:`../guides/workflows`.
+— see :doc:`../guides/workflows`.
 
 Which names are registered right now
 ------------------------------------

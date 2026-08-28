@@ -18,18 +18,24 @@ Construction
    from kavalai import Agent, OpenAIClient, FunctionKernel
 
    agent = Agent(
-       llm_client=OpenAIClient("gpt-5.4-mini"),
+       llm_client=OpenAIClient("gpt-5.6-luna"),
        kernel=FunctionKernel(),   # optional
        run_context=...,           # optional
        prompt_template=...,       # optional Jinja2 Template
        allowed_tools=None,        # optional; None = every registered tool
+       on_step=None,              # optional observer, called after each step
        debug=False,               # print each step's reasoning and tool calls
    )
 
-Any provider client works, since they share the :class:`BaseLlmClient`
-interface — :class:`~kavalai.OpenAIClient`, :class:`~kavalai.GeminiClient`, or
-:class:`~kavalai.OllamaClient` (e.g. ``GeminiClient("gemini-3.1-flash-lite")``). See
+Any provider client works, since they share the :class:`~kavalai.BaseLlmClient`
+interface — :class:`~kavalai.OpenAIClient`, :class:`~kavalai.GeminiClient`,
+:class:`~kavalai.AnthropicClient` or :class:`~kavalai.OllamaClient`, or
+``make_client("gemini/gemini-3.1-flash-lite")``. See
 :doc:`../tutorials/llm_clients`.
+
+``on_step`` is called once per completed step with that step's record — its
+tool calls, their results and durations, and the step's output. The workflow
+engine uses it to turn an agent node's tool calls into task rows.
 
 Running a prompt
 ----------------
@@ -50,8 +56,8 @@ The four-step cycle
 
 Each step of the loop performs the same four operations:
 
-#. **Render** a system prompt from the Jinja2 template, including the task, the
-   available tool descriptions, and the history of previous steps.
+#. **Render** a system prompt from the Jinja2 template, including the task,
+   the available tool descriptions, and the history of previous steps.
 #. **Reason** — the LLM returns a ``StepOutput``: a list of ``tool_calls`` plus
    an optional final output.
 #. **Act** — the requested tool calls execute *in parallel* through the
