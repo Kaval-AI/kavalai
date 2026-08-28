@@ -64,7 +64,7 @@ def fake_embedding_client():
         stats = create_model_call_stat(
             call_type="embedding",
             model="fake/embedding-model",
-            duration_sections=0.0,
+            duration_seconds=0.0,
             batch_size=len(texts),
             total_tokens=len(texts),
         )

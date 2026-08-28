@@ -14,11 +14,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
+import json
 import os
 import time
 from typing import List, Optional, Tuple
 
 from kavalai.db import ModelCallStat
+from kavalai.llm_clients.base_client import LlmClientException
 from kavalai.llm_clients.common import create_model_call_stat, get_model_name
 from kavalai.normalizer import Normalizer, get_default_normalizer
 
@@ -114,7 +116,7 @@ class OpenAIEmbeddingClient(BaseEmbeddingClient):
         stats = create_model_call_stat(
             call_type="embedding",
             model=f"openai/{self.model}",
-            duration_sections=duration,
+            duration_seconds=duration,
             batch_size=len(texts),
             total_tokens=total_tokens,
             response_data=response.model_dump()
@@ -159,7 +161,7 @@ class GeminiEmbeddingClient(BaseEmbeddingClient):
         stats = create_model_call_stat(
             call_type="embedding",
             model=f"gemini/{model_name}",
-            duration_sections=duration,
+            duration_seconds=duration,
             batch_size=len(texts),
             total_tokens=0,
         )
@@ -201,7 +203,7 @@ class OllamaEmbeddingClient(BaseEmbeddingClient):
         stats = create_model_call_stat(
             call_type="embedding",
             model=f"ollama/{model_name}",
-            duration_sections=duration,
+            duration_seconds=duration,
             batch_size=len(texts),
             total_tokens=total_prompt_tokens,
         )
@@ -267,8 +269,8 @@ class FastEmbedClient(BaseEmbeddingClient):
 
         stats = create_model_call_stat(
             call_type="embedding",
-            model=f"fastembed/{get_model_name(self.model)}",
-            duration_sections=duration,
+            model=f"fastembed/{self.model}",
+            duration_seconds=duration,
             batch_size=len(texts),
             total_tokens=None,  # FastEmbed does not expose token counts.
         )
@@ -301,9 +303,6 @@ class BrowserEmbeddingClient(BaseEmbeddingClient):
         normalizer: Optional[Normalizer] = None,
         **kwargs,
     ) -> Tuple[Embeddings, ModelCallStat]:
-        import json
-
-        from kavalai.llm_clients.base_client import LlmClientException
         from kavalai.llm_clients.browser_client import get_browser_bridge
 
         start_time = time.perf_counter()
@@ -333,7 +332,7 @@ class BrowserEmbeddingClient(BaseEmbeddingClient):
         stats = create_model_call_stat(
             call_type="embedding",
             model=f"browser/{self.model}",
-            duration_sections=duration,
+            duration_seconds=duration,
             batch_size=len(texts),
             total_tokens=total_tokens,
         )

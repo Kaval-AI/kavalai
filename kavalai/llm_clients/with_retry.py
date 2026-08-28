@@ -80,6 +80,10 @@ def _gemini_client_error() -> type:
     return found[0] if found else _NeverRaised
 
 
+def _is_rate_limited(error: Exception) -> bool:
+    return getattr(error, "status", None) == 429 or "429" in str(error)
+
+
 async def with_retry(
     func: Callable,
     *args,
@@ -91,11 +95,12 @@ async def with_retry(
 ) -> Any:
     """
     Exponential backoff retry wrapper for LLM client calls.
-    Retries only on specific OpenAI and Gemini exceptions.
+    Retries only on the transient error types of the OpenAI, Gemini and
+    Anthropic SDKs; anything else (auth errors, programming errors) is raised
+    at once.
 
-    The ``openai`` and ``google-genai`` SDKs are optional extras and are
-    imported lazily, so this wrapper also works in lightweight / pyodide
-    installs where neither is present.
+    The provider SDKs are optional extras and are imported lazily, so this
+    wrapper also works in lightweight / pyodide installs where none is present.
 
     :param func: The function to call.
     :param max_retries: Maximum number of retries.
@@ -113,16 +118,12 @@ async def with_retry(
     for attempt in range(max_retries + 1):
         try:
             return await func(*args, **kwargs)
-        except gemini_client_error as e:
-            # Special handling for Gemini ClientError to avoid retrying on 404
-            if hasattr(e, "status") and e.status == 404:
-                raise e
-            if "404" in str(e):
-                raise e
-            last_exception = e
-            if on_retry is not None and attempt < max_retries:
-                await on_retry(attempt + 1, e)
-        except retriable_exceptions as e:
+        except (*retriable_exceptions, gemini_client_error) as e:
+            # Gemini reports rate limits as ``ClientError`` (429), the same
+            # class as bad requests, auth failures and unknown models, which
+            # never recover and are raised at once.
+            if isinstance(e, gemini_client_error) and not _is_rate_limited(e):
+                raise
             last_exception = e
             if attempt == max_retries:
                 break
@@ -135,8 +136,5 @@ async def with_retry(
             if on_retry is not None:
                 await on_retry(attempt + 1, e)
             await asyncio.sleep(delay)
-        except Exception as e:
-            # Do not retry on other exceptions (programming errors, auth errors, etc.)
-            raise e
 
     raise last_exception

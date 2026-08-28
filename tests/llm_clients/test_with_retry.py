@@ -102,11 +102,23 @@ async def test_gemini_client_error_retries_with_on_retry():
         "kavalai.llm_clients.with_retry._gemini_client_error",
         return_value=FakeGeminiError,
     ):
-        result = await with_retry(func, on_retry=on_retry)
+        result = await with_retry(func, on_retry=on_retry, base_delay=0.001)
 
     assert result == "ok"
     assert calls["count"] == 2
     assert retries == [(1, "throttled")]
+
+
+@pytest.mark.asyncio
+async def test_gemini_auth_error_not_retried():
+    func, calls = make_flaky(1, lambda: FakeGeminiError("unauthenticated", status=401))
+    with patch(
+        "kavalai.llm_clients.with_retry._gemini_client_error",
+        return_value=FakeGeminiError,
+    ):
+        with pytest.raises(FakeGeminiError):
+            await with_retry(func)
+    assert calls["count"] == 1
 
 
 @pytest.mark.asyncio

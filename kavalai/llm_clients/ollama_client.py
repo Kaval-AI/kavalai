@@ -16,7 +16,6 @@ limitations under the License.
 
 import os
 import time
-import json
 from typing import Optional, Type
 
 import ollama
@@ -27,7 +26,6 @@ from kavalai.llm_clients.base_client import (
     BaseLlmClient,
     ChatHistory,
     LlmClientParameters,
-    ModelCallStat,
     ModelStatsReceiver,
 )
 from kavalai.llm_clients.streamer import Streamer
@@ -59,11 +57,7 @@ class OllamaClient(BaseLlmClient):
         super().__init__(llm_client_parameters, model_stats_receiver)
         self.model = model
         self.host = host or os.getenv("OLLAMA_HOST", "http://localhost:11434")
-
-        self.timeout = 30.0
-        if self.parameters and self.parameters.timeout_seconds:
-            self.timeout = self.parameters.timeout_seconds
-
+        self.timeout = self.timeout_seconds
         self.client = ollama.AsyncClient(host=self.host, timeout=self.timeout)
 
     async def _run_chat_completions(
@@ -80,17 +74,16 @@ class OllamaClient(BaseLlmClient):
             "response", response_model=response_model
         )
 
-        messages = []
-        for msg in ensure_user_turn(chat_history.messages):
-            message_dict = {"role": msg.role, "content": msg.content}
-            messages.append(message_dict)
+        messages = [
+            {"role": msg.role, "content": msg.content}
+            for msg in ensure_user_turn(chat_history.messages)
+        ]
 
         options = {}
-        if self.parameters:
-            if self.parameters.temperature is not None:
-                options["temperature"] = self.parameters.temperature
-            if self.parameters.top_p is not None:
-                options["top_p"] = self.parameters.top_p
+        if self.parameters.temperature is not None:
+            options["temperature"] = self.parameters.temperature
+        if self.parameters.top_p is not None:
+            options["top_p"] = self.parameters.top_p
 
         call_kwargs = {
             "model": self.model,
@@ -122,17 +115,10 @@ class OllamaClient(BaseLlmClient):
                 completion_tokens = chunk.get("eval_count", 0)
 
         await value_streamer.stream_complete()
-
-        duration = time.perf_counter() - start_time
-        stats = ModelCallStat(
-            call_type="llm",
-            model=self.stat_model_name(),
-            request_data=json.dumps(call_kwargs, default=str),
+        await self._record_completed_call(
+            request_data=call_kwargs,
             response_data=full_response,
-            duration_seconds=duration,
+            started=start_time,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
-            total_tokens=prompt_tokens + completion_tokens,
-            response_code=200,
         )
-        await self._send_model_call_stats(stats)

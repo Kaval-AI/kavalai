@@ -179,7 +179,7 @@ class SqliteRagService(BaseRagService):
         return row is not None
 
     def _create_table(self) -> None:
-        """Create the index table; mirrors the Postgres rag_index migration."""
+        """Create the single index table shared by every collection."""
         self._conn.executescript(
             f"""
             CREATE TABLE {self.table_name} (
@@ -231,11 +231,10 @@ class SqliteRagService(BaseRagService):
             texts=texts,
             normalizer=self.normalizer,
         )
-        if stats is not None:
-            logger.debug(
-                f"SqliteRagService embedded {len(texts)} texts with {self.model} "
-                f"({getattr(stats, 'total_tokens', None)} tokens)"
-            )
+        logger.debug(
+            f"SqliteRagService embedded {len(texts)} texts with {self.model} "
+            f"({stats.total_tokens} tokens)"
+        )
         return embeddings
 
     async def index(
@@ -309,21 +308,21 @@ class SqliteRagService(BaseRagService):
         self._ensure_vector_ready(dim)
 
         now = _utc_now_iso()
-        rows = []
-        for i, (content, meta, emb) in enumerate(zip(texts, metadata_list, embeddings)):
-            rows.append(
-                {
-                    "id": str(uuid4()),
-                    "model": self.model,
-                    "collection_name": collection_name,
-                    "source_id": source_ids[i] if source_ids else "default",
-                    "content": content,
-                    "embedding_size": dim,
-                    "rag_metadata": meta,
-                    "created_at": now,
-                    "updated_at": now,
-                }
-            )
+        source_ids = source_ids or ["default"] * len(texts)
+        rows = [
+            {
+                "id": str(uuid4()),
+                "model": self.model,
+                "collection_name": collection_name,
+                "source_id": source_id,
+                "content": content,
+                "embedding_size": dim,
+                "rag_metadata": meta,
+                "created_at": now,
+                "updated_at": now,
+            }
+            for content, meta, source_id in zip(texts, metadata_list, source_ids)
+        ]
 
         self._conn.executemany(
             f"""
@@ -370,6 +369,7 @@ class SqliteRagService(BaseRagService):
             source_ids (Optional[list[str]]): If provided, filter by source identifiers.
             keep_best (bool): If True, only the best result per source_id is returned.
                              Useful when a single source is split into multiple indexed items.
+            include_content (bool): When False, ``content`` is omitted from the results.
 
         Returns:
             list[RagServiceResult]: List of results with similarity scores.

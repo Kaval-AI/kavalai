@@ -17,7 +17,7 @@ limitations under the License.
 import asyncio
 import io
 import json
-from typing import Optional, Type
+from typing import Callable, Optional, Type
 
 from pydantic import BaseModel
 
@@ -70,14 +70,16 @@ class ValueStreamer:
         queue: asyncio.Queue,
         response_model: Optional[Type[BaseModel]] = None,
         stream_delta: bool = False,
-        on_complete_callback: Optional[callable] = None,
+        on_complete_callback: Optional[Callable[[], None]] = None,
     ):
         """
-        Initialize the Streamer.
-
         Args:
             name: Name/label of the value.
             queue: Target queue for the JSON-serialized StreamContent.
+            response_model: When set, partial and complete chunks carry the
+                buffered content re-serialised through ``safe_parse_json``.
+            stream_delta: Send only the new text in each partial chunk.
+            on_complete_callback: Called once after the complete chunk is queued.
         """
         self._name = name
         self._queue = queue
@@ -185,8 +187,7 @@ class Streamer:
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit."""
-        # Optionally handle cleanup or ensure the queue is properly closed
+        """Async context manager exit; nothing to release."""
         return False
 
     def __aiter__(self):
@@ -246,7 +247,7 @@ class Streamer:
             except asyncio.TimeoutError:
                 raise StreamerTimeoutException(
                     self._active_streamer_names, self._timeout_seconds
-                )
+                ) from None
         else:
             data = await self._queue.get()
         stream_content = StreamContent.model_validate_json(data)

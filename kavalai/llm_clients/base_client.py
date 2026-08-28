@@ -15,8 +15,9 @@ limitations under the License.
 """
 
 import asyncio
+import json
 import time
-from typing import Optional, Type, Literal
+from typing import Any, Optional, Type, Literal
 
 from pydantic import BaseModel
 from loguru import logger
@@ -39,7 +40,7 @@ class LlmClientParameters(BaseModel):
     service_tier: Optional[str] = None
     timeout_seconds: Optional[float] = 30.0
     # Inter-chunk inactivity timeout for streaming consumers. When unset,
-    # ``chat_stream`` falls back to 2 x timeout_seconds so the stream survives
+    # ``stream_chat_completions`` uses 2 x timeout_seconds so the stream survives
     # one timed-out attempt plus its retry backoff (timeout_seconds alone
     # would kill retries).
     stream_timeout_seconds: Optional[float] = None
@@ -146,13 +147,15 @@ class BaseLlmClient:
         llm_client_parameters: Optional[LlmClientParameters] = None,
         model_stats_receiver: Optional[ModelStatsReceiver] = None,
     ):
-        if not llm_client_parameters:
-            llm_client_parameters = LlmClientParameters()
-        self.parameters = llm_client_parameters
-        self.streamer = None
-        self.model_stats_receiver = model_stats_receiver
-        if self.model_stats_receiver is None:
-            self.model_stats_receiver = ModelStatsLogger()
+        self.parameters = llm_client_parameters or LlmClientParameters()
+        self.model_stats_receiver = (
+            ModelStatsLogger() if model_stats_receiver is None else model_stats_receiver
+        )
+
+    @property
+    def timeout_seconds(self) -> float:
+        """Per-request timeout, 30 s unless ``LlmClientParameters`` sets one."""
+        return self.parameters.timeout_seconds or 30.0
 
     async def stream_chat_completions(
         self,
@@ -174,17 +177,9 @@ class BaseLlmClient:
         Returns:
             A Streamer instance that will yield the completion events.
         """
-        llm_timeout = 30.0
-        if self.parameters and self.parameters.timeout_seconds:
-            llm_timeout = self.parameters.timeout_seconds
-
         # The inactivity timeout must outlast a single timed-out attempt plus
         # its retry backoff; retries reset the clock via the restart chunk.
-        stream_timeout = None
-        if self.parameters and self.parameters.stream_timeout_seconds:
-            stream_timeout = self.parameters.stream_timeout_seconds
-        timeout = stream_timeout or 2 * llm_timeout
-
+        timeout = self.parameters.stream_timeout_seconds or 2 * self.timeout_seconds
         streamer = Streamer(stream_delta=stream_delta, timeout_seconds=timeout)
 
         started = time.perf_counter()
@@ -312,15 +307,54 @@ class BaseLlmClient:
             )
         )
 
+    async def _record_completed_call(
+        self,
+        *,
+        request_data: Any,
+        response_data: str,
+        started: float,
+        prompt_tokens: int,
+        completion_tokens: int,
+        total_tokens: Optional[int] = None,
+        cached_prompt_tokens: Optional[int] = None,
+        reasoning_tokens: Optional[int] = None,
+    ) -> None:
+        """Record a successful completion.
+
+        ``request_data`` is serialised with ``json.dumps(default=str)``, so
+        provider SDK objects (Pydantic models, enums) in the call kwargs are
+        stored as their string form rather than failing the record.
+        """
+        await self._send_model_call_stats(
+            ModelCallStat(
+                call_type="llm",
+                model=self.stat_model_name(),
+                request_data=json.dumps(request_data, default=str),
+                response_data=response_data,
+                duration_seconds=time.perf_counter() - started,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=(
+                    prompt_tokens + completion_tokens
+                    if total_tokens is None
+                    else total_tokens
+                ),
+                cached_prompt_tokens=cached_prompt_tokens,
+                reasoning_tokens=reasoning_tokens,
+                response_code=200,
+            )
+        )
+
     async def _run_chat_completions(
         self,
         chat_history: ChatHistory,
         response_model: Optional[Type[BaseModel]],
         streamer: Streamer,
     ):
-        """
-        Background task to handle the actual LLM API call and stream results.
-        This method must be overridden by subclasses.
+        """Perform the provider call and push chunks into ``streamer``.
+
+        Runs as the background task started by :meth:`stream_chat_completions`;
+        subclasses override it.
         """
         raise NotImplementedError("Subclasses must implement _run_chat_completions")
 

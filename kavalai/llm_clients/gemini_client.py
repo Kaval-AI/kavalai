@@ -16,7 +16,6 @@ limitations under the License.
 
 import os
 import time
-import json
 from typing import Any, Dict, List, Optional, Tuple, Type
 
 from google import genai
@@ -30,10 +29,17 @@ from kavalai.llm_clients.base_client import (
     LlmClientException,
     ChatHistory,
     LlmClientParameters,
-    ModelCallStat,
     ModelStatsReceiver,
 )
+from kavalai.llm_clients.common import walk_json_schema
 from kavalai.llm_clients.streamer import Streamer
+
+#: ``LlmClientParameters.service_tier`` values the Gemini API understands.
+_SERVICE_TIERS = {
+    "priority": types.ServiceTier.PRIORITY,
+    "standard": types.ServiceTier.STANDARD,
+    "flex": types.ServiceTier.FLEX,
+}
 
 
 class GeminiClient(BaseLlmClient):
@@ -62,7 +68,6 @@ class GeminiClient(BaseLlmClient):
         super().__init__(llm_client_parameters, model_stats_receiver)
         self.model = model
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
-        self.timeout = self.parameters.timeout_seconds
 
         try:
             self.client = genai.Client(api_key=self.api_key)
@@ -88,28 +93,22 @@ class GeminiClient(BaseLlmClient):
         )
 
         config_kwargs = {}
-        if self.parameters:
-            if self.parameters.temperature is not None:
-                config_kwargs["temperature"] = self.parameters.temperature
-            if self.parameters.top_p is not None:
-                config_kwargs["top_p"] = self.parameters.top_p
-            if self.parameters.service_tier is not None:
-                # Map string values to ServiceTier enum
-                service_tier = self.parameters.service_tier.lower()
-                tier_map = {
-                    "priority": types.ServiceTier.PRIORITY,
-                    "standard": types.ServiceTier.STANDARD,
-                    "flex": types.ServiceTier.FLEX,
-                }
-                if service_tier in tier_map:
-                    config_kwargs["service_tier"] = tier_map[service_tier]
-                    logger.info(f"Gemini Service Tier: {service_tier.upper()}")
-
-            if self.parameters.reasoning_effort is not None:
-                # Map reasoning_effort to thinking_config if applicable
-                config_kwargs["thinking_config"] = types.ThinkingConfig(
-                    include_thoughts=True,
-                )
+        params = self.parameters
+        if params.temperature is not None:
+            config_kwargs["temperature"] = params.temperature
+        if params.top_p is not None:
+            config_kwargs["top_p"] = params.top_p
+        if params.service_tier is not None:
+            service_tier = params.service_tier.lower()
+            if service_tier in _SERVICE_TIERS:
+                config_kwargs["service_tier"] = _SERVICE_TIERS[service_tier]
+                logger.info(f"Gemini Service Tier: {service_tier.upper()}")
+        if params.reasoning_effort is not None:
+            # Gemini has no effort levels here; any setting turns on streamed
+            # thoughts, delivered on the "thought" value streamer below.
+            config_kwargs["thinking_config"] = types.ThinkingConfig(
+                include_thoughts=True,
+            )
 
         if system_instruction:
             config_kwargs["system_instruction"] = system_instruction
@@ -165,26 +164,19 @@ class GeminiClient(BaseLlmClient):
         if thought_streamer:
             await thought_streamer.stream_complete()
 
-        duration = time.perf_counter() - start_time
-        request_data = {
-            "model": self.model,
-            "contents": [str(c) for c in contents],
-            "config": config_kwargs,
-        }
-        stats = ModelCallStat(
-            call_type="llm",
-            model=self.stat_model_name(),
-            request_data=json.dumps(request_data, default=str),
+        await self._record_completed_call(
+            request_data={
+                "model": self.model,
+                "contents": [str(c) for c in contents],
+                "config": config_kwargs,
+            },
             response_data=full_response,
-            duration_seconds=duration,
+            started=start_time,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
-            total_tokens=prompt_tokens + completion_tokens,
             cached_prompt_tokens=cached_prompt_tokens,
             reasoning_tokens=reasoning_tokens,
-            response_code=200,
         )
-        await self._send_model_call_stats(stats)
 
 
 def convert_messages(
@@ -234,33 +226,8 @@ def convert_messages(
 
 
 def remove_additional_properties(schema: Dict[str, Any]) -> None:
+    """Strip ``additionalProperties`` from every object schema, in place.
+
+    Gemini's response schema does not accept the field.
     """
-    Recursively remove 'additionalProperties' from a JSON schema.
-    Gemini's API doesn't support this field.
-    """
-    if not isinstance(schema, dict):
-        return
-
-    # Remove additionalProperties if present
-    schema.pop("additionalProperties", None)
-
-    # Recursively process nested objects
-    if "properties" in schema:
-        for prop_schema in schema["properties"].values():
-            remove_additional_properties(prop_schema)
-
-    # Handle arrays
-    if "items" in schema:
-        remove_additional_properties(schema["items"])
-
-    # Handle allOf, anyOf, oneOf
-    for key in ["allOf", "anyOf", "oneOf"]:
-        if key in schema:
-            for sub_schema in schema[key]:
-                remove_additional_properties(sub_schema)
-
-    # Handle $defs or definitions (where nested models are stored)
-    for key in ["$defs", "definitions"]:
-        if key in schema:
-            for def_schema in schema[key].values():
-                remove_additional_properties(def_schema)
+    walk_json_schema(schema, lambda node: node.pop("additionalProperties", None))

@@ -233,7 +233,7 @@ def test_create_model_call_stat_basic():
     stat = create_model_call_stat(
         call_type="llm",
         model="test-model",
-        duration_sections=1.5,
+        duration_seconds=1.5,
         prompt_tokens=10,
         completion_tokens=20,
         response_data={"foo": "bar"},
@@ -253,7 +253,7 @@ def test_create_model_call_stat_string_response():
     stat = create_model_call_stat(
         call_type="llm",
         model="test-model",
-        duration_sections=1.0,
+        duration_seconds=1.0,
         response_data="just a string",
     )
     assert stat.response_data == "just a string"
@@ -261,7 +261,7 @@ def test_create_model_call_stat_string_response():
 
 def test_create_model_call_stat_none_response():
     stat = create_model_call_stat(
-        call_type="llm", model="test-model", duration_sections=1.0, response_data=None
+        call_type="llm", model="test-model", duration_seconds=1.0, response_data=None
     )
     assert stat.response_data is None
 
@@ -270,9 +270,45 @@ def test_create_model_call_stat_tokens():
     stat = create_model_call_stat(
         call_type="llm",
         model="test",
-        duration_sections=1.0,
+        duration_seconds=1.0,
         prompt_tokens=10,
         completion_tokens=20,
         total_tokens=None,
     )
     assert stat.total_tokens == 30
+
+
+# --- walk_json_schema tests ---
+
+
+def test_walk_json_schema_visits_every_nested_object_schema():
+    from kavalai.llm_clients.common import walk_json_schema
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "child": {"type": "object", "properties": {}},
+            "items": {"type": "array", "items": {"type": "object"}},
+            "union": {"anyOf": [{"type": "object"}, {"type": "null"}]},
+        },
+        "$defs": {"Nested": {"type": "object", "allOf": [{"type": "object"}]}},
+        "definitions": {"Legacy": {"oneOf": [{"type": "object"}]}},
+    }
+    seen = []
+    walk_json_schema(schema, lambda node: seen.append(node.get("type")))
+
+    # Root, child, the array item, the anyOf member, Nested and its allOf
+    # member, and the oneOf member under definitions.
+    assert seen.count("object") == 7
+    assert seen.count("array") == 1
+    assert seen.count("null") == 1
+    assert seen.count(None) == 2  # the bare anyOf/oneOf wrappers
+
+
+def test_walk_json_schema_ignores_non_dict_input():
+    from kavalai.llm_clients.common import walk_json_schema
+
+    calls = []
+    walk_json_schema("not a schema", calls.append)
+    walk_json_schema(None, calls.append)
+    assert calls == []

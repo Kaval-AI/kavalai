@@ -27,7 +27,6 @@ from kavalai.llm_clients.base_client import (
     ChatHistory,
     LlmClientException,
     LlmClientParameters,
-    ModelCallStat,
     ModelStatsReceiver,
 )
 from kavalai.llm_clients.streamer import Streamer
@@ -127,11 +126,10 @@ class BrowserLLMClient(BaseLlmClient):
             messages[-1]["role"] = "user"
         request: dict = {"model": self.model, "messages": messages}
 
-        if self.parameters:
-            if self.parameters.temperature is not None:
-                request["temperature"] = self.parameters.temperature
-            if self.parameters.top_p is not None:
-                request["top_p"] = self.parameters.top_p
+        if self.parameters.temperature is not None:
+            request["temperature"] = self.parameters.temperature
+        if self.parameters.top_p is not None:
+            request["top_p"] = self.parameters.top_p
 
         if response_model is not None:
             # WebLLM (and OpenAI-compatible engines) constrain generation to the
@@ -174,20 +172,11 @@ class BrowserLLMClient(BaseLlmClient):
         await value_streamer.stream_complete()
 
         usage = data.get("usage") or {}
-        prompt_tokens = usage.get("prompt_tokens") or 0
-        completion_tokens = usage.get("completion_tokens") or 0
-        total_tokens = usage.get("total_tokens") or (prompt_tokens + completion_tokens)
-
-        duration = time.perf_counter() - start_time
-        stats = ModelCallStat(
-            call_type="llm",
-            model=self.stat_model_name(),
-            request_data=json.dumps(request, default=str),
+        await self._record_completed_call(
+            request_data=request,
             response_data=content,
-            duration_seconds=duration,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=total_tokens,
-            response_code=200,
+            started=start_time,
+            prompt_tokens=usage.get("prompt_tokens") or 0,
+            completion_tokens=usage.get("completion_tokens") or 0,
+            total_tokens=usage.get("total_tokens") or None,
         )
-        await self._send_model_call_stats(stats)

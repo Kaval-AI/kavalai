@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-from typing import Any, Optional, Type
+from typing import Any, Callable, Optional, Type
 
 import json
 from partial_json_parser import ensure_json
@@ -115,9 +115,9 @@ def safe_model_validate(response_model: Type[BaseModel], json_str: str) -> BaseM
     """
     parsed = safe_parse_json(json_str)
 
-    # If we got a list when expecting a BaseModel (dict), convert to empty dict
-    # This happens when LLM returns incomplete/malformed responses like "[]"
-    if isinstance(parsed, list) and not isinstance(parsed, dict):
+    # A list cannot validate against a model; a truncated or failed stream
+    # sometimes leaves "[]" behind.
+    if isinstance(parsed, list):
         logger.error(f"LLM returned invalid JSON: {json_str}")
         parsed = {}
 
@@ -136,15 +136,35 @@ def get_model_name(model: str) -> str:
     Returns:
         The extracted model name.
     """
-    if "/" in model:
-        return model.split("/")[-1]
-    return model
+    return model.rsplit("/", 1)[-1]
+
+
+def walk_json_schema(schema: Any, visit: Callable[[dict], None]) -> None:
+    """Call ``visit`` on ``schema`` and on every nested object schema.
+
+    Descends through ``properties``, ``items``, ``allOf``/``anyOf``/``oneOf``
+    and ``$defs``/``definitions`` — the places a Pydantic-generated schema
+    keeps sub-schemas. Non-dict input is ignored.
+    """
+    if not isinstance(schema, dict):
+        return
+    visit(schema)
+    for prop_schema in schema.get("properties", {}).values():
+        walk_json_schema(prop_schema, visit)
+    if "items" in schema:
+        walk_json_schema(schema["items"], visit)
+    for key in ("allOf", "anyOf", "oneOf"):
+        for sub_schema in schema.get(key, ()):
+            walk_json_schema(sub_schema, visit)
+    for key in ("$defs", "definitions"):
+        for def_schema in schema.get(key, {}).values():
+            walk_json_schema(def_schema, visit)
 
 
 def create_model_call_stat(
     call_type: str,
     model: str,
-    duration_sections: float,
+    duration_seconds: float,
     prompt_tokens: Optional[int] = None,
     completion_tokens: Optional[int] = None,
     total_tokens: Optional[int] = None,
@@ -161,7 +181,7 @@ def create_model_call_stat(
     Args:
         call_type: Category of the call (e.g., 'llm', 'embedding').
         model: Name of the model used.
-        duration_sections: Time taken for the call in seconds.
+        duration_seconds: Time taken for the call in seconds.
         prompt_tokens: Number of tokens in the input prompt.
         completion_tokens: Number of tokens in the output completion.
         total_tokens: Total tokens used (calculated if None).
@@ -187,6 +207,6 @@ def create_model_call_stat(
         completion_tokens=completion_tokens,
         total_tokens=total_tokens,
         batch_size=batch_size,
-        duration_seconds=duration_sections,
+        duration_seconds=duration_seconds,
         response_data=to_plain(response_data),
     )

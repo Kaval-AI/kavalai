@@ -16,7 +16,6 @@ limitations under the License.
 
 import os
 import time
-import json
 from typing import Optional, Type
 
 from openai import AsyncOpenAI
@@ -33,7 +32,6 @@ from kavalai.llm_clients.base_client import (
     BaseLlmClient,
     ChatHistory,
     LlmClientParameters,
-    ModelCallStat,
     ModelStatsReceiver,
 )
 from kavalai.llm_clients.streamer import Streamer
@@ -70,12 +68,8 @@ class OpenAIClient(BaseLlmClient):
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         self.base_url = base_url
 
-        timeout = 30.0
-        if self.parameters and self.parameters.timeout_seconds:
-            timeout = self.parameters.timeout_seconds
-
         self.client = AsyncOpenAI(
-            api_key=self.api_key, base_url=self.base_url, timeout=timeout
+            api_key=self.api_key, base_url=self.base_url, timeout=self.timeout_seconds
         )
 
     async def _run_chat_completions(
@@ -92,31 +86,27 @@ class OpenAIClient(BaseLlmClient):
             "response", response_model=response_model
         )
 
-        messages = []
-        for msg in ensure_user_turn(chat_history.messages):
-            message_dict = {"role": msg.role, "content": msg.content}
-            messages.append(message_dict)
+        messages = [
+            {"role": msg.role, "content": msg.content}
+            for msg in ensure_user_turn(chat_history.messages)
+        ]
+        call_kwargs = {"model": self.model, "input": messages}
 
-        call_kwargs = {
-            "model": self.model,
-            "input": messages,
-        }
-
-        if self.parameters:
-            # Reasoning models (GPT-5 family, o-series) reject sampling params
-            # such as top_p/temperature on the Responses API.
-            sampling_supported = not is_openai_reasoning_model(self.model)
-            if sampling_supported and self.parameters.temperature is not None:
-                call_kwargs["temperature"] = self.parameters.temperature
-            if sampling_supported and self.parameters.top_p is not None:
-                call_kwargs["top_p"] = self.parameters.top_p
-            if self.parameters.service_tier is not None:
-                call_kwargs["service_tier"] = self.parameters.service_tier
-            if self.parameters.reasoning_effort is not None:
-                # The Responses API takes reasoning effort nested under
-                # `reasoning`, not as a top-level `reasoning_effort` kwarg
-                # (that is the Chat Completions form).
-                call_kwargs["reasoning"] = {"effort": self.parameters.reasoning_effort}
+        params = self.parameters
+        # Reasoning models (GPT-5 family, o-series) reject sampling params
+        # such as top_p/temperature on the Responses API.
+        sampling_supported = not is_openai_reasoning_model(self.model)
+        if sampling_supported and params.temperature is not None:
+            call_kwargs["temperature"] = params.temperature
+        if sampling_supported and params.top_p is not None:
+            call_kwargs["top_p"] = params.top_p
+        if params.service_tier is not None:
+            call_kwargs["service_tier"] = params.service_tier
+        if params.reasoning_effort is not None:
+            # The Responses API takes reasoning effort nested under
+            # `reasoning`, not as a top-level `reasoning_effort` kwarg
+            # (that is the Chat Completions form).
+            call_kwargs["reasoning"] = {"effort": params.reasoning_effort}
 
         if response_model:
             call_kwargs["text_format"] = response_model
@@ -129,14 +119,12 @@ class OpenAIClient(BaseLlmClient):
 
         async with self.client.responses.stream(**call_kwargs) as stream:
             async for event in stream:
-                if isinstance(event, ResponseTextDeltaEvent):
-                    full_response += event.delta
-                    await value_streamer.stream_partial(event.delta)
-                elif isinstance(event, ResponseRefusalDeltaEvent):
+                if isinstance(
+                    event, (ResponseTextDeltaEvent, ResponseRefusalDeltaEvent)
+                ):
                     full_response += event.delta
                     await value_streamer.stream_partial(event.delta)
                 elif isinstance(event, ResponseErrorEvent):
-                    # We raise here to let the background task fail
                     # ResponseErrorEvent carries `message`/`code`, not `error`.
                     raise RuntimeError(f"OpenAI Stream Error: {event.message}")
                 elif isinstance(event, ResponseCompletedEvent):
@@ -152,19 +140,12 @@ class OpenAIClient(BaseLlmClient):
                     reasoning_tokens = getattr(output_details, "reasoning_tokens", None)
 
         await value_streamer.stream_complete()
-
-        duration = time.perf_counter() - start_time
-        stats = ModelCallStat(
-            call_type="llm",
-            model=self.stat_model_name(),
-            request_data=json.dumps(call_kwargs, default=str),
+        await self._record_completed_call(
+            request_data=call_kwargs,
             response_data=full_response,
-            duration_seconds=duration,
+            started=start_time,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
-            total_tokens=prompt_tokens + completion_tokens,
             cached_prompt_tokens=cached_prompt_tokens,
             reasoning_tokens=reasoning_tokens,
-            response_code=200,
         )
-        await self._send_model_call_stats(stats)

@@ -740,8 +740,16 @@ async def test_build_batch_query_cte(
     ]
 
     # The CTE builder requires a provisioned collection (table-per-collection).
+    # Dropped afterwards: the schema is shared with other tests, and one of
+    # them indexes 2-dimensional vectors into a collection of the same name.
     await service.create_collection("test", embedding_size=1536)
+    try:
+        await _assert_batch_query_cte(service, embeddings)
+    finally:
+        await service.drop_collection("test")
 
+
+async def _assert_batch_query_cte(service, embeddings):
     # Test 1: Basic CTE without filters
     cte_sql, params = service.build_batch_query_cte(
         embeddings=embeddings, top_k=5, collection_name="test"
@@ -1201,3 +1209,18 @@ async def test_iter_entries_and_embeddings_by_ids(
     assert all(len(v) == 1536 for v in by_id.values())
 
     await service.drop_collection(collection)
+
+
+# --- vector text helpers ---
+
+
+def test_vector_literal_and_parse_vector_round_trip():
+    from kavalai.rag.postgres import _parse_vector, _vector_literal
+
+    literal = _vector_literal((0.5, -1.0, 2.0))
+    assert literal == "[0.5, -1.0, 2.0]"
+    # pgvector returns the same bracketed text, without spaces.
+    assert _parse_vector("[0.5,-1.0,2.0]") == [0.5, -1.0, 2.0]
+    assert _parse_vector(literal) == [0.5, -1.0, 2.0]
+    # A driver that already decodes the vector hands back a sequence.
+    assert _parse_vector((0.5, -1.0)) == [0.5, -1.0]

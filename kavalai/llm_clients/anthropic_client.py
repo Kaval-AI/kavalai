@@ -16,7 +16,6 @@ limitations under the License.
 
 import os
 import time
-import json
 from typing import Any, Dict, List, Optional, Tuple, Type
 
 from anthropic import AsyncAnthropic
@@ -29,9 +28,9 @@ from kavalai.llm_clients.base_client import (
     ChatHistory,
     LlmClientException,
     LlmClientParameters,
-    ModelCallStat,
     ModelStatsReceiver,
 )
+from kavalai.llm_clients.common import walk_json_schema
 from kavalai.llm_clients.streamer import Streamer
 
 # The Messages API requires max_tokens on every request. It is only an output
@@ -71,12 +70,8 @@ class AnthropicClient(BaseLlmClient):
         self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
         self.base_url = base_url
 
-        timeout = 30.0
-        if self.parameters and self.parameters.timeout_seconds:
-            timeout = self.parameters.timeout_seconds
-
         self.client = AsyncAnthropic(
-            api_key=self.api_key, base_url=self.base_url, timeout=timeout
+            api_key=self.api_key, base_url=self.base_url, timeout=self.timeout_seconds
         )
 
     async def _run_chat_completions(
@@ -106,24 +101,24 @@ class AnthropicClient(BaseLlmClient):
             call_kwargs["system"] = system_prompt
 
         output_config: Dict[str, Any] = {}
-        if self.parameters:
-            if self.parameters.temperature is not None:
-                call_kwargs["temperature"] = self.parameters.temperature
-            if self.parameters.top_p is not None:
-                # The Messages API rejects a request carrying both sampling
-                # parameters, so send only temperature when both are set.
-                if "temperature" in call_kwargs:
-                    logger.warning(
-                        f"Anthropic model '{self.model}' accepts only one of "
-                        "temperature and top_p; sending temperature and "
-                        "ignoring top_p."
-                    )
-                else:
-                    call_kwargs["top_p"] = self.parameters.top_p
-            if self.parameters.service_tier is not None:
-                call_kwargs["service_tier"] = self.parameters.service_tier
-            if self.parameters.reasoning_effort is not None:
-                output_config["effort"] = self.parameters.reasoning_effort
+        params = self.parameters
+        if params.temperature is not None:
+            call_kwargs["temperature"] = params.temperature
+        if params.top_p is not None:
+            # The Messages API rejects a request carrying both sampling
+            # parameters, so send only temperature when both are set.
+            if "temperature" in call_kwargs:
+                logger.warning(
+                    f"Anthropic model '{self.model}' accepts only one of "
+                    "temperature and top_p; sending temperature and "
+                    "ignoring top_p."
+                )
+            else:
+                call_kwargs["top_p"] = params.top_p
+        if params.service_tier is not None:
+            call_kwargs["service_tier"] = params.service_tier
+        if params.reasoning_effort is not None:
+            output_config["effort"] = params.reasoning_effort
 
         if response_model:
             schema = response_model.model_json_schema()
@@ -160,21 +155,14 @@ class AnthropicClient(BaseLlmClient):
             ) + (getattr(usage, "cache_creation_input_tokens", 0) or 0) or None
 
         await value_streamer.stream_complete()
-
-        duration = time.perf_counter() - start_time
-        stats = ModelCallStat(
-            call_type="llm",
-            model=self.stat_model_name(),
-            request_data=json.dumps(call_kwargs, default=str),
+        await self._record_completed_call(
+            request_data=call_kwargs,
             response_data=full_response,
-            duration_seconds=duration,
+            started=start_time,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
-            total_tokens=prompt_tokens + completion_tokens,
             cached_prompt_tokens=cached_prompt_tokens,
-            response_code=200,
         )
-        await self._send_model_call_stats(stats)
 
 
 def convert_messages(
@@ -214,33 +202,13 @@ def convert_messages(
 
 
 def forbid_additional_properties(schema: Dict[str, Any]) -> None:
-    """
-    Recursively set 'additionalProperties: false' on all object schemas.
+    """Set ``additionalProperties: false`` on every object schema, in place.
+
     Anthropic structured outputs require closed object schemas.
     """
-    if not isinstance(schema, dict):
-        return
 
-    if schema.get("type") == "object" or "properties" in schema:
-        schema["additionalProperties"] = False
+    def close_object(node: dict) -> None:
+        if node.get("type") == "object" or "properties" in node:
+            node["additionalProperties"] = False
 
-    # Recursively process nested objects
-    if "properties" in schema:
-        for prop_schema in schema["properties"].values():
-            forbid_additional_properties(prop_schema)
-
-    # Handle arrays
-    if "items" in schema:
-        forbid_additional_properties(schema["items"])
-
-    # Handle allOf, anyOf, oneOf
-    for key in ["allOf", "anyOf", "oneOf"]:
-        if key in schema:
-            for sub_schema in schema[key]:
-                forbid_additional_properties(sub_schema)
-
-    # Handle $defs or definitions (where nested models are stored)
-    for key in ["$defs", "definitions"]:
-        if key in schema:
-            for def_schema in schema[key].values():
-                forbid_additional_properties(def_schema)
+    walk_json_schema(schema, close_object)

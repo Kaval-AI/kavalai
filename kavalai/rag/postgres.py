@@ -34,12 +34,10 @@ from typing import AsyncIterator, Callable, Optional, Union, AsyncContextManager
 from uuid import UUID, uuid4
 
 from loguru import logger
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-# Several methods take a parameter named ``text`` (the query text), shadowing
-# sqlalchemy.text — use this alias inside those methods.
-sql_text = text
+# Imported under an alias because several methods take a ``text`` parameter.
+from sqlalchemy import text as sql_text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from kavalai.db import Agent, db_manager
 from kavalai.llm_clients.embeddings import make_embedding_client
@@ -54,6 +52,18 @@ RAG_COLLECTION_SCHEMA_VERSION = 1
 #: async callable ``(session, service, collection_info) -> None`` that brings
 #: a collection from ``from_version`` to ``from_version + 1``.
 _COLLECTION_UPGRADES: dict[int, Callable] = {}
+
+
+def _vector_literal(embedding) -> str:
+    """Render an embedding as the ``[x, y, ...]`` text pgvector casts from."""
+    return str(list(embedding))
+
+
+def _parse_vector(value) -> list[float]:
+    """Parse a vector read back as ``[x,y,...]`` text; lists pass through."""
+    if isinstance(value, str):
+        return [float(x) for x in value.strip("[]").split(",")]
+    return list(value)
 
 
 class CollectionInfo:
@@ -202,10 +212,10 @@ class PostgresRagService(BaseRagService):
         if self._registry_ready:
             return
         await session.execute(
-            text("CREATE EXTENSION IF NOT EXISTS vector SCHEMA public")
+            sql_text("CREATE EXTENSION IF NOT EXISTS vector SCHEMA public")
         )
         await session.execute(
-            text(
+            sql_text(
                 f"""
                 CREATE TABLE IF NOT EXISTS {self._qualified(self.REGISTRY_TABLE)} (
                     name TEXT PRIMARY KEY,
@@ -232,7 +242,7 @@ class PostgresRagService(BaseRagService):
         await self._ensure_registry(session)
         row = (
             await session.execute(
-                text(
+                sql_text(
                     f"SELECT name, table_name, model, embedding_size, schema_version "
                     f"FROM {self._qualified(self.REGISTRY_TABLE)} WHERE name = :name"
                 ).bindparams(name=collection_name)
@@ -276,7 +286,7 @@ class PostgresRagService(BaseRagService):
             await upgrade(session, self, info)
             info.schema_version += 1
             await session.execute(
-                text(
+                sql_text(
                     f"UPDATE {self._qualified(self.REGISTRY_TABLE)} "
                     f"SET schema_version = :version WHERE name = :name"
                 ).bindparams(version=info.schema_version, name=info.name)
@@ -306,7 +316,7 @@ class PostgresRagService(BaseRagService):
         table_name = self.table_name_for_collection(collection_name)
         qualified = self._qualified(table_name)
         await session.execute(
-            text(
+            sql_text(
                 f"""
                 CREATE TABLE IF NOT EXISTS {qualified} (
                     id UUID PRIMARY KEY,
@@ -321,25 +331,25 @@ class PostgresRagService(BaseRagService):
             )
         )
         await session.execute(
-            text(
+            sql_text(
                 f'CREATE INDEX IF NOT EXISTS "ix_{table_name}_source_id" '
                 f"ON {qualified} (source_id)"
             )
         )
         await session.execute(
-            text(
+            sql_text(
                 f'CREATE INDEX IF NOT EXISTS "ix_{table_name}_metadata" '
                 f"ON {qualified} USING gin (metadata)"
             )
         )
         await session.execute(
-            text(
+            sql_text(
                 f'CREATE INDEX IF NOT EXISTS "ix_{table_name}_embedding" '
                 f"ON {qualified} USING hnsw (embedding public.vector_cosine_ops)"
             )
         )
         await session.execute(
-            text(
+            sql_text(
                 f"INSERT INTO {self._qualified(self.REGISTRY_TABLE)} "
                 f"(name, table_name, model, embedding_size, schema_version) "
                 f"VALUES (:name, :table_name, :model, :embedding_size, :version) "
@@ -381,10 +391,10 @@ class PostgresRagService(BaseRagService):
             if info is None:
                 return
             await session.execute(
-                text(f"DROP TABLE IF EXISTS {self._qualified(info.table_name)}")
+                sql_text(f"DROP TABLE IF EXISTS {self._qualified(info.table_name)}")
             )
             await session.execute(
-                text(
+                sql_text(
                     f"DELETE FROM {self._qualified(self.REGISTRY_TABLE)} "
                     f"WHERE name = :name"
                 ).bindparams(name=collection_name)
@@ -399,7 +409,7 @@ class PostgresRagService(BaseRagService):
             await self._ensure_registry(session)
             rows = (
                 await session.execute(
-                    text(
+                    sql_text(
                         f"SELECT name, table_name, model, embedding_size, "
                         f"schema_version FROM "
                         f"{self._qualified(self.REGISTRY_TABLE)} ORDER BY name"
@@ -410,7 +420,9 @@ class PostgresRagService(BaseRagService):
             for row in rows:
                 count = (
                     await session.execute(
-                        text(f"SELECT count(*) FROM {self._qualified(row.table_name)}")
+                        sql_text(
+                            f"SELECT count(*) FROM {self._qualified(row.table_name)}"
+                        )
                     )
                 ).scalar()
                 collections.append(
@@ -494,26 +506,26 @@ class PostgresRagService(BaseRagService):
             info = await self._ensure_collection(session, collection_name, dim)
 
             now = datetime.now(timezone.utc)
-            rows = []
-            for i, (content, meta, emb) in enumerate(
-                zip(texts, metadata_list, embeddings)
-            ):
-                rows.append(
-                    {
-                        "id": uuid4(),
-                        "model": info.model,
-                        "collection_name": collection_name,
-                        "source_id": source_ids[i] if source_ids else "default",
-                        "content": content,
-                        "embedding_size": dim,
-                        "embedding": list(emb),
-                        "rag_metadata": meta,
-                        "created_at": now,
-                        "updated_at": now,
-                    }
+            source_ids = source_ids or ["default"] * len(texts)
+            rows = [
+                {
+                    "id": uuid4(),
+                    "model": info.model,
+                    "collection_name": collection_name,
+                    "source_id": source_id,
+                    "content": content,
+                    "embedding_size": dim,
+                    "embedding": list(emb),
+                    "rag_metadata": meta,
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                for content, meta, emb, source_id in zip(
+                    texts, metadata_list, embeddings, source_ids
                 )
+            ]
 
-            insert_sql = text(
+            insert_sql = sql_text(
                 f"INSERT INTO {self._qualified(info.table_name)} "
                 f"(id, source_id, content, embedding, metadata, created_at, updated_at) "
                 f"VALUES (:id, :source_id, :content, CAST(:embedding AS vector), "
@@ -526,12 +538,12 @@ class PostgresRagService(BaseRagService):
                         "id": row["id"],
                         "source_id": row["source_id"],
                         "content": row["content"],
-                        "embedding": str(list(emb)),
+                        "embedding": _vector_literal(row["embedding"]),
                         "metadata": json.dumps(row["rag_metadata"]),
                         "created_at": row["created_at"],
                         "updated_at": row["updated_at"],
                     }
-                    for row, emb in zip(rows, embeddings)
+                    for row in rows
                 ],
             )
             await session.commit()
@@ -563,7 +575,7 @@ class PostgresRagService(BaseRagService):
                 ]
             for info in infos:
                 await session.execute(
-                    text(
+                    sql_text(
                         f"DELETE FROM {self._qualified(info.table_name)} WHERE id = :id"
                     ).bindparams(id=item_id)
                 )
@@ -581,7 +593,7 @@ class PostgresRagService(BaseRagService):
             if info is None:
                 return
             await session.execute(
-                text(
+                sql_text(
                     f"DELETE FROM {self._qualified(info.table_name)} "
                     f"WHERE source_id = ANY(:source_ids)"
                 ).bindparams(source_ids=source_ids)
@@ -737,7 +749,7 @@ class PostgresRagService(BaseRagService):
         params: dict = {"top_k": top_k}
         vector_parts = []
         for i, embedding in enumerate(embeddings):
-            params[f"vector_{i}"] = str(list(embedding))
+            params[f"vector_{i}"] = _vector_literal(embedding)
             vector_parts.append(f"CAST(:vector_{i} AS public.vector)")
         vector_array = f"ARRAY[{', '.join(vector_parts)}]"
 
@@ -866,21 +878,16 @@ class PostgresRagService(BaseRagService):
                 select_columns.extend(join_columns)
             select_clause = ", ".join(select_columns)
 
+            join_sql = ""
             if join_table and join_condition:
-                query_sql = f"""
-                    WITH {cte_sql}
-                    SELECT {select_clause}
-                    FROM rag_results r
-                    JOIN {join_table} ON {join_condition}
-                    ORDER BY r.query_idx, r.similarity DESC
-                """
-            else:
-                query_sql = f"""
-                    WITH {cte_sql}
-                    SELECT {select_clause}
-                    FROM rag_results r
-                    ORDER BY r.query_idx, r.similarity DESC
-                """
+                join_sql = f"JOIN {join_table} ON {join_condition}"
+            query_sql = f"""
+                WITH {cte_sql}
+                SELECT {select_clause}
+                FROM rag_results r
+                {join_sql}
+                ORDER BY r.query_idx, r.similarity DESC
+            """
 
             result = await session.execute(sql_text(query_sql).bindparams(**params))
             rows = result.all()
@@ -923,7 +930,7 @@ class PostgresRagService(BaseRagService):
             params: dict = {"source_ids": source_ids}
             dist_cols = []
             for i, emb in enumerate(embeddings):
-                params[f"vector_{i}"] = str(list(emb))
+                params[f"vector_{i}"] = _vector_literal(emb)
                 dist_cols.append(
                     f"{agg}(embedding <=> CAST(:vector_{i} AS public.vector)) "
                     f"AS dist_{i}"
@@ -969,10 +976,8 @@ class PostgresRagService(BaseRagService):
             ).scalar()
             if mean_vector is None:
                 raise Exception("No embeddings found in RAG index.")
-            if isinstance(mean_vector, str):
-                mean_vector = [float(x) for x in mean_vector.strip("[]").split(",")]
             await session.commit()
-            return Normalizer(center_vector=list(mean_vector))
+            return Normalizer(center_vector=_parse_vector(mean_vector))
 
     # ------------------------------------------------------------------
     # Bulk export
@@ -991,37 +996,33 @@ class PostgresRagService(BaseRagService):
             if info is None:
                 await session.commit()
                 return
-            last_id = None
+            params: dict = {"batch_size": batch_size}
             while True:
-                where = "WHERE id > :last_id" if last_id is not None else ""
+                where = "WHERE id > :last_id" if "last_id" in params else ""
                 query_sql = (
                     f"SELECT id, source_id, content, embedding::text AS embedding, "
                     f"metadata, created_at, updated_at "
                     f"FROM {self._qualified(info.table_name)} {where} "
                     f"ORDER BY id ASC LIMIT :batch_size"
                 )
-                stmt = sql_text(query_sql).bindparams(batch_size=batch_size)
-                if last_id is not None:
-                    stmt = stmt.bindparams(last_id=last_id)
-                rows = (await session.execute(stmt)).all()
+                rows = (
+                    await session.execute(sql_text(query_sql).bindparams(**params))
+                ).all()
                 if not rows:
                     # Close the read transaction (see count_entries).
                     await session.commit()
                     return
                 for row in rows:
-                    embedding = row.embedding
-                    if isinstance(embedding, str):
-                        embedding = [float(x) for x in embedding.strip("[]").split(",")]
                     yield {
                         "id": row.id,
                         "source_id": row.source_id,
                         "content": row.content,
-                        "embedding": embedding,
+                        "embedding": _parse_vector(row.embedding),
                         "rag_metadata": row.metadata or {},
                         "created_at": row.created_at,
                         "updated_at": row.updated_at,
                     }
-                last_id = rows[-1].id
+                params["last_id"] = rows[-1].id
 
     async def count_entries(self, collection_name: str) -> int:
         """Number of entries in a collection (0 if it doesn't exist)."""
@@ -1060,11 +1061,5 @@ class PostgresRagService(BaseRagService):
                     ).bindparams(ids=ids)
                 )
             ).all()
-            out = {}
-            for row in rows:
-                embedding = row.embedding
-                if isinstance(embedding, str):
-                    embedding = [float(x) for x in embedding.strip("[]").split(",")]
-                out[row.id] = embedding
             await session.commit()
-            return out
+            return {row.id: _parse_vector(row.embedding) for row in rows}
