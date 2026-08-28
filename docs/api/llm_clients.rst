@@ -48,13 +48,13 @@ Registering your own
 The provider names above are the built-ins, not the whole set:
 :func:`~kavalai.register_llm_provider` and
 :func:`~kavalai.register_embedding_provider` add more, so ``mycorp/model-x``
-resolves anywhere a model name is accepted --- including workflow YAML.
+resolves anywhere a model name is accepted — including workflow YAML.
 
 A provider that speaks the OpenAI wire format needs no code at all: register
 :class:`~kavalai.OpenAIClient` under a new name with its ``base_url`` and key
 bound to it. One with a protocol of its own means implementing
 :class:`~kavalai.BaseLlmClient` (for chat) or
-:class:`~kavalai.BaseEmbeddingClient` (for embeddings) --- one method each.
+:class:`~kavalai.BaseEmbeddingClient` (for embeddings) — one method each.
 :doc:`/tutorials/llm_clients` works through both against live APIs, and
 :doc:`/cookbook/index` has the condensed recipe.
 

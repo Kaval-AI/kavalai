@@ -45,9 +45,10 @@ Installing them into a project
    installed  .claude/skills/kavalai-workflows
    ...
 
-``--target`` chooses another directory, and a skill that is already there is
-kept rather than overwritten — so your own edits survive an upgrade — unless
-you pass ``--force``. Name one or more skills to install just those:
+``--target`` chooses another directory (the default is ``.claude/skills``),
+and a skill that is already there is kept rather than overwritten — reported
+as ``exists … (--force to overwrite)`` — so your own edits survive an upgrade
+unless you pass ``--force``. Name one or more skills to install just those:
 
 .. code-block:: console
 

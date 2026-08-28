@@ -86,7 +86,7 @@ Execution: one engine, many runs
 
 :class:`~kavalai.WorkflowEngine` walks the graph. Its single execution path is
 ``run_stream()``, an asynchronous generator of ``WorkflowStreamEvent``; the
-convenient ``run()`` simply drains it. Having one path rather than two is a
+convenient ``run()`` drains it. Having one path rather than two is a
 deliberate constraint, and it is why streaming behaviour cannot diverge from
 non-streaming behaviour: there is no second implementation in which to
 introduce the divergence.
@@ -341,9 +341,8 @@ Known limitations
 The architecture has costs, and they are recorded rather than elided. A run has
 no mid-execution checkpoint, so a crashed process loses the run; there is no
 primitive for pausing a run pending human approval; there is no agent-to-agent
-handoff, delegation or group-chat pattern; there is no evaluation harness for
-prompt changes; and observability is Kaval.AI's own tables rather than
-OpenTelemetry. Each is discussed in :doc:`comparison`.
+handoff, delegation or group-chat pattern; and observability is Kaval.AI's
+own tables rather than OpenTelemetry. Each is discussed in :doc:`comparison`.
 
 Where to next
 =============

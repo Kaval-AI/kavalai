@@ -145,7 +145,17 @@ def _build_svg() -> str:
     chip_row(
         382,
         36,
-        ["start", "end", "llm", "agent", "function", "if", "switch", "parallel"],
+        [
+            "start",
+            "end",
+            "llm",
+            "agent",
+            "function",
+            "rag_query",
+            "if",
+            "switch",
+            "parallel",
+        ],
         "#6366f1",
         "#4338ca",
     )
@@ -185,7 +195,7 @@ def _build_svg() -> str:
         56,
         *BLUE,
         "Embedding clients",
-        "fastembed · openai · gemini · ollama",
+        "fastembed · OpenAI · Gemini · Ollama · WebLLM",
     )
     arrow(161, 526, 570)
     arrow(451, 526, 570)

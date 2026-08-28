@@ -187,8 +187,7 @@ The run prints a header, one line per case as it finishes, and a count:
 
 .. code-block:: text
 
-   bakery-email-assistant: 26 cases tagged baseline against
-   http://localhost:25100
+   bakery-email-assistant: 26 cases tagged baseline against http://localhost:25100
 
    PASS  order_single_item
    FAIL  missing_quantity  — order_id: expected '', got 'ord-0007'

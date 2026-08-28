@@ -177,7 +177,7 @@ Calling it from Python
    ):
        print(chunk)
 
-Two conveniences are easily overlooked. ``run_agent`` and ``stream_agent`` take an
+Two conveniences are worth noting. ``run_agent`` and ``stream_agent`` take an
 **instance of the agent's input model**, not a dict — build it from
 ``client.input_schema``, or pass your own matching model. And the client stores
 the ``session_id`` from each response and sends it with the next call, so a

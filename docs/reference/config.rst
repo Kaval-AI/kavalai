@@ -52,9 +52,9 @@ Models
      - Model used when a workflow and its nodes both omit ``llm_model``, as
        ``provider/model``.
    * - ``KAVALAI_DEFAULT_EMBEDDING_MODEL``
-     - Default embedding model for RAG and embedding clients.
-   * - ``KAVALAI_OPENAI_SERVICE_TIER``
-     - OpenAI service tier (for example ``priority``). Read by the agent server.
+     - Embedding model, as ``provider/model``, used by
+       ``python -m kavalai.tools.index_csv`` when ``--model`` is not given.
+       Library code does not read it.
    * - ``FASTEMBED_THREADS``
      - Thread count for local ``fastembed`` embedding.
    * - ``FASTEMBED_CACHE_DIR``
@@ -121,8 +121,8 @@ Agent server
    * - ``KAVALAI_AGENT_PORT``
      - Port. Default ``10000``.
    * - ``KAVALAI_AGENT_BASIC_AUTH_USER``
-     - Basic-auth username. Auth is enabled only when both this and the
-       password are set.
+     - Basic-auth username. Auth is disabled only when both this and the
+       password are unset; setting either one enables it.
    * - ``KAVALAI_AGENT_BASIC_AUTH_PASSWORD``
      - Basic-auth password.
 
@@ -155,7 +155,8 @@ Backoffice
      - Signing key for session cookies. **Set this in production** — the
        fallback is a well-known development value.
    * - ``FRONTEND_URL``
-     - Where to redirect after a successful login.
+     - Where to redirect after a successful login. Required — the login
+       callback fails without it.
 
 Tools
 -----
@@ -167,9 +168,12 @@ Tools
    * - Variable
      - Description
    * - ``RSS_AUTH_USER`` / ``RSS_AUTH_PASSWORD``
-     - Basic-auth credentials for protected RSS feeds.
+     - Basic-auth credentials the bundled RSS server
+       (``python -m kavalai.tools.rss``) requires from its callers. Default
+       ``admin`` / ``password``.
    * - ``TOR_PROXY_HOST`` / ``TOR_PROXY_PORT``
-     - Tor proxy used by ``http_request(use_proxy=True)``.
+     - Tor proxy used by ``http_request(use_proxy=True)``. Default
+       ``localhost`` / ``8118``.
 
 See :doc:`tools`.
 

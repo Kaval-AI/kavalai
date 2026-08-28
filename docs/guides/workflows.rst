@@ -67,16 +67,23 @@ Node types
      - A multi-step, tool-using agent loop bounded by ``max_steps`` (see :doc:`agents`).
    * - ``function``
      - A single tool call through the FunctionKernel, addressed by URI (see :doc:`tools`).
+   * - ``rag_query``
+     - A read-only similarity search against a registered RAG service, named
+       by the node's ``service``, the graph's ``rag_service`` or ``"default"``.
    * - ``if``
      - Branches on a boolean ``condition``.
    * - ``switch``
      - Evaluates ``expr``, stringifies it, matches against ``cases``, else ``default``.
+   * - ``parallel``
+     - Walks several ``branches`` concurrently and rejoins at ``next``.
 
 The corresponding node classes — :class:`~kavalai.StartNode`,
 :class:`~kavalai.EndNode`, :class:`~kavalai.LLMNode`,
 :class:`~kavalai.AgentNode`, :class:`~kavalai.FunctionNode`,
-:class:`~kavalai.IfNode`, :class:`~kavalai.SwitchNode` — are importable from the
-top-level :mod:`kavalai` package.
+:class:`~kavalai.RagQueryNode`, :class:`~kavalai.IfNode`,
+:class:`~kavalai.SwitchNode` — are importable from the top-level
+:mod:`kavalai` package; :class:`~kavalai.workflow.ParallelNode` from
+:mod:`kavalai.workflow`.
 
 Context and interpolation
 --------------------------
@@ -92,8 +99,9 @@ YAML vs. WorkflowBuilder
 ------------------------
 
 The :class:`~kavalai.WorkflowBuilder` mirrors the YAML structure with chainable
-methods — ``data_type``, ``start``, ``end``, ``llm``, ``agent``, ``function``,
-``if_``, ``switch`` — each returning ``self``. Finish with ``build()`` for a
+methods — ``data_type``, ``data_model``, ``start``, ``end``, ``llm``,
+``agent``, ``function``, ``rag_query``, ``if_``, ``switch``, ``parallel`` —
+each returning ``self``. Finish with ``build()`` for a
 :class:`~kavalai.WorkflowGraph` or ``build_engine()`` for a ready
 :class:`~kavalai.WorkflowEngine`.
 

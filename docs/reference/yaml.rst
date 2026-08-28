@@ -44,6 +44,10 @@ Top level
      - Default model for every ``llm`` and ``agent`` node, as
        ``provider/model``. A node may override it. If omitted here and on the
        node, the ``KAVALAI_DEFAULT_LLM_MODEL`` environment variable is used.
+       The provider is a registration name, never an import path: a provider
+       containing ``.`` is rejected when the workflow loads, and a provider
+       that is not registered only logs a warning at load, so a
+       ``client_factory`` can still supply the client.
    * - ``llm_kwargs``
      - no
      - Default sampling/reliability options merged into
@@ -332,8 +336,8 @@ service passed to the engine is registered as ``"default"``.
      - Node to run afterwards. Required.
    * - ``service``
      - Registered service name. Defaults to the workflow's ``rag_service``,
-       then ``"default"``. This is a **name**, never a connection string --- a
-       value containing ``://`` is rejected when the workflow loads.
+       then ``"default"``. This is a **name**, never a connection string — a
+       value containing ``://`` or ``@`` is rejected when the workflow loads.
    * - ``collection``
      - Collection to search. Defaults to the workflow's ``rag_collection``.
    * - ``top_k``

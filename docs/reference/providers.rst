@@ -1,7 +1,7 @@
 Model providers
 ===============
 
-Every model in Kaval.AI is named with a single string, ``provider/model`` --- in
+Every model in Kaval.AI is named with a single string, ``provider/model`` — in
 Python (``make_client("openai/gpt-5.4-mini")``), as a workflow's ``llm_model``,
 in a YAML node, and in the ``model`` argument of a RAG service. The part before
 the first ``/`` selects the client; everything after it is the provider's own
@@ -9,7 +9,7 @@ model name, passed through untouched. ``fastembed/BAAI/bge-small-en-v1.5`` is
 therefore provider ``fastembed``, model ``BAAI/bge-small-en-v1.5``.
 
 This page lists the providers that ship in the box and shows how to find out
-which models each one currently offers --- because Kaval.AI deliberately keeps
+which models each one currently offers — because Kaval.AI deliberately keeps
 no list of model names of its own.
 
 Chat models
@@ -42,13 +42,13 @@ Chat models
      - `Ollama library <https://ollama.com/library>`_
    * - ``browser/``
      - :class:`~kavalai.llm_clients.browser_client.BrowserLLMClient`
-     - none --- runs in the page
+     - none — runs in the page
      - `WebLLM prebuilt models
        <https://github.com/mlc-ai/web-llm/blob/main/src/config.ts>`_
 
 The client accepts ``api_key=`` (or ``host=``) directly, which wins over the
 environment. ``openai/`` also takes ``base_url=``, which is what makes it serve
-any OpenAI-compatible endpoint --- see :doc:`../tutorials/llm_clients`.
+any OpenAI-compatible endpoint — see :doc:`../tutorials/llm_clients`.
 
 Embedding models
 ----------------
@@ -84,12 +84,12 @@ Embeddings use the same string through a separate registry: the lookup behind
        <https://ollama.com/search?c=embedding>`_
    * - ``fastembed/``
      - :class:`~kavalai.llm_clients.embeddings.FastEmbedClient`
-     - none --- local ONNX, downloaded once
+     - none — local ONNX, downloaded once
      - `FastEmbed supported models
        <https://qdrant.github.io/fastembed/examples/Supported_Models/>`_
    * - ``browser/``
      - :class:`~kavalai.llm_clients.embeddings.BrowserEmbeddingClient`
-     - none --- runs in the page
+     - none — runs in the page
      - `WebLLM prebuilt models
        <https://github.com/mlc-ai/web-llm/blob/main/src/config.ts>`_
 
@@ -101,7 +101,7 @@ answer with ``anthropic/claude-sonnet-5`` and index with
 RAG services
 ------------
 
-A RAG service is registered under a plain name --- there is no
+A RAG service is registered under a plain name — there is no
 ``provider/model`` split, because the name is what a ``rag_query`` node's
 ``service`` field refers to.
 
@@ -123,7 +123,7 @@ A RAG service is registered under a plain name --- there is no
 
 Both are registered bare, with nothing bound, so ``make_rag_service("sqlite")``
 still needs whatever the backend requires. What a workflow actually names is a
-*configured* service, registered under the name its ``rag_query`` nodes use ---
+*configured* service, registered under the name its ``rag_query`` nodes use —
 usually ``default``, which is what a node resolves to when neither it nor the
 graph says otherwise:
 
@@ -139,7 +139,7 @@ graph says otherwise:
    )
 
 The workflow document then mentions neither a filename nor a connection string
---- see ``examples/green_village/eval_setup.py`` and :doc:`../guides/workflows`.
+— see ``examples/green_village/eval_setup.py`` and :doc:`../guides/workflows`.
 
 Which names are registered right now
 ------------------------------------
@@ -170,7 +170,7 @@ with :func:`~kavalai.llm_clients.registry.register_llm_provider`,
 :func:`~kavalai.llm_clients.registry.register_embedding_provider` or
 :func:`~kavalai.llm_clients.registry.register_rag_service` appears in the same
 list, which is why the check is worth running from the process that will do
-the work --- a
+the work — a
 provider module that was never imported is exactly what is missing from the
 output.
 
@@ -198,7 +198,7 @@ any request is made, and the message names every provider that does exist:
    register_embedding_provider(), which must run before the workflow is loaded.
 
 An unknown **model** reaches the provider and fails there, with the provider's
-own message --- ``The requested model 'gpt-nonexistent-9' does not exist`` from
+own message — ``The requested model 'gpt-nonexistent-9' does not exist`` from
 OpenAI, a 404 from Gemini, a "model not found" from Ollama. Read that message
 literally: the provider does not have that model, and Kaval.AI is not what
 rejected it.
@@ -247,7 +247,7 @@ embedding ones (``embedContent``):
    models/gemini-embedding-2-preview
    models/gemini-embedding-2
 
-Strip the ``models/`` prefix or leave it --- the client accepts both, so
+Strip the ``models/`` prefix or leave it — the client accepts both, so
 ``gemini/gemini-embedding-001`` is the id to use.
 
 Anthropic
@@ -328,7 +328,7 @@ lazily:
    )
 
 Because the client is built on first use, a name the registry cannot resolve
-raises on the first ``index`` or ``query`` call rather than at construction ---
+raises on the first ``index`` or ``query`` call rather than at construction —
 so validate the string early if the service is built at start-up. Four
 practical points then matter more than a model's benchmark score:
 
@@ -361,7 +361,7 @@ data, so an index of unknown provenance can identify itself:
 
 :class:`~kavalai.rag.postgres.PostgresRagService` additionally records the
 model per collection, and ``await rag.list_collections()`` returns it
-alongside the dimension, the entry count and the schema version --- so an
+alongside the dimension, the entry count and the schema version — so an
 existing database can be asked which model it was built with before anything
 queries it.
 Changing embedding model means re-indexing into a new collection, not editing
@@ -381,13 +381,13 @@ implement the same interface, so the choice is one string.
 
 ``KAVALAI_DEFAULT_EMBEDDING_MODEL`` supplies the model for
 ``python -m kavalai.tools.index_csv`` when ``--model`` is omitted. Library code
-reads no environment variables of its own --- see :doc:`config`.
+reads no environment variables of its own — see :doc:`config`.
 
 Adding a provider of your own
 -----------------------------
 
 The tables above are a starting set, not a closed one. Register a name and it
-becomes indistinguishable from a built-in --- usable in ``make_client``, in a
+becomes indistinguishable from a built-in — usable in ``make_client``, in a
 YAML node, and as a workflow default:
 
 .. code-block:: python
@@ -406,6 +406,6 @@ Registration must run **before** the workflow is loaded, since model names and
 ``rag_query`` services are resolved when the graph is parsed. For the agent
 server, ``KAVALAI_PROVIDER_MODULES`` names the modules to import first.
 
-The worked examples --- an OpenAI-compatible endpoint, a provider with its own
-wire protocol, and an embedding client that calls nothing at all --- are in
+The worked examples — an OpenAI-compatible endpoint, a provider with its own
+wire protocol, and an embedding client that calls nothing at all — are in
 :doc:`../tutorials/llm_clients` and :doc:`../cookbook/index`.

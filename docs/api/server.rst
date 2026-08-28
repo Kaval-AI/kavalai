@@ -50,10 +50,17 @@ payload as it arrives:
 
 .. code-block:: python
 
+   from pydantic import BaseModel
+
    from kavalai.client import AgentClient
 
+
+   class Message(BaseModel):
+       user_message: str
+
+
    client = AgentClient("http://localhost:8000")
-   async for chunk in client.stream_agent(Message(message="Hi there")):
+   async for chunk in client.stream_agent(Message(user_message="Hi there")):
        print(chunk)
 
 See :class:`~kavalai.workflow.models.WorkflowStreamEvent` for the event contract

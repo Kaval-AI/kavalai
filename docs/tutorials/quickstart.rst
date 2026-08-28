@@ -6,8 +6,7 @@ that remembers the conversation, then keep that memory in Postgres. Every
 output below is real.
 
 Readers wanting the full tour should start at :doc:`llm_clients`. Readers new
-to language models
-altogether? Read :doc:`../guides/concepts` first.
+to language models altogether should read :doc:`../guides/concepts` first.
 
 Install
 -------

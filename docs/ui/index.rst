@@ -64,7 +64,8 @@ set creates the ``vector`` extension as its first revision:
    python -m kavalai.migrate_db backoffice
 
    # The agent runtime tables the backoffice reads: sessions, runs, tasks,
-   # model call statistics, RAG collections.
+   # model call statistics. The RAG tables are provisioned by the RAG
+   # service itself on first use.
    python -m kavalai.migrate_db agents
 
 Both are idempotent and both read their connection from the environment —
@@ -111,7 +112,7 @@ port:
 
 .. code-block:: bash
 
-   python -m kavalai.backoffice.server      # API, port 10888 by default
+   python -m kavalai.backoffice.server      # API, port 8000 unless set
    cd frontend && npm start                 # UI on http://localhost:4200
 
 Signing in

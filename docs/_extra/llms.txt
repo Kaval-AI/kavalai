@@ -35,21 +35,23 @@ Source: https://github.com/Kaval-AI/kaval.ai — Apache-2.0.
 - [Tools](https://docs.kaval.ai/guides/tools.html): Python functions, REST endpoints and MCP servers through one kernel.
 - [Agents](https://docs.kaval.ai/guides/agents.html): how the agent loop plans, acts and observes.
 - [Observability](https://docs.kaval.ai/guides/observability.html): what a run records, and why there is no cost column.
+- [Evaluation and acceptance testing](https://docs.kaval.ai/guides/evaluation.html): grading a running agent with literal matchers or a judging model, and why the case file never names the server.
 - [The database and data model](https://docs.kaval.ai/guides/data_model.html): every runtime table, what it holds and how the schema is created.
 - [Safety and determinism](https://docs.kaval.ai/guides/safety.html): running a graph with no network and no API key.
 
 ## Reference
 
 - [Workflow YAML reference](https://docs.kaval.ai/reference/yaml.html): every key of the workflow document.
+- [Evaluation YAML and CLI](https://docs.kaval.ai/reference/eval_yaml.html): every key of a case file, every matcher, and the `kavalai-eval` flags and exit codes.
 - [Bundled tools](https://docs.kaval.ai/reference/tools.html): the tools shipped with the library.
 - [Model providers](https://docs.kaval.ai/reference/providers.html): the LLM, embedding and RAG providers that ship with the library, where each one publishes its model names, and how to list them from the SDK.
 - [Configuration](https://docs.kaval.ai/reference/config.html): every environment variable the entry points read.
+- [Agent skills](https://docs.kaval.ai/reference/skills.html): the briefings shipped for coding agents, and `kavalai-skills install`.
 - [Python API](https://docs.kaval.ai/api/index.html): generated API documentation.
-- [Cookbook](https://docs.kaval.ai/cookbook/index.html): worked recipes, from retrieval to self-correcting loops.
+- [Cookbook](https://docs.kaval.ai/cookbook/index.html): worked recipes, from retrieval to self-correcting loops, plus two worked evaluations — a RAG chatbot and a workflow with side effects.
 
 ## Optional
 
 - [How Kaval.AI compares](https://docs.kaval.ai/tutorials/comparison.html): an assessment against LangGraph, CrewAI, LlamaIndex, Pydantic AI, n8n and Dify, including where Kaval.AI is behind.
 - [Backoffice UI](https://docs.kaval.ai/ui/index.html): the interface that browses recorded runs.
 - [Deployment](https://docs.kaval.ai/deploy/index.html): containers, migrations and configuration.
-- [Open questions](https://docs.kaval.ai/todo.html): known gaps and decisions still to be taken.

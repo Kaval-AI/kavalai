@@ -5,8 +5,9 @@ Hands-on, in the order most people need them. Each notebook is executable: find
 the matching ``.ipynb`` under ``notebooks/`` in the repository and run it cell by
 cell — the outputs you see here are from real runs.
 
-New here? :doc:`installation` then :doc:`quickstart`. Never built with LLMs
-before? :doc:`../guides/concepts` covers the vocabulary first.
+New readers should begin with :doc:`installation` and then :doc:`quickstart`.
+For readers who have not built with language models before,
+:doc:`../guides/concepts` covers the vocabulary first.
 
 .. toctree::
    :maxdepth: 1

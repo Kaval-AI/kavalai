@@ -27,11 +27,14 @@ development:
 That starts PostgreSQL with ``pgvector`` (on host port ``6543``), migrates the
 backoffice schema, and serves the UI at ``http://localhost:8000``.
 
-Add the runtime tables for your agents:
+Add the runtime tables for your agents. There is no Compose service for this
+step — the agent database belongs to the deployment that runs the workflow —
+so run the migration set against the development instance directly:
 
 .. code-block:: bash
 
-   docker compose up agent-migrations
+   KAVALAI_DB_URI=postgresql://kavalai_dev:kavalai_dev@localhost:6543/kavalai_dev \
+   KAVALAI_DB_SCHEMA=agents python -m kavalai.migrate_db agents
 
 Optional services, for when you need them:
 
@@ -64,7 +67,7 @@ agent runtime tables, one for the backoffice.
 
 Both are idempotent: run them on every deploy, before the service that uses
 them. They are also what the ``agent-migrations`` and ``backoffice-migrations``
-container commands run.
+commands of the Docker images run.
 
 The two schemas are independent and may live in the same Postgres instance
 (``agents`` and ``backoffice`` by convention) or in different ones entirely. The

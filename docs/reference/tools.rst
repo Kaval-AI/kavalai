@@ -97,8 +97,8 @@ Returns ``query``, ``success``, ``error_message`` and ``results`` — a list of
 
    Both tools drive a real browser, so they are slow (seconds, not
    milliseconds) relative to an HTTP call, and scraped search results depend on
-   a page layout outside our control. For production search volume prefer a
-   keyed API below.
+   a page layout that DuckDuckGo may change. For production search volume,
+   register a keyed search API as a ``rest://`` server instead.
 
    ``docker-compose.yml`` includes a ``crawl4ai`` service if you would rather
    run the crawler as a container.
@@ -152,8 +152,11 @@ Fetches and parses an RSS or Atom feed.
 
    get_rss_feed(url: str, max_results: int = 5) -> Feed
 
-Returns ``title``, ``url`` and ``items``. Credentials for a protected feed come
-from ``RSS_AUTH_USER`` / ``RSS_AUTH_PASSWORD``.
+Returns ``title``, ``url`` and ``items`` (each with ``title``, ``link`` and
+``summary``). The same module is also a small FastAPI service
+(``python -m kavalai.tools.rss``) exposing the tool at ``GET /get_rss_feed``;
+``RSS_AUTH_USER`` / ``RSS_AUTH_PASSWORD`` are the basic-auth credentials that
+service requires from its callers, not credentials for the feed.
 
 Writing your own
 ----------------

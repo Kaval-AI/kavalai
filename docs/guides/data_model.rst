@@ -98,9 +98,9 @@ One row per configured agent, defined by
    * - ``created_at``, ``updated_at``
      - Timestamps, maintained by the ORM.
 
-The engine calls ``get_or_create_agent`` at the start of a run, so an agent row
-appears the first time a workflow executes; registration is not a separate
-step.
+``initialize_workflow_run`` gets or creates the agent row at the start of a
+run, so an agent row appears the first time a workflow executes; registration
+is not a separate step.
 
 ``sessions``
 ------------
@@ -171,8 +171,10 @@ records how it got there.
        ``agent_id`` make per-agent and per-session aggregation a single indexed
        query rather than a join through ``runs``.
    * - ``name``, ``node_type``
-     - Which node executed, and of which kind (``llm``, ``agent``,
-       ``function``, ``if``, ``switch``, ``parallel``).
+     - Which node executed, and of which kind (``start``, ``end``, ``llm``,
+       ``agent``, ``function``, ``rag_query``, ``if``, ``switch``,
+       ``parallel``). The tool calls an ``agent`` node makes are rows of their
+       own, with ``node_type`` ``tool_call``.
    * - ``inputs``, ``output``
      - The values the node received and produced, after validation.
    * - ``prompt``
@@ -183,10 +185,19 @@ records how it got there.
      - Any errors raised by the node, as a list of strings.
    * - ``duration_seconds``
      - Wall-clock duration, which is what identifies the slow step in a graph.
+   * - ``seq``
+     - Position of the row in the run's execution order.
+   * - ``parent_task_name``
+     - The node that produced the row, set on the ``tool_call`` rows an
+       ``agent`` node emits.
+   * - ``tool_uri``
+     - The tool the row executed, set by ``function`` nodes and by agent tool
+       calls alike.
 
-Ordering ``tasks`` by ``created_at`` within a run reproduces the execution
-trace. Under a ``parallel`` node the branches interleave, and their tasks are
-distinguished by node name rather than by order.
+Ordering ``tasks`` by ``seq`` within a run reproduces the execution trace,
+including the interleaving of concurrent ``parallel`` branches, which
+``created_at`` cannot order reliably. See :doc:`observability` for how the
+three columns are read.
 
 ``chat_messages``
 -----------------
@@ -254,7 +265,7 @@ Everything above is queryable through ``AgentService`` without writing SQL:
    from uuid import UUID
 
    history = await service.get_chat_history(UUID(state.session_id))
-   stats = await service.get_model_call_stats(agent_id=agent.id)
+   stats = await service.get_model_call_stats(call_type="llm", limit=20)
 
 For traversals the service does not expose — the runs of a session, the tasks
 of a run — the ORM models are ordinary SQLAlchemy classes and

@@ -27,7 +27,7 @@ Choosing an extra
 
 The bare ``kavalai`` package is deliberately small and provider-agnostic: it is
 restricted to libraries that also work under Pyodide, so the core can run in a
-browser. Almost everyone wants ``common`` on top of it.
+browser. ``common`` on top of it is the normal install.
 
 .. list-table::
    :header-rows: 1
@@ -44,7 +44,7 @@ browser. Almost everyone wants ``common`` on top of it.
        See :doc:`run_in_browser`.
    * - ``kavalai[gpu]``
      - Local embedding on an NVIDIA GPU. Replaces the CPU ``fastembed``
-       rather than adding to it --- see below.
+       rather than adding to it — see below.
    * - ``kavalai[test]``
      - Test tooling. Pulls in ``common``; this is what CI installs.
    * - ``kavalai[docs]``
@@ -55,7 +55,7 @@ Embedding on a GPU
 
 ``fastembed`` runs the local embedding models on the CPU. ``fastembed-gpu`` is
 the same library under the same import name, built against ``onnxruntime-gpu``,
-so the two cannot be installed together --- the GPU extra *replaces* the CPU
+so the two cannot be installed together — the GPU extra *replaces* the CPU
 package instead of adding to it:
 
 .. code-block:: bash
@@ -65,7 +65,7 @@ package instead of adding to it:
 
 Nothing else changes. FastEmbed defaults to ``cuda=Device.AUTO`` and selects
 the CUDA execution provider when one is available, so a model name like
-``fastembed/BAAI/bge-small-en-v1.5`` keeps working and simply runs on the GPU.
+``fastembed/BAAI/bge-small-en-v1.5`` keeps working and runs on the GPU.
 To be explicit instead, register the provider with ``cuda=True`` (and
 ``device_ids=[0]`` to pick a card):
 :class:`~kavalai.llm_clients.embeddings.FastEmbedClient` passes both straight
@@ -73,7 +73,7 @@ through to FastEmbed.
 
 Check the card before taking the newest wheel. The current
 ``onnxruntime-gpu`` on PyPI is a CUDA 13 build, and CUDA 13 dropped compute
-capability below 7.5 --- on a Pascal or Volta card it fails to load
+capability below 7.5 — on a Pascal or Volta card it fails to load
 ``libcublasLt.so.13`` and quietly falls back to the CPU. Such a card needs the
 CUDA 12 build and a cuDNN 9 still carrying its kernels:
 
