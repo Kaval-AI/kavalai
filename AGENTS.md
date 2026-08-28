@@ -110,7 +110,16 @@ uv run --env-file .env pytest
 
 # One file
 .venv/bin/python -m pytest tests/test_functionkernel.py
+
+# Only the tests that talk to real providers (deselected by default)
+.venv/bin/dotenv run -- .venv/bin/python -m pytest -m integration
 ```
+
+Tests marked `integration` hit a real provider or the internet; `addopts` in
+`pyproject.toml` deselects them, and CI runs them in a separate step. There is
+one smoke test per provider, not one per model: the runtime keeps no model
+catalogue and never drops a parameter — an unsupported one fails the call with
+the provider's own error.
 
 `conftest.py` does not auto-load `.env`, so integration tests gated on
 `OPENAI_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`

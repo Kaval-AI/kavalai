@@ -130,6 +130,8 @@ pytest tests/test_functionkernel.py
 ```
 
 - Framework: `pytest` + `pytest-asyncio`
+- **Integration tests are deselected by default.** Anything that talks to a real provider or the internet carries `@pytest.mark.integration`, and `addopts = "-m 'not integration'"` in `pyproject.toml` skips them; `pytest -m integration` runs only them, which is what the second CI step does (each is still `skipif`-gated on its API key, so a missing secret skips rather than fails). There is one smoke test per LLM provider, not one per model: the runtime keeps **no model catalogue** and drops **no parameter** — a model that rejects a parameter fails the call with the provider's own error, which is the intended behaviour
+- Tests never call a real embedding model: RAG tests assign `service.embedding_client = fake_embedding_client()` (see `tests/rag/test_conformance.py`)
 - Target: **100% coverage** for new and modified code
 - Keep tests for a single source file in a single test file (e.g. `agent.py` → `test_agent.py`)
 - `tests/` holds tests for the library only. An example's tests live **in the example folder** beside what they test (`examples/chat_client/test_chat_client.py`, `examples/business_info_agent/test_business_info_agent.py`); `testpaths = ["tests", "examples"]`, so a bare `pytest` still runs both. They cannot use `tests/conftest.py` fixtures — an example's test is expected to stand on its own

@@ -287,53 +287,21 @@ def test_remove_additional_properties_ignores_non_dict_input():
     remove_additional_properties("string")
 
 
-# Supported Gemini models usable with the generateContent API, as of June 2026.
-# Sourced from the Gemini API models documentation
-# (https://ai.google.dev/gemini-api/docs/models). Gemini 1.5 and 2.0 are retired.
-SUPPORTED_GEMINI_MODELS = [
-    "gemini-3.5-flash",
-    "gemini-3.1-pro-preview",
-    "gemini-3.1-flash-lite",
-    "gemini-2.5-pro",
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
-]
-
-
+@pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.skipif(not os.getenv("GEMINI_API_KEY"), reason="GEMINI_API_KEY not set")
-@pytest.mark.parametrize("model", SUPPORTED_GEMINI_MODELS)
-async def test_gemini_supported_models_integration(model):
-    """Hit the real generateContent API for every supported model with params set.
+async def test_gemini_structured_output_against_the_real_api():
+    """One real call: streaming, parameter mapping and structured output.
 
-    Sends temperature/top_p (universally supported) plus reasoning_effort, which
-    the client maps to a thinking config; a real call must succeed for every model.
+    Deselected by default (see ``addopts`` in ``pyproject.toml``); CI runs it
+    with ``-m integration``. One model is enough — which models exist and
+    which parameters they accept is the provider's business, and a call with
+    an unsupported parameter fails with the provider's own error.
     """
     params = LlmClientParameters(
         temperature=0.0, top_p=1.0, reasoning_effort="low", timeout_seconds=60.0
     )
-    client = GeminiClient(model=model, llm_client_parameters=params)
-    chat_history = ChatHistory(
-        messages=[ChatMessage(role="user", content="Reply with the single word: Hello")]
-    )
-
-    streamer = await client.stream_chat_completions(chat_history=chat_history)
-
-    contents = []
-    async for content in streamer:
-        contents.append(content)
-
-    assert contents[-1].type == "complete"
-    assert contents[-1].value.strip() != ""
-
-
-@pytest.mark.asyncio
-@pytest.mark.skipif(not os.getenv("GEMINI_API_KEY"), reason="GEMINI_API_KEY not set")
-@pytest.mark.parametrize("model", SUPPORTED_GEMINI_MODELS)
-async def test_gemini_supported_models_structured_output(model):
-    """Structured output (response_schema) works against every supported model."""
-    params = LlmClientParameters(timeout_seconds=60.0)
-    client = GeminiClient(model=model, llm_client_parameters=params)
+    client = GeminiClient(model="gemini-3.5-flash", llm_client_parameters=params)
     chat_history = ChatHistory(
         messages=[
             ChatMessage(
@@ -347,10 +315,7 @@ async def test_gemini_supported_models_structured_output(model):
         chat_history=chat_history, response_model=SimpleResponse
     )
 
-    contents = []
-    async for content in streamer:
-        contents.append(content)
+    contents = [content async for content in streamer]
 
     assert contents[-1].type == "complete"
-    data = json.loads(contents[-1].value)
-    assert "Paris" in data["answer"]
+    assert "Paris" in json.loads(contents[-1].value)["answer"]

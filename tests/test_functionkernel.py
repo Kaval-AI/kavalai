@@ -29,6 +29,17 @@ def find_free_port():
         return s.getsockname()[1]
 
 
+def wait_until_listening(port, timeout=10.0):
+    """Poll the port until the forked server accepts a connection."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            if s.connect_ex(("127.0.0.1", port)) == 0:
+                return
+        time.sleep(0.02)
+    raise RuntimeError(f"test server on port {port} did not start")
+
+
 FREE_PORT = find_free_port()
 
 app = FastAPI()
@@ -168,7 +179,7 @@ def run_server(port):
 def rest_server():
     proc = multiprocessing.Process(target=run_server, args=(FREE_PORT,))
     proc.start()
-    time.sleep(1)  # Wait for server to start
+    wait_until_listening(FREE_PORT)
     yield f"http://127.0.0.1:{FREE_PORT}"
     proc.terminate()
 
@@ -723,22 +734,6 @@ async def test_mcp_tool_sse(rest_server):
     Tests MCP tool execution using the Server-Sent Events (SSE) transport protocol.
     Interacts with a real FastAPI server acting as an MCP SSE host.
     """
-    # Wait for server to be ready
-    import httpx
-    import time
-
-    max_retries = 20
-    for i in range(max_retries):
-        try:
-            with httpx.Client(timeout=1.0) as client:
-                resp = client.get(f"{rest_server}/get_item?id=1")
-                if resp.status_code == 200:
-                    break
-        except (httpx.ConnectError, httpx.ConnectTimeout):
-            if i == max_retries - 1:
-                pytest.fail("Server did not start in time")
-            time.sleep(0.5)
-
     try:
         async with asyncio.timeout(20):
             kernel = FunctionKernel()

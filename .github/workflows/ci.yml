@@ -24,9 +24,14 @@ jobs:
         run: uv sync --extra test
 
       - name: Run backend unit tests
+        run: uv run --extra test pytest
+
+      - name: Run integration tests
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: uv run --extra test pytest
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: uv run --extra test pytest -m integration
 
   frontend-tests:
     name: Frontend unit tests

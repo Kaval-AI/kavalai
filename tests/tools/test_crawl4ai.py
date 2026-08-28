@@ -246,6 +246,7 @@ async def test_web_search_failure():
     assert response.error_message == "Timeout"
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     not os.environ.get("CRAWL4AI_INTEGRATION"),
     reason="CRAWL4AI_INTEGRATION not defined",
@@ -264,6 +265,7 @@ async def test_crawl_url_integration():
     assert "Example Domain" in response.markdown
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     not os.environ.get("CRAWL4AI_INTEGRATION"),
     reason="CRAWL4AI_INTEGRATION not defined",

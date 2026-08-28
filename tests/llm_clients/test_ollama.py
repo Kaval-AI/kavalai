@@ -28,10 +28,7 @@ def is_ollama_running():
         return False
 
 
-requires_ollama = pytest.mark.skipif(
-    not is_ollama_running(),
-    reason="OLLAMA_HOST not set or Ollama service not reachable",
-)
+requires_ollama = pytest.mark.integration
 
 USER_HISTORY = ChatHistory(messages=[ChatMessage(role="user", content="Say 'Hello'")])
 
@@ -189,6 +186,10 @@ def model_name():
 
 @pytest.fixture
 def ollama_client(model_name):
+    # Probed here rather than at import, so collecting the file never touches
+    # the network.
+    if not is_ollama_running():
+        pytest.skip("OLLAMA_HOST not set or Ollama service not reachable")
     return OllamaClient(model=model_name)
 
 

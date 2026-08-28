@@ -35,7 +35,6 @@ from kavalai.llm_clients.base_client import (
     ModelStatsReceiver,
 )
 from kavalai.llm_clients.streamer import Streamer
-from kavalai.llm_clients.kwargs_mapper import is_openai_reasoning_model
 
 
 class OpenAIClient(BaseLlmClient):
@@ -93,12 +92,13 @@ class OpenAIClient(BaseLlmClient):
         call_kwargs = {"model": self.model, "input": messages}
 
         params = self.parameters
-        # Reasoning models (GPT-5 family, o-series) reject sampling params
-        # such as top_p/temperature on the Responses API.
-        sampling_supported = not is_openai_reasoning_model(self.model)
-        if sampling_supported and params.temperature is not None:
+        # Sampling parameters go out exactly as set. Which models accept them
+        # changes with every release, so no model list is kept here: a model
+        # that rejects a parameter fails the call with the provider's own
+        # "Unsupported parameter" error rather than having it dropped silently.
+        if params.temperature is not None:
             call_kwargs["temperature"] = params.temperature
-        if sampling_supported and params.top_p is not None:
+        if params.top_p is not None:
             call_kwargs["top_p"] = params.top_p
         if params.service_tier is not None:
             call_kwargs["service_tier"] = params.service_tier

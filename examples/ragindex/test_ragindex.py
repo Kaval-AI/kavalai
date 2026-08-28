@@ -187,54 +187,50 @@ def test_make_rag_service_returns_sqlite_for_a_path(tmp_path):
     service.close()
 
 
-def test_make_rag_service_uses_the_environment_for_postgres(monkeypatch):
+@pytest.mark.parametrize(
+    "index_arg, env, schema_arg, expected",
+    [
+        (
+            "postgres",
+            {"KAVALAI_DB_URI": "postgresql://db/x", "KAVALAI_DB_SCHEMA": "agents"},
+            None,
+            ("postgresql://db/x", "agents"),
+        ),
+        (
+            "postgres",
+            {"KAVALAI_DB_URI": "postgresql://db/x", "KAVALAI_DB_SCHEMA": "agents"},
+            "other",
+            ("postgresql://db/x", "other"),
+        ),
+        ("postgresql://elsewhere/db", {}, None, ("postgresql://elsewhere/db", None)),
+        ("postgres", {}, None, KeyError),
+    ],
+    ids=["env-uri-and-schema", "explicit-schema-wins", "uri-directly", "uri-unset"],
+)
+def test_make_rag_service_resolves_the_postgres_target(
+    monkeypatch, index_arg, env, schema_arg, expected
+):
+    """``--index postgres`` reads the server's environment, an explicit
+    ``--schema`` beats it, and a URI is taken as given."""
     captured = {}
 
     def fake_from_uri(uri, model, schema=None):
-        captured.update(uri=uri, model=model, schema=schema)
+        captured.update(uri=uri, schema=schema)
         return "service"
 
     monkeypatch.setattr(PostgresRagService, "from_uri", fake_from_uri)
-    monkeypatch.setenv("KAVALAI_DB_URI", "postgresql://db/x")
-    monkeypatch.setenv("KAVALAI_DB_SCHEMA", "agents")
+    for name in ("KAVALAI_DB_URI", "KAVALAI_DB_SCHEMA"):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
 
-    assert make_rag_service("postgres", "fastembed/model", None) == "service"
-    assert captured == {
-        "uri": "postgresql://db/x",
-        "model": "fastembed/model",
-        "schema": "agents",
-    }
+    if expected is KeyError:
+        with pytest.raises(KeyError):
+            make_rag_service(index_arg, "fastembed/model", schema_arg)
+        return
 
-
-def test_make_rag_service_prefers_an_explicit_schema(monkeypatch):
-    captured = {}
-    monkeypatch.setattr(
-        PostgresRagService,
-        "from_uri",
-        lambda uri, model, schema=None: captured.update(schema=schema),
-    )
-    monkeypatch.setenv("KAVALAI_DB_URI", "postgresql://db/x")
-    monkeypatch.setenv("KAVALAI_DB_SCHEMA", "agents")
-
-    make_rag_service("postgres", "fastembed/model", "other")
-    assert captured == {"schema": "other"}
-
-
-def test_make_rag_service_accepts_a_uri_directly(monkeypatch):
-    captured = {}
-    monkeypatch.setattr(
-        PostgresRagService,
-        "from_uri",
-        lambda uri, model, schema=None: captured.update(uri=uri),
-    )
-    make_rag_service("postgresql://elsewhere/db", "fastembed/model", None)
-    assert captured == {"uri": "postgresql://elsewhere/db"}
-
-
-def test_make_rag_service_needs_the_uri_to_be_set(monkeypatch):
-    monkeypatch.delenv("KAVALAI_DB_URI", raising=False)
-    with pytest.raises(KeyError):
-        make_rag_service("postgres", "fastembed/model", None)
+    assert make_rag_service(index_arg, "fastembed/model", schema_arg) == "service"
+    assert (captured["uri"], captured["schema"]) == expected
 
 
 async def test_index_rows_batches_and_counts():

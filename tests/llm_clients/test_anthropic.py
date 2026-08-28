@@ -21,23 +21,6 @@ class SimpleResponse(BaseModel):
     answer: str
 
 
-# Supported Anthropic models, as of August 2026. Claude 4.7+ and the 5 family
-# reject sampling params such as temperature/top_p; older models still accept
-# them. The client sends sampling params only when explicitly set, so the
-# integration tests set them only for the older models.
-ANTHROPIC_NO_SAMPLING_MODELS = [
-    "claude-opus-5",
-    "claude-sonnet-5",
-    "claude-opus-4-8",
-]
-
-ANTHROPIC_SAMPLING_MODELS = [
-    "claude-haiku-4-5",
-]
-
-SUPPORTED_ANTHROPIC_MODELS = ANTHROPIC_NO_SAMPLING_MODELS + ANTHROPIC_SAMPLING_MODELS
-
-
 class FakeMessageStream:
     """Async context manager mimicking the SDK's MessageStreamManager."""
 
@@ -344,53 +327,21 @@ def test_forbid_additional_properties_non_dict():
     forbid_additional_properties("not-a-schema")
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.skipif(
     not os.getenv("ANTHROPIC_API_KEY"), reason="ANTHROPIC_API_KEY not set"
 )
-@pytest.mark.parametrize("model", SUPPORTED_ANTHROPIC_MODELS)
-async def test_anthropic_supported_models_integration(model):
-    """Hit the real Messages API for every supported model with parameters set.
+async def test_anthropic_structured_output_against_the_real_api():
+    """One real call: streaming, parameter mapping and structured output.
 
-    Current models reject sampling params (temperature/top_p) and instead take
-    effort, while older models still accept the sampling params — so each part
-    of the lineup gets the parameters it supports, and a real call must succeed
-    for every supported model.
+    Deselected by default (see ``addopts`` in ``pyproject.toml``); CI runs it
+    with ``-m integration``. One model is enough — which models exist and
+    which parameters they accept is the provider's business, and a call with
+    an unsupported parameter fails with the provider's own error.
     """
-    params = LlmClientParameters(timeout_seconds=60.0)
-    if model in ANTHROPIC_SAMPLING_MODELS:
-        params.temperature = 0.0
-        params.top_p = 1.0
-    else:
-        params.reasoning_effort = "low"
-
-    client = AnthropicClient(model=model, llm_client_parameters=params)
-    chat_history = ChatHistory(
-        messages=[ChatMessage(role="user", content="Reply with the single word: Hello")]
-    )
-
-    streamer = await client.stream_chat_completions(chat_history=chat_history)
-
-    contents = []
-    async for content in streamer:
-        contents.append(content)
-
-    assert contents[-1].type == "complete"
-    assert contents[-1].value.strip() != ""
-
-
-@pytest.mark.asyncio
-@pytest.mark.skipif(
-    not os.getenv("ANTHROPIC_API_KEY"), reason="ANTHROPIC_API_KEY not set"
-)
-@pytest.mark.parametrize("model", SUPPORTED_ANTHROPIC_MODELS)
-async def test_anthropic_supported_models_structured_output(model):
-    """Structured output (response_model) works against every supported model."""
-    params = LlmClientParameters(timeout_seconds=60.0)
-    if model not in ANTHROPIC_SAMPLING_MODELS:
-        params.reasoning_effort = "low"
-
-    client = AnthropicClient(model=model, llm_client_parameters=params)
+    params = LlmClientParameters(reasoning_effort="low", timeout_seconds=60.0)
+    client = AnthropicClient(model="claude-sonnet-5", llm_client_parameters=params)
     chat_history = ChatHistory(
         messages=[
             ChatMessage(
@@ -404,10 +355,7 @@ async def test_anthropic_supported_models_structured_output(model):
         chat_history=chat_history, response_model=SimpleResponse
     )
 
-    contents = []
-    async for content in streamer:
-        contents.append(content)
+    contents = [content async for content in streamer]
 
     assert contents[-1].type == "complete"
-    data = json.loads(contents[-1].value)
-    assert "Paris" in data["answer"]
+    assert "Paris" in json.loads(contents[-1].value)["answer"]

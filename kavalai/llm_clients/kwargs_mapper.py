@@ -17,19 +17,6 @@ from __future__ import annotations
 from typing import Any, Dict, Iterable
 
 
-def is_openai_reasoning_model(model: str) -> bool:
-    """Return True for OpenAI reasoning models that reject sampling params.
-
-    Covers the GPT-5 family (gpt-5, gpt-5.5, gpt-5-mini, …) and the o-series
-    (o1, o3, o4 and their variants). These models reject sampling parameters
-    such as top_p/temperature on the Responses API.
-    """
-    m = (model or "").lower()
-    if "/" in m:
-        m = m.rsplit("/", 1)[-1]
-    return m.startswith(("gpt-5", "o1", "o3", "o4"))
-
-
 class LLMKWargsMapper:
     """Map common/user-friendly kwargs to provider-specific ones.
 
@@ -105,24 +92,12 @@ class LLMKWargsMapper:
         "format",
     }
 
-    # Sampling parameters that OpenAI reasoning models (GPT-5 family, o-series)
-    # reject on the Responses API, e.g. "Unsupported parameter: 'top_p'".
-    _OPENAI_REASONING_UNSUPPORTED: set[str] = {
-        "temperature",
-        "top_p",
-        "presence_penalty",
-        "frequency_penalty",
-        "logit_bias",
-    }
-
     @staticmethod
     def _pop_any(d: Dict[str, Any], keys: Iterable[str]) -> Any | None:
         for k in keys:
             if k in d:
                 return d.pop(k)
         return None
-
-    _is_openai_reasoning_model = staticmethod(is_openai_reasoning_model)
 
     @classmethod
     def map(cls, provider: str, model: str, kwargs: Dict[str, Any]) -> Dict[str, Any]:
@@ -134,7 +109,7 @@ class LLMKWargsMapper:
             out["max_output_tokens"] = out.pop("max_tokens")
 
         if provider == "openai":
-            return cls._map_openai(out, model)
+            return cls._map_openai(out)
         elif provider == "gemini":
             return cls._map_gemini(out)
         elif provider == "anthropic":
@@ -146,16 +121,10 @@ class LLMKWargsMapper:
             return out
 
     @classmethod
-    def _map_openai(cls, out: Dict[str, Any], model: str = "") -> Dict[str, Any]:
+    def _map_openai(cls, out: Dict[str, Any]) -> Dict[str, Any]:
         # Convert stop_sequences -> stop
         if "stop" not in out and "stop_sequences" in out:
             out["stop"] = out.pop("stop_sequences")
-
-        # Reasoning models (GPT-5 family, o-series) reject sampling params such
-        # as top_p/temperature on the Responses API — drop them.
-        if cls._is_openai_reasoning_model(model):
-            for k in cls._OPENAI_REASONING_UNSUPPORTED:
-                out.pop(k, None)
 
         # Convert priority -> service_tier
         # priority: high -> service_tier: priority (priority processing)

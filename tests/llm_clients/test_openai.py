@@ -4,7 +4,6 @@ import json
 from pydantic import BaseModel
 
 from kavalai.llm_clients.openai_client import OpenAIClient
-from kavalai.llm_clients.kwargs_mapper import is_openai_reasoning_model
 from kavalai.llm_clients.base_client import (
     ChatHistory,
     ChatMessage,
@@ -28,30 +27,6 @@ from openai.types.responses.response_usage import (
 class SimpleResponse(BaseModel):
     answer: str
 
-
-# Supported OpenAI models usable with the Responses API, as of June 2026.
-# Sourced from the OpenAI models documentation
-# (https://platform.openai.com/docs/models).
-#
-# Reasoning models (GPT-5 family + o-series) reject sampling params such as
-# temperature/top_p; the remaining models still accept them.
-OPENAI_REASONING_MODELS = [
-    "gpt-5.5",
-    "gpt-5.4",
-    "gpt-5.4-mini",
-    "gpt-5",
-    "gpt-5-mini",
-    "gpt-5-nano",
-    "o3",
-    "o4-mini",
-]
-
-OPENAI_SAMPLING_MODELS = [
-    "gpt-4o",
-    "gpt-4o-mini",
-]
-
-SUPPORTED_OPENAI_MODELS = OPENAI_REASONING_MODELS + OPENAI_SAMPLING_MODELS
 
 USER_HISTORY = ChatHistory(messages=[ChatMessage(role="user", content="Say 'Hello'")])
 
@@ -230,7 +205,7 @@ async def test_stream_error_event_fails_the_stream():
 
 
 @pytest.mark.asyncio
-async def test_sampling_parameters_are_sent_for_sampling_models():
+async def test_sampling_parameters_are_sent():
     client = make_client(
         text_delta("Hi"),
         completed(),
@@ -262,25 +237,6 @@ async def test_service_tier_and_reasoning_effort_are_forwarded():
     assert call_kwargs["reasoning"] == {"effort": "low"}
 
 
-@pytest.mark.asyncio
-async def test_reasoning_model_omits_sampling_params():
-    # GPT-5 family reasoning models reject top_p/temperature on the Responses API.
-    client = make_client(
-        text_delta("Hi"),
-        completed(),
-        model="gpt-5.5",
-        parameters=LlmClientParameters(temperature=0.0, top_p=1.0),
-    )
-
-    streamer = await client.stream_chat_completions(chat_history=USER_HISTORY)
-    [_ async for _ in streamer]
-
-    call_kwargs = sent_kwargs(client)
-    assert "top_p" not in call_kwargs
-    assert "temperature" not in call_kwargs
-    assert call_kwargs["model"] == "gpt-5.5"
-
-
 def test_timeout_comes_from_the_client_parameters():
     params = LlmClientParameters(
         temperature=0.0, top_p=1.0, service_tier="priority", timeout_seconds=45.0
@@ -292,47 +248,19 @@ def test_timeout_comes_from_the_client_parameters():
     assert client.client.timeout == 45.0
 
 
-# Integration tests (require OPENAI_API_KEY)
-
-
+@pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.skipif(not os.getenv("OPENAI_API_KEY"), reason="OPENAI_API_KEY not set")
-@pytest.mark.parametrize("model", SUPPORTED_OPENAI_MODELS)
-async def test_openai_supported_models_integration(model):
-    """Hit the real Responses API for every supported model with parameters set.
+async def test_openai_structured_output_against_the_real_api():
+    """One real call: streaming, parameter mapping and structured output.
 
-    The same parameter set is sent for the whole lineup: reasoning models reject
-    sampling params (temperature/top_p) and instead take reasoning_effort, while
-    the other models take the sampling params. The client maps these per-model,
-    so a real call must succeed for every supported model.
+    Deselected by default (see ``addopts`` in ``pyproject.toml``); CI runs it
+    with ``-m integration``. One model is enough — which models exist and
+    which parameters they accept is the provider's business, and a call with
+    an unsupported parameter fails with the provider's own error.
     """
-    params = LlmClientParameters(temperature=0.0, top_p=1.0, timeout_seconds=60.0)
-    if is_openai_reasoning_model(model):
-        params.reasoning_effort = "low"
-
-    client = OpenAIClient(model=model, llm_client_parameters=params)
-    chat_history = ChatHistory(
-        messages=[ChatMessage(role="user", content="Reply with the single word: Hello")]
-    )
-
-    streamer = await client.stream_chat_completions(chat_history=chat_history)
-
-    contents = [content async for content in streamer]
-
-    assert contents[-1].type == "complete"
-    assert contents[-1].value.strip() != ""
-
-
-@pytest.mark.asyncio
-@pytest.mark.skipif(not os.getenv("OPENAI_API_KEY"), reason="OPENAI_API_KEY not set")
-@pytest.mark.parametrize("model", SUPPORTED_OPENAI_MODELS)
-async def test_openai_supported_models_structured_output(model):
-    """Structured output (response_model) works against every supported model."""
-    params = LlmClientParameters(timeout_seconds=60.0)
-    if is_openai_reasoning_model(model):
-        params.reasoning_effort = "low"
-
-    client = OpenAIClient(model=model, llm_client_parameters=params)
+    params = LlmClientParameters(reasoning_effort="low", timeout_seconds=60.0)
+    client = OpenAIClient(model="gpt-5-mini", llm_client_parameters=params)
     chat_history = ChatHistory(
         messages=[
             ChatMessage(
@@ -349,5 +277,4 @@ async def test_openai_supported_models_structured_output(model):
     contents = [content async for content in streamer]
 
     assert contents[-1].type == "complete"
-    data = json.loads(contents[-1].value)
-    assert "Paris" in data["answer"]
+    assert "Paris" in json.loads(contents[-1].value)["answer"]

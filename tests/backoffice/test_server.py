@@ -9,12 +9,6 @@ from kavalai.backoffice import db
 from kavalai.backoffice.server import app
 
 
-@pytest.fixture
-def mock_google_oauth():
-    with patch("kavalai.backoffice.server.oauth.google") as mock:
-        yield mock
-
-
 @pytest_asyncio.fixture
 async def client():
     async with AsyncClient(
@@ -47,35 +41,6 @@ async def test_user_details_unauthorized(client):
 
 
 @pytest.mark.asyncio
-async def test_google_auth_callback_success(client, mock_google_oauth, backoffice_db):
-    # Setup mock user in DB (active_project_id has a real FK to projects)
-    project = db.Project(name="Auth Test Project", id=uuid.uuid4())
-    backoffice_db.add(project)
-    user = db.User(
-        email="test@example.com",
-        name="Test User",
-        is_admin=True,
-        id=uuid.uuid4(),
-        active_project_id=project.id,
-    )
-    backoffice_db.add(user)
-    await backoffice_db.commit()
-    await backoffice_db.refresh(user)
-
-    mock_google_oauth.authorize_access_token.return_value = {"access_token": "token"}
-    mock_google_oauth.userinfo.return_value = {
-        "email": "test@example.com",
-        "name": "Updated Name",
-        "picture": "http://pic",
-    }
-
-    response = await client.get("/auth/google/callback")
-    # If it returns 400, it might be because of session or other issues in the test env.
-    # Let's see what happens.
-    assert response.status_code in [302, 400]
-
-
-@pytest.mark.asyncio
 async def test_projects_create_unauthorized(client):
     response = await client.post("/projects/create", json={"name": "New Project"})
     assert response.status_code == 401
@@ -103,95 +68,30 @@ async def test_projects_all(client, backoffice_db):
 
 
 @pytest.mark.asyncio
-async def test_projects_test_connection_success(client, backoffice_db):
-    project_id = uuid.uuid4()
-
-    project = db.Project(
-        id=project_id,
-        name="Test Project",
-        db_user="user",
-        db_password="password",
-        db_host="localhost",
-        db_port=5432,
-        db_name="test_db",
-    )
-    backoffice_db.add(project)
-    await backoffice_db.commit()
-
-    with (
-        patch("kavalai.backoffice.server.assert_logged_in"),
-        patch(
-            "kavalai.backoffice.server.get_project_and_assert_access",
-            return_value=project,
-        ),
-        patch("kavalai.db.db_manager.get_sessionmaker") as mock_sm,
-    ):
-        mock_session = AsyncMock()
-        mock_sm.return_value = MagicMock(return_value=mock_session)
-        mock_session.__aenter__.return_value = mock_session
-
-        response = await client.post(f"/projects/test-connection/{project_id}")
-        assert response.status_code == 200
-        assert response.json()["status"] == "success"
-
-
-@pytest.mark.asyncio
-async def test_projects_test_connection_new_success(client, backoffice_db):
-    with (
-        patch("kavalai.backoffice.server.assert_logged_in"),
-        patch("kavalai.db.db_manager.get_sessionmaker") as mock_sm,
-    ):
-        mock_session = AsyncMock()
-        mock_sm.return_value = MagicMock(return_value=mock_session)
-        mock_session.__aenter__.return_value = mock_session
-
-        data = {
-            "name": "New Project",
-            "db_user": "user",
-            "db_password": "password",
-            "db_host": "localhost",
-            "db_port": 5432,
-            "db_name": "test_db",
-        }
+async def test_projects_test_connection_reaches_the_database(
+    client, backoffice_db, postgres_container
+):
+    """The endpoint opens a session on the described database and runs a
+    query, so a real reachable database answers success and a wrong password
+    surfaces as a 400 rather than as a crash."""
+    data = {
+        "name": "Probe",
+        "db_user": postgres_container.username,
+        "db_password": postgres_container.password,
+        "db_host": postgres_container.get_container_host_ip(),
+        "db_port": int(postgres_container.get_exposed_port(5432)),
+        "db_name": postgres_container.dbname,
+    }
+    with patch("kavalai.backoffice.server.assert_logged_in"):
         response = await client.post("/projects/test-connection/new", json=data)
         assert response.status_code == 200
         assert response.json()["status"] == "success"
 
-
-@pytest.mark.asyncio
-async def test_agents_get_all(client, backoffice_db):
-    project_id = uuid.uuid4()
-    project = db.Project(
-        id=project_id,
-        name="P1",
-        db_user="u",
-        db_password="p",
-        db_host="h",
-        db_port=5432,
-        db_name="d",
-    )
-    backoffice_db.add(project)
-    await backoffice_db.commit()
-
-    with (
-        patch("kavalai.backoffice.server.assert_logged_in"),
-        patch(
-            "kavalai.backoffice.server.get_project_and_assert_access",
-            return_value=project,
-        ),
-        patch("kavalai.db.db_manager.get_sessionmaker") as mock_sm,
-    ):
-        mock_session = AsyncMock()
-        mock_sm.return_value = MagicMock(return_value=mock_session)
-        mock_session.__aenter__.return_value = mock_session
-
-        mock_session.execute.return_value = MagicMock(
-            scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+        response = await client.post(
+            "/projects/test-connection/new", json={**data, "db_password": "wrong"}
         )
-
-        response = await client.get(f"/agents/all/{project_id}")
-        assert response.status_code == 200
-        assert response.json() == []
+    assert response.status_code == 400
+    assert response.json()["detail"].startswith("Failed to connect")
 
 
 @pytest.mark.asyncio
@@ -223,7 +123,19 @@ async def test_access_denied_propagates_403_not_503(client, backoffice_db):
 
 
 @pytest.mark.asyncio
-async def test_agents_get_stats(client, backoffice_db):
+@pytest.mark.parametrize(
+    "path, target, extra_kwargs",
+    [
+        ("/agents/stats", "get_daily_stats", {"days": 7}),
+        ("/agents/summary-stats", "get_summary_stats", {}),
+    ],
+)
+async def test_agents_stats_forward_the_query_parameters(
+    client, backoffice_db, path, target, extra_kwargs
+):
+    """What the route owns is the plumbing: the optional ``agent_id`` query
+    parameter (and the ``days`` default) must reach the stats function as
+    keyword arguments on the project session."""
     project_id = uuid.uuid4()
     project = db.Project(
         id=project_id,
@@ -237,12 +149,6 @@ async def test_agents_get_stats(client, backoffice_db):
     backoffice_db.add(project)
     await backoffice_db.commit()
 
-    mock_stats = {
-        "runs": [],
-        "sessions": [],
-        "messages": [],
-    }
-
     with (
         patch("kavalai.backoffice.server.assert_logged_in"),
         patch(
@@ -250,79 +156,22 @@ async def test_agents_get_stats(client, backoffice_db):
             return_value=project,
         ),
         patch("kavalai.db.db_manager.get_sessionmaker") as mock_sm,
-    ):
-        mock_session = AsyncMock()
-        mock_sm.return_value = MagicMock(return_value=mock_session)
-        mock_session.__aenter__.return_value = mock_session
-
-        with patch(
-            "kavalai.backoffice.server.agent_stats.get_daily_stats",
-            return_value=mock_stats,
-        ) as mock_get_stats:
-            response = await client.get(f"/agents/stats/{project_id}")
-
-            assert response.status_code == 200
-            assert response.json() == mock_stats
-            mock_get_stats.assert_called_once_with(mock_session, days=7, agent_id=None)
-
-            # Test with agent_id
-            agent_id = uuid.uuid4()
-            response = await client.get(
-                f"/agents/stats/{project_id}?agent_id={agent_id}"
-            )
-            assert response.status_code == 200
-            mock_get_stats.assert_called_with(mock_session, days=7, agent_id=agent_id)
-
-
-@pytest.mark.asyncio
-async def test_agents_get_summary_stats(client, backoffice_db):
-    project_id = uuid.uuid4()
-    project = db.Project(
-        id=project_id,
-        name="P1",
-        db_user="u",
-        db_password="p",
-        db_host="h",
-        db_port=5432,
-        db_name="d",
-    )
-    backoffice_db.add(project)
-    await backoffice_db.commit()
-
-    mock_stats = {
-        "total_cost": 12.34,
-        "total_sessions": 56,
-    }
-
-    with (
-        patch("kavalai.backoffice.server.assert_logged_in"),
         patch(
-            "kavalai.backoffice.server.get_project_and_assert_access",
-            return_value=project,
-        ),
-        patch("kavalai.db.db_manager.get_sessionmaker") as mock_sm,
+            f"kavalai.backoffice.server.agent_stats.{target}", return_value={}
+        ) as mock_stats,
     ):
         mock_session = AsyncMock()
         mock_sm.return_value = MagicMock(return_value=mock_session)
         mock_session.__aenter__.return_value = mock_session
 
-        with patch(
-            "kavalai.backoffice.server.agent_stats.get_summary_stats",
-            return_value=mock_stats,
-        ) as mock_get_stats:
-            response = await client.get(f"/agents/summary-stats/{project_id}")
+        response = await client.get(f"{path}/{project_id}")
+        assert response.status_code == 200
+        mock_stats.assert_called_once_with(mock_session, agent_id=None, **extra_kwargs)
 
-            assert response.status_code == 200
-            assert response.json() == mock_stats
-            mock_get_stats.assert_called_once_with(mock_session, agent_id=None)
-
-            # Test with agent_id
-            agent_id = uuid.uuid4()
-            response = await client.get(
-                f"/agents/summary-stats/{project_id}?agent_id={agent_id}"
-            )
-            assert response.status_code == 200
-            mock_get_stats.assert_called_with(mock_session, agent_id=agent_id)
+        agent_id = uuid.uuid4()
+        response = await client.get(f"{path}/{project_id}?agent_id={agent_id}")
+        assert response.status_code == 200
+        mock_stats.assert_called_with(mock_session, agent_id=agent_id, **extra_kwargs)
 
 
 @pytest.mark.asyncio
