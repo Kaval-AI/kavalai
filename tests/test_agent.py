@@ -235,7 +235,6 @@ async def test_tool_error_is_captured(mock_kernel, run_context):
     assert duration >= 0.0
 
 
-# ------------------------------------------------------------------- streaming
 async def collect(agen):
     return [chunk async for chunk in agen]
 
@@ -422,7 +421,6 @@ async def test_tool_call_without_id_gets_stable_id(mock_kernel, run_context):
     assert mock_kernel.call_tool.await_count == 1
 
 
-# ------------------------------------------------------------------- demuxer
 def test_demuxer_restart_on_non_monotonic_instructions():
     """A non-monotonic instructions change in delta mode emits a restart."""
     demux = StepStreamDemuxer(0, stream_instructions=True, stream_delta=True)

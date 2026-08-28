@@ -22,7 +22,6 @@ from kavalai.llm_clients.embeddings import (
 from kavalai.normalizer import Normalizer
 
 
-# ------------------------------------------------------------------- factory
 def test_make_embedding_client_providers(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "k")
     monkeypatch.setenv("GEMINI_API_KEY", "k")
@@ -58,7 +57,6 @@ def test_base_client_not_implemented():
         asyncio.run(BaseEmbeddingClient("m").compute_embeddings(["a"]))
 
 
-# ---------------------------------------------------------------- providers
 async def test_openai_embeddings(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "k")
     client = OpenAIEmbeddingClient("text-embedding-3-small")
@@ -174,7 +172,6 @@ def test_fastembed_get_model_lazy(monkeypatch):
     assert created and created[0]["model_name"] == "m"
 
 
-# ------------------------------------------------------------- browser bridge
 class FakeEmbedBridge:
     """Stand-in for ``window.kavalBrowserLLM`` exposing an ``embed`` function."""
 

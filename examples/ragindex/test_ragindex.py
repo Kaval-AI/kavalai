@@ -94,11 +94,6 @@ def csv_file(tmp_path):
     return str(path)
 
 
-# --------------------------------------------------------------------------
-# Column and row helpers
-# --------------------------------------------------------------------------
-
-
 def test_split_columns_ignores_blanks_and_spacing():
     assert split_columns(" title , artist ,, lyrics ") == ["title", "artist", "lyrics"]
     assert split_columns("") == []
@@ -148,11 +143,6 @@ def test_matches_requires_every_clause():
     assert matches(row, {})
 
 
-# --------------------------------------------------------------------------
-# Reading the file
-# --------------------------------------------------------------------------
-
-
 def test_read_rows_maps_text_metadata_and_source_id(csv_file):
     rows = list(read_rows(csv_file, ["title", "lyrics"], ["tag"], "id"))
     assert [row.source_id for row in rows] == ["10", "11", "12"]
@@ -189,11 +179,6 @@ def test_read_rows_rejects_a_column_the_file_does_not_have(csv_file):
 def test_read_rows_reports_a_missing_filter_column(csv_file):
     with pytest.raises(ValueError, match="no column\\(s\\) missing"):
         list(read_rows(csv_file, ["title"], [], "id", filters={"missing": "x"}))
-
-
-# --------------------------------------------------------------------------
-# Backend selection
-# --------------------------------------------------------------------------
 
 
 def test_make_rag_service_returns_sqlite_for_a_path(tmp_path):
@@ -252,11 +237,6 @@ def test_make_rag_service_needs_the_uri_to_be_set(monkeypatch):
         make_rag_service("postgres", "fastembed/model", None)
 
 
-# --------------------------------------------------------------------------
-# Indexing
-# --------------------------------------------------------------------------
-
-
 async def test_index_rows_batches_and_counts():
     rag = FakeRag()
     rows = [IndexRow(str(i), f"text {i}", {"n": str(i)}) for i in range(5)]
@@ -282,11 +262,6 @@ async def test_index_rows_on_an_empty_file_indexes_nothing():
     report = await index_rows(rag, iter([]), "songs")
     assert (report.indexed, report.skipped, report.handled) == (0, 0, 0)
     assert rag.batches == []
-
-
-# --------------------------------------------------------------------------
-# Command line
-# --------------------------------------------------------------------------
 
 
 def test_index_parser_defaults_describe_the_bundled_songs():
@@ -359,11 +334,6 @@ def test_main_reports_a_bad_column_instead_of_raising(csv_file, monkeypatch):
     )
     monkeypatch.setattr("sys.argv", ["index_csv", csv_file, "--text-columns", "nope"])
     assert main() == 2
-
-
-# --------------------------------------------------------------------------
-# Querying
-# --------------------------------------------------------------------------
 
 
 def test_format_result_shows_rank_similarity_and_metadata():
@@ -440,11 +410,6 @@ def test_query_main_reports_a_missing_environment_variable(monkeypatch):
     assert query_main() == 2
 
 
-# --------------------------------------------------------------------------
-# The bundled CSV
-# --------------------------------------------------------------------------
-
-
 def test_bundled_csv_has_a_hundred_invented_songs():
     rows = list(csv.DictReader(open(SONGS_CSV, encoding="utf-8")))
     assert len(rows) == 100
@@ -466,11 +431,6 @@ def test_bundled_csv_reads_with_the_default_settings():
     assert len(rows) == 100
     assert rows[0].text.startswith("My Stapler Has Tenure\nThe Beige Alarmists\n")
     assert rows[0].metadata["tag"] == "rock"
-
-
-# --------------------------------------------------------------------------
-# Skipping what is already indexed
-# --------------------------------------------------------------------------
 
 
 async def test_existing_source_ids_reads_the_collection():

@@ -20,7 +20,6 @@ from typing import Any, Optional
 
 from kavalai.eval.base import AgentEvaluator, EvalResult
 
-#: The matcher names a field expectation may use.
 MATCHERS = ("equals", "contains", "not_contains", "regex", "one_of")
 
 

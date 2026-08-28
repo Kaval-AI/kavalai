@@ -39,7 +39,6 @@ from sqlalchemy.exc import OperationalError
 
 from kavalai.paths import MIGRATIONS_PATH
 
-#: Migration set name -> script directory.
 MIGRATION_SETS = {
     "agents": os.path.join(MIGRATIONS_PATH, "agents"),
     "backoffice": os.path.join(MIGRATIONS_PATH, "backoffice"),

@@ -139,6 +139,11 @@ cd frontend && npm test -- --watch=false
 - Angular: modern control flow (`@if`, `@for`), never `*ngIf` / `*ngFor`.
   Prefer `common.css`, Tailwind and DaisyUI.
 - Refactor blocks with distinct responsibilities into named functions.
+- Comments: no `#:` attribute comments and no dash-rule section dividers.
+  Explain a field in the class docstring and a constant in the module or
+  function docstring. A comment answers *why*, not *what*; if the name already
+  says it, or the only content is implementation history, omit it. Say a thing
+  once, where the reader looks first.
 - Do not edit `README.md` unless asked; it deep-links to documentation anchors,
   so renaming a heading in the tutorials breaks it.
 

@@ -34,7 +34,6 @@ from kavalai.llm_clients.base_client import (
 from kavalai.llm_clients.common import walk_json_schema
 from kavalai.llm_clients.streamer import Streamer
 
-#: ``LlmClientParameters.service_tier`` values the Gemini API understands.
 _SERVICE_TIERS = {
     "priority": types.ServiceTier.PRIORITY,
     "standard": types.ServiceTier.STANDARD,

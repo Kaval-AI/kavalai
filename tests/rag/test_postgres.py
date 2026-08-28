@@ -1051,9 +1051,6 @@ async def test_rag_service_delete_by_source_id_single(
     assert results[0].source_id == "sid_b"
 
 
-# --- self-provisioning backend (M2) ------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_collection_provisioning_and_drop(
     agents_db_config, migrated_agents_db, embedding_model

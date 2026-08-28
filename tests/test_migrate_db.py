@@ -135,8 +135,9 @@ def test_migrate_main_backoffice_env_vars(db_uri):
         "KAVALAI_BO_DB_URI": db_uri,
         "KAVALAI_BO_DB_SCHEMA": schema,
     }
-    with patch.dict(os.environ, env), patch(
-        "sys.argv", ["migrate_db.py", "backoffice"]
+    with (
+        patch.dict(os.environ, env),
+        patch("sys.argv", ["migrate_db.py", "backoffice"]),
     ):
         main()
 
@@ -170,8 +171,6 @@ def test_migrate_skip_create_schema_fails_if_schema_missing(db_uri):
         )
 
 
-# --- model <-> migration parity ---------------------------------------------
-#
 # The guard that replaces "keep the SQL files in sync by hand": applying the
 # revisions to an empty database and diffing it against the ORM metadata must
 # produce no changes.

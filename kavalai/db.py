@@ -246,7 +246,7 @@ class DatabaseManager:
             bind=engine, class_=AsyncSession, expire_on_commit=False
         )
 
-    # -- SQLite / IndexedDB backend -------------------------------------------
+    # SQLite / IndexedDB backend.
     #
     # A pure-Python, pyodide-compatible backend. The ORM models are schema-less
     # and live directly in the SQLite file (no ATTACH aliasing). Under Pyodide

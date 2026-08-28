@@ -30,7 +30,6 @@ limitations under the License.
 # ``kavalai.db`` to keep the runtime names (``Agent`` the agent,
 # ``ModelCallStat`` the stats model) unambiguous at the top level.
 
-# --- Workflow engine -------------------------------------------------------
 from kavalai.workflow import (
     WorkflowEngine,
     WorkflowBuilder,
@@ -73,7 +72,6 @@ from kavalai.llm_clients.registry import (
     verify_registrations,
 )
 
-# --- Agent & tools ---------------------------------------------------------
 from kavalai.agent import Agent, ToolCall
 from kavalai.run_context import RunContext
 from kavalai.functionkernel import (
@@ -82,7 +80,6 @@ from kavalai.functionkernel import (
     pythontool,
 )
 
-# --- LLM & embedding clients ----------------------------------------------
 from kavalai.llm_clients.base_client import (
     BaseLlmClient,
     ensure_user_turn,
@@ -157,7 +154,6 @@ def __dir__():
     return sorted(__all__)
 
 
-# --- Streaming -------------------------------------------------------------
 from kavalai.llm_clients.streamer import (
     Streamer,
     StreamContent,
@@ -165,7 +161,6 @@ from kavalai.llm_clients.streamer import (
     StreamerTimeoutException,
 )
 
-# --- RAG, normalization, persistence --------------------------------------
 from kavalai.rag import (
     BaseRagService,
     PostgresRagService,

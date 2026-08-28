@@ -28,7 +28,23 @@ from kavalai.workflow.models import ArgumentInfo
 
 
 class RunContext(BaseModel):
-    """Runtime data for a single interaction."""
+    """Runtime data for a single interaction.
+
+    ``token_stats`` is the run's ``TokenAccumulator``. Every LLM client built
+    during the run reports into it, and parallel branches share the parent's,
+    so the totals cover the whole run.
+
+    ``seq_counter`` is the run's task-sequence counter, shared with parallel
+    branches in the same way so that every task row of the run draws from one
+    sequence and the interleaving of concurrent branches is recorded rather than
+    lost. ``current_seq`` is the number handed to the node this context is
+    currently executing, and is per-branch.
+
+    ``task_logger`` overrides the engine's ``TaskLogger`` for this run only.
+    One engine serves many concurrent runs, so a caller that wants *this* run's
+    trajectory on its own — the evaluation runner, a notebook debugging one
+    call — cannot swap the engine's logger.
+    """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -38,23 +54,9 @@ class RunContext(BaseModel):
     data: dict = {}
     templates: Dict[str, str] = {}
     agent_service: Optional[Any] = None
-    # The run's TokenAccumulator. Typed loosely for the same reason as
-    # ``agent_service``: importing it here would close an import cycle. Every
-    # LLM client built during the run reports into this one object, and parallel
-    # branches share the parent's, so the totals cover the whole run.
     token_stats: Optional[Any] = None
-    # The run's task-sequence counter (an ``itertools.count``). Shared with
-    # parallel branches exactly as ``token_stats`` is, so every task row of the
-    # run draws from one sequence and the interleaving of concurrent branches is
-    # recorded rather than lost. ``current_seq`` is the number handed to the
-    # node this context is currently executing, and is per-branch.
     seq_counter: Optional[Any] = None
     current_seq: Optional[int] = None
-    # Optional per-run TaskLogger, overriding the engine's for this run only.
-    # One engine serves many concurrent runs, so a caller that wants *this*
-    # run's trajectory on its own — the evaluation runner, a notebook debugging
-    # one call — cannot swap the engine's logger. Typed loosely for the same
-    # reason as ``token_stats``.
     task_logger: Optional[Any] = None
 
     def next_seq(self) -> Optional[int]:

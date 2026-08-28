@@ -63,8 +63,6 @@ class AgentService:
     def __init__(self, session_maker: async_sessionmaker[AsyncSession]):
         self.session_maker = session_maker
 
-    # -- core entities: agents, sessions, runs --------------------------------
-
     async def get_or_create_agent(
         self,
         name: str,
@@ -274,8 +272,6 @@ class AgentService:
                     return val
             return None
 
-    # -- chat history ----------------------------------------------------------
-
     async def add_chat_message(
         self,
         agent_id: UUID,
@@ -314,8 +310,6 @@ class AgentService:
             )
             result = await session.execute(stmt)
             return list(result.scalars().all())
-
-    # -- task records ----------------------------------------------------------
 
     async def add_task(
         self,
@@ -360,8 +354,6 @@ class AgentService:
             await session.refresh(task)
             return task
 
-    # -- model call stats ------------------------------------------------------
-
     async def add_model_call_stats(
         self, stats: ModelCallStat, agent_id: Optional[UUID] = None
     ) -> ModelCallStat:
@@ -395,8 +387,6 @@ class AgentService:
 
             result = await session.execute(stmt)
             return list(result.scalars().all())
-
-    # -- deletion ----------------------------------------------------------------
 
     async def delete_history_for_session(self, session_id: UUID) -> None:
         """Delete all history (chat, tasks) belonging to a session."""

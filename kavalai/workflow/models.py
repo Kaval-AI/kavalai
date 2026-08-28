@@ -444,8 +444,6 @@ Node = Annotated[
 ]
 
 
-#: Node types that declare their own output model, so the author does not have
-#: to name one in ``data_types``. See ``validate_graph``.
 _NODES_WITH_OWN_OUTPUT_TYPE = frozenset({RagQueryNode})
 
 

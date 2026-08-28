@@ -49,11 +49,8 @@ from kavalai.eval.judge_evaluator import DEFAULT_JUDGE_MODEL, JudgeEvaluator
 from kavalai.settings import llm_parameters_from_env
 from kavalai.eval.simple_evaluator import SimpleEvaluator
 
-#: Exit code for a run whose cases all passed.
 EXIT_PASSED = 0
-#: Exit code for a run with at least one failing case.
 EXIT_FAILED = 1
-#: Exit code for a run that never got as far as a verdict.
 EXIT_ERROR = 2
 
 

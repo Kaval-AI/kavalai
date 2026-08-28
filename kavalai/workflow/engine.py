@@ -12,6 +12,11 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+
+``DEFAULT_RAG_SERVICE`` is the name a ``rag_query`` node resolves to when
+neither it nor the workflow names a service. It matches ``BaseRagService``'s
+own default collection and source identifiers, so the simple case never has to
+name anything.
 """
 
 import asyncio
@@ -59,9 +64,6 @@ from kavalai.llm_clients.streamer import StreamContent
 
 ClientFactory = Callable[..., BaseLlmClient]
 
-#: Name a ``rag_query`` node resolves to when neither it nor the workflow says
-#: otherwise. It matches ``BaseRagService``'s own default collection and source
-#: identifiers, so the simple case never has to name anything.
 DEFAULT_RAG_SERVICE = "default"
 
 DEFAULT_MAX_NODE_VISITS = 1000
@@ -73,19 +75,21 @@ class BranchDecision:
 
     Returned by :meth:`WorkflowEngine._next_node` so the routing itself stays a
     pure function and the recording happens at its single call site.
+
+    ``expr`` is the condition or expression verbatim, as written in the YAML —
+    kept as text so an old recorded run stays interpretable after the graph
+    changes. ``value`` is what it evaluated to: a bool for ``if``, the switched
+    value for ``switch``. This is the diagnostic — a mis-route is usually an
+    upstream classifier emitting ``"Refund"`` where the graph expects
+    ``"refund"``. ``taken`` is the node routed to, or ``None`` when nothing
+    matched. ``matched`` says, for a ``switch``, whether an explicit case
+    matched; ``False`` means the value fell through to ``default`` — almost
+    always an upstream bug.
     """
 
-    #: The condition or expression verbatim, as written in the YAML. Kept as
-    #: text so an old recorded run stays interpretable after the graph changes.
     expr: str
-    #: What it evaluated to — a bool for ``if``, the switched value for
-    #: ``switch``. This is the diagnostic: a mis-route is usually an upstream
-    #: classifier emitting ``"Refund"`` where the graph expects ``"refund"``.
     value: Any
-    #: Node routed to, or ``None`` when nothing matched.
     taken: Optional[str]
-    #: For a ``switch``, whether an explicit case matched. ``False`` means the
-    #: value fell through to ``default`` — almost always an upstream bug.
     matched: bool
 
     def as_inputs(self) -> dict:
@@ -237,7 +241,6 @@ class WorkflowEngine:
                 func = pythontool(func)
             self.kernel.register_python_tool(func_config.name, func)
 
-    # ------------------------------------------------------------------ loaders
     @classmethod
     def from_yaml(cls, yaml_string: str, **kwargs) -> "WorkflowEngine":
         """Build an engine from a YAML workflow definition string."""
@@ -259,7 +262,6 @@ class WorkflowEngine:
             raise WorkflowException(f"Workflow validation failed: {e}") from e
         return cls(graph, **kwargs)
 
-    # ----------------------------------------------------------------- lifecycle
     async def connect(self) -> "WorkflowEngine":
         """Open the connections the workflow's tool servers need.
 
@@ -297,7 +299,6 @@ class WorkflowEngine:
     async def __aexit__(self, exc_type, exc, tb) -> None:
         await self.aclose()
 
-    # ------------------------------------------------------------------- helpers
     def get_data_type(self, name: Optional[str]) -> Optional[type[BaseModel]]:
         return self.models.get(name) if name else None
 
@@ -370,7 +371,6 @@ class WorkflowEngine:
         # It tallies the whole run and forwards each call to the task logger.
         return self.client_factory(model, parameters, run_context.token_stats)
 
-    # --------------------------------------------------------------------- nodes
     @staticmethod
     def _scoped_event(node: Node, chunk: StreamContent) -> WorkflowStreamEvent:
         """Rename a client stream chunk to node scope.
@@ -763,7 +763,6 @@ class WorkflowEngine:
             self._log_node(run_context, node, inputs=None, output=None)
         # if / switch nodes are recorded from their decision, in the walk loop.
 
-    # ------------------------------------------------------------------ parallel
     @staticmethod
     def _branch_context(parent: RunContext) -> RunContext:
         """A private context for one branch, seeded with the parent's data.
@@ -894,7 +893,6 @@ class WorkflowEngine:
             task.cancel()
         await asyncio.gather(*pending, return_exceptions=True)
 
-    # ----------------------------------------------------------------------- run
     async def run(
         self,
         input_data: dict,

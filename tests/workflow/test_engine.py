@@ -20,7 +20,6 @@ def make_agent_service() -> AgentService:
     return AgentService(DatabaseManager().get_sqlite_compat_sessionmaker())
 
 
-# --------------------------------------------------------------------------- fakes
 def _default_for(annotation):
     if annotation is str:
         return "x"
@@ -108,7 +107,6 @@ class _RaisingClient(BaseLlmClient):
         raise RuntimeError("llm boom")
 
 
-# ------------------------------------------------------------------------ schemas
 DATA_TYPES = {
     "input": {"type": "object", "properties": {"user_message": {"type": "string"}}},
     "classification": {
@@ -133,7 +131,6 @@ def graph_dict(nodes, **extra):
     }
 
 
-# --------------------------------------------------------------------------- tests
 async def test_linear_llm_workflow_persists_everything():
     nodes = [
         {"name": "s", "type": "start", "next": "answer"},
@@ -887,7 +884,6 @@ async def test_engine_data_models_override_parsed_types():
     assert state.output_data == {"agent_response": "hi"}
 
 
-# ---------------------------------------------------------------------- streaming
 STREAM_NODES = [
     {"name": "s", "type": "start", "next": "answer"},
     {
@@ -1105,7 +1101,6 @@ async def test_run_matches_run_stream_result():
     assert state.trace == ["s", "answer", "e"]
 
 
-# ------------------------------------------------------- concurrency / lifecycle
 async def test_concurrent_runs_report_their_own_token_usage():
     """One engine, four overlapping runs: each reports only its own model call.
 
@@ -1199,7 +1194,6 @@ async def test_engine_connect_opens_mcp_servers():
         assert connected == [True]
 
 
-# ------------------------------------------------------------- allowed_tools
 async def test_agent_node_allowed_tools_are_passed_through_verbatim():
     """`[]` means no tools in YAML too — it used to mean "all of them".
 
@@ -1228,7 +1222,6 @@ def test_tool_allow_list_understands_the_wildcard():
     assert _is_tool_allowed("python://anything", None)
 
 
-# ------------------------------------------------------------------- rag_query
 class RecordingRagService:
     """A stand-in that records calls and refuses anything but ``query``.
 
@@ -1398,7 +1391,6 @@ async def test_retrieved_content_reaches_a_following_prompt():
     assert "Lake Miller is 1.2 meters deep." in seen["prompt"]
 
 
-# --------------------------------------------------- service/collection defaults
 async def test_node_service_beats_workflow_default():
     node_service, workflow_service = RecordingRagService(), RecordingRagService()
     graph = rag_graph(service="special")
@@ -1486,7 +1478,6 @@ async def test_unknown_service_fails_at_load_not_at_execution():
     assert "register_rag_service()" in message
 
 
-# ------------------------------------------------------- trajectory recording
 async def _trajectory(engine, input_data=None):
     """Run once with a private in-memory logger and return its records."""
     from kavalai.workflow.tasklog import MemoryTaskLogger

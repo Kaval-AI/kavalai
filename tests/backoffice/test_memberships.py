@@ -44,8 +44,11 @@ async def test_projects_get_members(client, backoffice_db):
     backoffice_db.add_all([user, project, membership])
     await backoffice_db.commit()
 
-    with patch("kavalai.backoffice.server.assert_logged_in"), patch(
-        "starlette.requests.Request.session", {"user_info": {"id": str(user_id)}}
+    with (
+        patch("kavalai.backoffice.server.assert_logged_in"),
+        patch(
+            "starlette.requests.Request.session", {"user_info": {"id": str(user_id)}}
+        ),
     ):
         response = await client.get(f"/projects/{project_id}/members")
         assert response.status_code == 200
@@ -66,9 +69,12 @@ async def test_projects_add_member(client, backoffice_db):
     backoffice_db.add_all([project, user])
     await backoffice_db.commit()
 
-    with patch("kavalai.backoffice.server.assert_logged_in"), patch(
-        "starlette.requests.Request.session",
-        {"user_info": {"id": str(admin_id), "is_admin": True}},
+    with (
+        patch("kavalai.backoffice.server.assert_logged_in"),
+        patch(
+            "starlette.requests.Request.session",
+            {"user_info": {"id": str(admin_id), "is_admin": True}},
+        ),
     ):
         response = await client.post(
             f"/projects/{project_id}/members/add",
@@ -102,9 +108,12 @@ async def test_projects_update_member(client, backoffice_db):
     backoffice_db.add_all([project, user, membership])
     await backoffice_db.commit()
 
-    with patch("kavalai.backoffice.server.assert_logged_in"), patch(
-        "starlette.requests.Request.session",
-        {"user_info": {"id": str(admin_id), "is_admin": True}},
+    with (
+        patch("kavalai.backoffice.server.assert_logged_in"),
+        patch(
+            "starlette.requests.Request.session",
+            {"user_info": {"id": str(admin_id), "is_admin": True}},
+        ),
     ):
         response = await client.put(
             f"/projects/{project_id}/members/update",
@@ -139,9 +148,12 @@ async def test_projects_remove_member(client, backoffice_db):
     backoffice_db.add_all([project, user, other_owner, membership, other_membership])
     await backoffice_db.commit()
 
-    with patch("kavalai.backoffice.server.assert_logged_in"), patch(
-        "starlette.requests.Request.session",
-        {"user_info": {"id": str(admin_id), "is_admin": True}},
+    with (
+        patch("kavalai.backoffice.server.assert_logged_in"),
+        patch(
+            "starlette.requests.Request.session",
+            {"user_info": {"id": str(admin_id), "is_admin": True}},
+        ),
     ):
         response = await client.delete(
             f"/projects/{project_id}/members/remove/{user_id}"
@@ -172,9 +184,12 @@ async def test_projects_remove_last_owner_fails(client, backoffice_db):
     backoffice_db.add_all([project, user, membership])
     await backoffice_db.commit()
 
-    with patch("kavalai.backoffice.server.assert_logged_in"), patch(
-        "starlette.requests.Request.session",
-        {"user_info": {"id": str(admin_id), "is_admin": True}},
+    with (
+        patch("kavalai.backoffice.server.assert_logged_in"),
+        patch(
+            "starlette.requests.Request.session",
+            {"user_info": {"id": str(admin_id), "is_admin": True}},
+        ),
     ):
         response = await client.delete(
             f"/projects/{project_id}/members/remove/{user_id}"
@@ -197,9 +212,12 @@ async def test_projects_demote_last_owner_fails(client, backoffice_db):
     backoffice_db.add_all([project, user, membership])
     await backoffice_db.commit()
 
-    with patch("kavalai.backoffice.server.assert_logged_in"), patch(
-        "starlette.requests.Request.session",
-        {"user_info": {"id": str(admin_id), "is_admin": True}},
+    with (
+        patch("kavalai.backoffice.server.assert_logged_in"),
+        patch(
+            "starlette.requests.Request.session",
+            {"user_info": {"id": str(admin_id), "is_admin": True}},
+        ),
     ):
         response = await client.put(
             f"/projects/{project_id}/members/update",
@@ -241,9 +259,12 @@ async def test_remove_member_clears_their_active_project(client, backoffice_db):
     backoffice_db.add_all([project, user, other_owner, *memberships])
     await backoffice_db.commit()
 
-    with patch("kavalai.backoffice.server.assert_logged_in"), patch(
-        "starlette.requests.Request.session",
-        {"user_info": {"id": str(admin_id), "is_admin": True}},
+    with (
+        patch("kavalai.backoffice.server.assert_logged_in"),
+        patch(
+            "starlette.requests.Request.session",
+            {"user_info": {"id": str(admin_id), "is_admin": True}},
+        ),
     ):
         response = await client.delete(
             f"/projects/{project_id}/members/remove/{user_id}"
@@ -276,9 +297,12 @@ async def test_delete_project_clears_active_project(client, backoffice_db):
     backoffice_db.add_all([project, owner, membership])
     await backoffice_db.commit()
 
-    with patch("kavalai.backoffice.server.assert_logged_in"), patch(
-        "starlette.requests.Request.session",
-        {"user_info": {"id": str(owner_id), "is_admin": True}},
+    with (
+        patch("kavalai.backoffice.server.assert_logged_in"),
+        patch(
+            "starlette.requests.Request.session",
+            {"user_info": {"id": str(owner_id), "is_admin": True}},
+        ),
     ):
         response = await client.delete(f"/projects/delete/{project_id}")
         assert response.status_code == 200

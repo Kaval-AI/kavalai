@@ -28,14 +28,15 @@ class SessionSummary(BaseModel):
 
     Aggregates a session's owning agent, its run/task/message and error counts,
     and a preview of its first and last messages.
+
+    ``external_id`` is the caller-supplied key for the conversation. Evaluation
+    runs record ``eval:{tag}:{case}``, so pasting one into the filter lands on
+    exactly the conversation a failing case produced.
     """
 
     session_id: UUID
     agent_id: UUID
     agent_name: str
-    #: The caller-supplied key for this conversation. Evaluation runs record
-    #: ``eval:{tag}:{case}``, so pasting one into the filter lands on exactly
-    #: the conversation a failing case produced.
     external_id: str | None = None
     runs_count: int
     tasks_count: int
@@ -51,6 +52,11 @@ class TaskSummary(BaseModel):
     """Summary of a single task (workflow-node execution) for the Tasks view.
 
     Exposes the task's inputs, output, name, prompt, any errors and duration.
+
+    ``seq`` is the run's execution order — order by it and you have the path
+    the run actually took. ``parent_task_name`` is set on the tool calls an
+    agent node made, so they render indented under it, and ``tool_uri`` names
+    the tool that ran.
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -65,10 +71,6 @@ class TaskSummary(BaseModel):
     prompt: str | None = None
     errors: list[str] | None = None
     duration_seconds: float | None = None
-    #: Trajectory columns. ``seq`` is the run's execution order — order by it
-    #: and you have the path the run actually took. ``parent_task_name`` is set
-    #: on the tool calls an agent node made, so they render indented under it,
-    #: and ``tool_uri`` names the tool that ran.
     seq: int | None = None
     parent_task_name: str | None = None
     tool_uri: str | None = None

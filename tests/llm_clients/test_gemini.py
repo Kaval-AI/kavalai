@@ -95,9 +95,7 @@ def sent_config(client):
     return client.client.aio.models.call_kwargs["config"]
 
 
-# ---------------------------------------------------------------------------
 # Unit tests (no API key required)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -215,9 +213,7 @@ def test_missing_api_key_raises_llm_client_exception(monkeypatch):
         GeminiClient(model="gemini-3.5-flash")
 
 
-# ---------------------------------------------------------------------------
 # convert_messages / remove_additional_properties
-# ---------------------------------------------------------------------------
 
 
 def test_convert_messages_joins_system_messages_and_maps_roles():

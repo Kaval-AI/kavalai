@@ -139,7 +139,12 @@ def error_status_code(error: Exception) -> Optional[int]:
 
 
 class BaseLlmClient:
-    #: Provider prefix used when recording model calls (``openai/gpt-4o``).
+    """Common interface of the LLM clients.
+
+    ``provider`` is the prefix a subclass sets so that recorded model calls
+    are named ``provider/model`` (``openai/gpt-4o``).
+    """
+
     provider: str = ""
 
     def __init__(

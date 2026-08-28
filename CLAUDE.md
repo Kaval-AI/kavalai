@@ -197,6 +197,12 @@ cd frontend && npm test -- --watch=false --code-coverage
 - Use modern Angular control flow syntax: `@if`, `@for` — never `*ngIf` / `*ngFor`
 - Prefer styles and components from `common.css`; use Tailwind CSS + DaisyUI for styling
 - Refactor code blocks with distinct responsibilities into dedicated functions
+- Comments: no `#:` attribute comments and no dash-rule section dividers
+  (`# -- core entities -----`). Explain a field in the class docstring and a
+  constant in the module or function docstring, not in a comment above it. A
+  comment answers *why*, not *what*; if the name already says it, or the only
+  content is implementation history ("typed loosely to avoid an import cycle"),
+  omit it. Say a thing once, where the reader looks first
 - Do not update `README.md`
 - Python tools must be decorated with `@kavalai.pythontool` and registered via `register_python_tool`
 - Keep this `CLAUDE.md` current: after a task, update it for important changes to project structure, components, or workflow

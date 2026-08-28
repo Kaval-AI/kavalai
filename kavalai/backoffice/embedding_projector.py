@@ -31,7 +31,6 @@ from kavalai.backoffice.db import Project, ProjectCache
 from kavalai.llm_clients.streamer import ValueStreamer
 from kavalai.rag.base import BaseRagService
 
-#: How many indexed points are projected and cached as the explorer background.
 SAMPLE_SIZE = 500
 
 
@@ -210,7 +209,8 @@ async def train_pca(
             streamer=streamer,
         )
 
-        # The first 500 points, projected, give the explorer its background.
+        # The first SAMPLE_SIZE points, projected, give the explorer its
+        # background.
         if streamer:
             await streamer.stream_partial("Generating sample points...")
         sample_points = _project_sample(tmp_csv_path, ipca, SAMPLE_SIZE)

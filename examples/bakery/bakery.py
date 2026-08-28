@@ -9,6 +9,20 @@ fields and does nothing else; :func:`validate_order` is ordinary code and is
 the only thing that says whether an order is complete. That is what lets
 :file:`eval_cases.yaml` grade most of this agent by comparing values, and what
 stops a model upgrade quietly redefining a valid order.
+
+``TODAY`` is the date the bakery believes it is. It is pinned so that "we need
+two days' notice" does not expire the shipped cases as their dates fall into
+the past.
+
+``CATALOGUE`` is what the bakery sells. Its key is the identifier the parse
+step must write into ``product`` — one underscored token, which a model is far
+less likely to get subtly wrong than a phrase. Mapping "sourdough bread" or
+"kringles" onto one of these keys is the model's job; the same list is named
+in the parse prompt in :file:`assistant.yaml`.
+
+``ORDER_BOOK`` holds every order the assistant accepted, for as long as the
+process lives. An example does not need a second database — the one in
+:file:`bakery_real_db.py` is there for the agent's *sessions*, not for this.
 """
 
 from dataclasses import dataclass
@@ -19,27 +33,25 @@ from pydantic import BaseModel, Field
 
 from kavalai import pythontool
 
-#: The date the bakery believes it is. Pinned, so "we need two days' notice"
-#: does not expire the shipped cases as their dates fall into the past.
 TODAY = date(2026, 9, 1)
 
 
 @dataclass(frozen=True)
 class Product:
+    """A catalogue entry and the rules an order of it must satisfy.
+
+    Below ``minimum_quantity`` the bakery cannot bake economically, so the
+    order is incomplete. ``lead_time_days`` is the notice needed before the
+    delivery date. Above ``maximum_quantity`` a human has to be involved,
+    whoever is asking.
+    """
+
     unit: str
-    #: Below this we cannot bake economically, so the order is incomplete.
     minimum_quantity: int
-    #: Days of notice needed before the delivery date.
     lead_time_days: int
-    #: Above this a human has to be involved, whoever is asking.
     maximum_quantity: int
 
 
-#: What the bakery sells. The key is the identifier the parse step must write
-#: into `product` — one underscored token, which a model is far less likely to
-#: get subtly wrong than a phrase. Mapping "sourdough bread" or "kringles" onto
-#: one of these keys is the model's job; the same list is named in the parse
-#: prompt in assistant.yaml.
 CATALOGUE: dict[str, Product] = {
     #                       unit,  min, lead, max
     "sourdough_loaf": Product("loaf", 1, 1, 60),
@@ -91,12 +103,17 @@ class Order(BaseModel):
 
 
 class ValidationResult(BaseModel):
+    """What :func:`validate_order` decided.
+
+    ``missing_fields`` lists the field paths still to be supplied, e.g.
+    ``items[0].quantity``; the clarification reply is graded against exactly
+    this list. ``problems`` lists the rules the order broke, in words a
+    customer can act on.
+    """
+
     ok: bool
     order: Optional[Order] = None
-    #: Field paths still to be supplied, e.g. `items[0].quantity`. The
-    #: clarification reply is graded against exactly this list.
     missing_fields: list[str] = Field(default_factory=list)
-    #: Rules the order broke, in words a customer can act on.
     problems: list[str] = Field(default_factory=list)
 
 
@@ -121,9 +138,6 @@ class AssistantReply(BaseModel):
     body: str
 
 
-#: The order book: every order the assistant accepted, for as long as the
-#: process lives. An example does not need a second database, and the one in
-#: bakery_real_db.py is there for the agent's *sessions*, not for this.
 ORDER_BOOK: list[dict] = []
 
 

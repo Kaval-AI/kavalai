@@ -32,7 +32,6 @@ VECTORS = {
     "durian": [0.0, 0.0, 0.0, 1.0],
 }
 
-#: (text, source_id) pairs indexed into the default collection by ``populated``.
 CORPUS = [
     ("apple", "apples"),
     ("apple pie", "apples"),
@@ -120,7 +119,6 @@ async def populated(rag_service, collection):
 pytestmark = pytest.mark.asyncio
 
 
-# ------------------------------------------------------------------- required
 async def test_index_returns_the_guaranteed_keys(rag_service, collection):
     entry = await rag_service.index(
         "apple", {"fruit": "apples"}, collection_name=collection, source_id="apples"
@@ -251,7 +249,6 @@ async def test_delete_of_an_unknown_id_is_not_an_error(populated, collection):
     await populated.delete(uuid4(), collection_name=collection)
 
 
-# ------------------------------------------------------------------ projection
 async def test_include_content_false_drops_only_the_content(populated, collection):
     with_content = await populated.query("apple", top_k=3, collection_name=collection)
     without = await populated.query(
@@ -274,7 +271,6 @@ async def test_include_content_false_applies_to_query_batch(populated, collectio
     assert all(hit.content is None for hit in batches[0])
 
 
-# -------------------------------------------------------------------- optional
 async def test_optional_methods_either_work_or_say_they_do_not(populated, collection):
     """A backend cannot quietly half-implement the optional tier."""
     if populated.supports("count_entries"):
@@ -296,7 +292,6 @@ async def test_supports_is_false_for_an_unknown_capability(rag_service):
     assert rag_service.supports("teleportation") is False
 
 
-# ------------------------------------------------------------------- defaulted
 async def test_compute_similarity_matrix_shape_and_ordering(populated, collection):
     matrix = await populated.compute_similarity_matrix(
         texts=["apple", "banana"],
@@ -326,7 +321,6 @@ async def test_learn_normalizer_returns_a_normalizer(populated, collection):
     assert hasattr(normalizer, "transform")
 
 
-# ------------------------------------------------------------- embedding side
 async def test_embedding_client_is_injectable(rag_service):
     """The property is how a caller substitutes a custom embedding provider."""
     sentinel = fake_embedding_client()

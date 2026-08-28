@@ -24,7 +24,6 @@ ROOT = Path(__file__).parent.parent
 SKILLS_DIR = ROOT / "kavalai" / ".agents" / "skills"
 ENV_EXAMPLE = ROOT / ".env.example"
 
-#: The skills that ship, so adding or dropping one is a deliberate edit here.
 EXPECTED_SKILLS = {
     "kavalai",
     "kavalai-workflows",

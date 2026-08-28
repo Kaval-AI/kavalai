@@ -12,11 +12,13 @@ def client():
 
 @pytest.fixture
 def mock_user_session():
-    with patch("kavalai.backoffice.server.is_logged_in", return_value=True), patch(
-        "kavalai.backoffice.server.assert_logged_in", return_value=None
-    ), patch(
-        "kavalai.backoffice.server.get_project_and_assert_access"
-    ) as mock_get_project:
+    with (
+        patch("kavalai.backoffice.server.is_logged_in", return_value=True),
+        patch("kavalai.backoffice.server.assert_logged_in", return_value=None),
+        patch(
+            "kavalai.backoffice.server.get_project_and_assert_access"
+        ) as mock_get_project,
+    ):
         project = MagicMock()
         project.db_user = "user"
         project.db_password = "pass"
@@ -32,13 +34,13 @@ async def test_projects_rag_query_with_normalizer(client, mock_user_session):
     project_id = uuid4()
 
     # Mock RagService and db_manager
-    with patch(
-        "kavalai.backoffice.server.db_manager.get_sessionmaker"
-    ) as mock_get_sessionmaker, patch(
-        "kavalai.backoffice.server.PostgresRagService"
-    ) as MockRagService, patch(
-        "kavalai.normalizer.Normalizer.from_yaml"
-    ) as mock_from_yaml:
+    with (
+        patch(
+            "kavalai.backoffice.server.db_manager.get_sessionmaker"
+        ) as mock_get_sessionmaker,
+        patch("kavalai.backoffice.server.PostgresRagService") as MockRagService,
+        patch("kavalai.normalizer.Normalizer.from_yaml") as mock_from_yaml,
+    ):
         mock_session_maker = MagicMock()
         mock_get_sessionmaker.return_value = mock_session_maker
 
@@ -85,8 +87,12 @@ async def test_projects_rag_query_with_normalizer(client, mock_user_session):
 async def test_projects_rag_query_invalid_normalizer(client, mock_user_session):
     project_id = uuid4()
 
-    with patch("kavalai.backoffice.server.db_manager.get_sessionmaker"), patch(
-        "kavalai.normalizer.Normalizer.from_yaml", side_effect=Exception("Invalid YAML")
+    with (
+        patch("kavalai.backoffice.server.db_manager.get_sessionmaker"),
+        patch(
+            "kavalai.normalizer.Normalizer.from_yaml",
+            side_effect=Exception("Invalid YAML"),
+        ),
     ):
         query_data = {
             "model": "test-model",

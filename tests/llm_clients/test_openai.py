@@ -56,10 +56,8 @@ SUPPORTED_OPENAI_MODELS = OPENAI_REASONING_MODELS + OPENAI_SAMPLING_MODELS
 USER_HISTORY = ChatHistory(messages=[ChatMessage(role="user", content="Say 'Hello'")])
 
 
-# ---------------------------------------------------------------------------
 # Real Responses API events, so the client's isinstance dispatch is exercised
 # for real instead of against mock stand-ins.
-# ---------------------------------------------------------------------------
 
 
 def text_delta(delta: str) -> ResponseTextDeltaEvent:
@@ -172,9 +170,7 @@ def sent_kwargs(client):
     return client.client.responses.call_kwargs
 
 
-# ---------------------------------------------------------------------------
 # Unit tests (no API key required)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -296,9 +292,7 @@ def test_timeout_comes_from_the_client_parameters():
     assert client.client.timeout == 45.0
 
 
-# ---------------------------------------------------------------------------
 # Integration tests (require OPENAI_API_KEY)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

@@ -35,13 +35,18 @@ async def test_projects_rag_query_with_source_ids(client):
         "keep_best": True,
     }
 
-    with patch("kavalai.backoffice.server.assert_logged_in"), patch(
-        "kavalai.backoffice.server.get_project_and_assert_access", return_value=project
-    ), patch("kavalai.db.db_manager.get_sessionmaker") as mock_sm, patch(
-        "kavalai.backoffice.server.PostgresRagService"
-    ) as mock_rag_service_class, patch(
-        "kavalai.backoffice.server.get_backoffice_session"
-    ) as mock_get_bo_session:
+    with (
+        patch("kavalai.backoffice.server.assert_logged_in"),
+        patch(
+            "kavalai.backoffice.server.get_project_and_assert_access",
+            return_value=project,
+        ),
+        patch("kavalai.db.db_manager.get_sessionmaker") as mock_sm,
+        patch("kavalai.backoffice.server.PostgresRagService") as mock_rag_service_class,
+        patch(
+            "kavalai.backoffice.server.get_backoffice_session"
+        ) as mock_get_bo_session,
+    ):
         mock_session = AsyncMock()
         mock_sm.return_value = MagicMock(return_value=mock_session)
         mock_session.__aenter__.return_value = mock_session

@@ -222,9 +222,7 @@ async def test_stream_sse_events_early_close_aborts_source():
     await asyncio.wait_for(closed.wait(), timeout=1)
 
 
-# ---------------------------------------------------------------------------
 # Auth
-# ---------------------------------------------------------------------------
 
 
 def test_validate_auth_allows_everything_when_unconfigured(monkeypatch):
@@ -257,9 +255,7 @@ def test_validate_auth_rejects_wrong_credentials(monkeypatch):
     assert exc.value.detail == "Incorrect username/password"
 
 
-# ---------------------------------------------------------------------------
 # session_scope
-# ---------------------------------------------------------------------------
 
 
 class FakeSession:
@@ -305,9 +301,7 @@ async def test_session_scope_yields_an_existing_session():
     assert session.closed is False
 
 
-# ---------------------------------------------------------------------------
 # health / mask_db_uri
-# ---------------------------------------------------------------------------
 
 
 def test_health_reports_a_connected_database():
@@ -496,7 +490,6 @@ nodes:""",
     assert server["command"] == "mcp-github"
 
 
-# ------------------------------------------------------- provider module loading
 def test_load_provider_modules_imports_named_modules():
     from kavalai.server import load_provider_modules
 

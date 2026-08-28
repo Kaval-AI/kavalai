@@ -1106,9 +1106,7 @@ async def test_tool_descriptions_nested():
     assert "NestedInput" in schema["$defs"]
 
 
-# ---------------------------------------------------------------------------
 # Tool URI resolution
-# ---------------------------------------------------------------------------
 
 
 def test_get_tool_definition_resolves_a_python_tool():
@@ -1155,9 +1153,7 @@ def test_register_python_tool_rejects_a_non_python_uri():
         kernel.register_python_tool("rest://math.add", sync_add)
 
 
-# ---------------------------------------------------------------------------
 # allowed_tools filtering
-# ---------------------------------------------------------------------------
 
 
 def test_is_tool_allowed_rules():

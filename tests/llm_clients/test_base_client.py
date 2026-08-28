@@ -249,7 +249,6 @@ def test_model_stats_logger():
         mock_logger.info.assert_called_with("Custom: 100")
 
 
-# ------------------------------------------------------------- user-turn rule
 def test_ensure_user_turn_promotes_a_system_only_history():
     """Workflow `llm` nodes render everything into one system message.
 
@@ -282,7 +281,6 @@ def test_ensure_user_turn_leaves_a_real_conversation_alone():
     assert ensure_user_turn(messages) is messages
 
 
-# --------------------------------------------------------- failed-call records
 def test_error_status_code_reads_each_provider_shape():
     from kavalai.llm_clients.base_client import error_status_code
 

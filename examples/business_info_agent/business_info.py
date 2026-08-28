@@ -40,9 +40,7 @@ AGENT_DESCRIPTION = (
 
 DEFAULT_MODEL = "gemini/gemini-3.1-pro-preview"
 
-#: How many search results the research agent is handed.
 DEFAULT_SEARCH_RESULTS = 8
-#: How many crawl/reasoning steps it may take before it has to answer.
 DEFAULT_MAX_STEPS = 8
 
 SEARCH_TOOL = "webtools.web_search"

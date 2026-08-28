@@ -289,7 +289,6 @@ def test_mcp_server_accepts_a_single_transport():
     assert McpServer(name="m", url="http://x").url == "http://x"
 
 
-# --------------------------------------------------------- model-name validation
 MINIMAL_NODES = [
     {"name": "s", "type": "start", "next": "e"},
     {"name": "e", "type": "end", "output": "output"},
@@ -346,7 +345,6 @@ def test_dotted_python_path_is_rejected_as_a_provider():
         make_graph(MINIMAL_NODES, llm_model="mypkg.mymodule.MyClient/model")
 
 
-# ------------------------------------------------------------- rag_query nodes
 def rag_nodes(**extra):
     return [
         {"name": "s", "type": "start", "next": "r"},

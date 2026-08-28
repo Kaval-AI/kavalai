@@ -29,16 +29,12 @@ import sys
 from importlib import resources
 from pathlib import Path
 
-#: Where a skill lives inside the installed package.
 SKILLS_PACKAGE_PATH = ("kavalai", ".agents", "skills")
 
-#: Default destination, relative to the directory the command is run in.
 DEFAULT_TARGET = Path(".claude") / "skills"
 
-#: Exit code when the command did what was asked.
 EXIT_OK = 0
 
-#: Exit code when it could not.
 EXIT_ERROR = 1
 
 

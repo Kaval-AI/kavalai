@@ -75,9 +75,7 @@ def make_client(chunks=None, error=None, parameters=None, stats_receiver=None):
     return client
 
 
-# ---------------------------------------------------------------------------
 # Unit tests (no Ollama server required)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -181,9 +179,7 @@ def test_ollama_parameters():
     assert client.model == "llama3.2:1b"
 
 
-# ---------------------------------------------------------------------------
 # Integration tests (require a reachable Ollama)
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture

@@ -46,9 +46,6 @@ INFO = {
 PROFILE = {**INFO, "summary": "Kaval.AI builds a YAML-based agent framework."}
 
 
-# -- fake tools, registered by import path through demo.TOOLS -----------------
-
-
 @pythontool
 async def fake_web_search(query: str, count: int = 10) -> WebSearchResponse:
     """Return canned search results."""
@@ -339,9 +336,6 @@ async def test_no_db_flag_skips_persistence(demo_env):
 
     assert await _count(maker, Run) == 0
     assert await _count(maker, Agent) == 0
-
-
-# -- the evaluated server and its case file ----------------------------------
 
 
 def test_server_serves_the_same_workflow():

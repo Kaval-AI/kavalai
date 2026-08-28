@@ -81,8 +81,9 @@ class BaseRagService(ABC):
     abstract. Every backend implements all six.
 
     **Optional.** :meth:`count_entries` and :meth:`iter_entries` raise
-    ``NotImplementedError`` by default. Ask :meth:`supports` before calling
-    them rather than catching the exception.
+    ``NotImplementedError`` by default. A backend that overrides them lists
+    their names in ``capabilities``; ask :meth:`supports` before calling them
+    rather than catching the exception.
 
     **Defaulted.** :meth:`compute_similarity_matrix` and
     :meth:`learn_normalizer` work on every backend as written, and may be
@@ -93,8 +94,6 @@ class BaseRagService(ABC):
     assumed.
     """
 
-    #: Optional methods this backend actually implements. Subclasses that
-    #: override ``count_entries`` or ``iter_entries`` list them here.
     capabilities: frozenset = frozenset()
 
     def supports(self, capability: str) -> bool:

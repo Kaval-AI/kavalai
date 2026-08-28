@@ -24,6 +24,12 @@ Dropping a collection is ``DROP TABLE``. The registry row carries a
 
 All SQL here is raw and therefore bypasses ``schema_translate_map`` — every
 statement qualifies the configured schema explicitly.
+
+``RAG_COLLECTION_SCHEMA_VERSION`` is the version of the per-collection table
+layout. Bump it when the layout changes and register an upgrade step in
+``_COLLECTION_UPGRADES``, which maps a *from_version* to an async callable
+``(session, service, collection_info) -> None`` that brings a collection from
+``from_version`` to ``from_version + 1``.
 """
 
 import hashlib
@@ -44,13 +50,8 @@ from kavalai.llm_clients.embeddings import make_embedding_client
 from kavalai.normalizer import Normalizer
 from kavalai.rag.base import BaseRagService, RagServiceResult
 
-#: Version of the per-collection table layout. Bump when the layout changes
-#: and register an upgrade step in ``_COLLECTION_UPGRADES``.
 RAG_COLLECTION_SCHEMA_VERSION = 1
 
-#: In-code upgrade steps for collection tables: maps *from_version* to an
-#: async callable ``(session, service, collection_info) -> None`` that brings
-#: a collection from ``from_version`` to ``from_version + 1``.
 _COLLECTION_UPGRADES: dict[int, Callable] = {}
 
 
@@ -98,7 +99,6 @@ class PostgresRagService(BaseRagService):
     :class:`BaseRagService` interface; here it maps to a table.
     """
 
-    #: Both optional methods of the interface are implemented here.
     capabilities = frozenset({"count_entries", "iter_entries"})
 
     REGISTRY_TABLE = "rag_collections"
@@ -179,9 +179,7 @@ class PostgresRagService(BaseRagService):
         """Create a PostgresRagService from a session maker."""
         return cls(session_maker, model, agent, normalizer, schema=schema)
 
-    # ------------------------------------------------------------------
     # Naming / SQL helpers
-    # ------------------------------------------------------------------
 
     def _qualified(self, table_name: str) -> str:
         """Schema-qualified, quoted table reference for raw SQL."""
@@ -203,9 +201,7 @@ class PostgresRagService(BaseRagService):
         ).hexdigest()[:8]
         return f"rag_c_{slug}_{digest}" if slug else f"rag_c_{digest}"
 
-    # ------------------------------------------------------------------
     # Provisioning
-    # ------------------------------------------------------------------
 
     async def _ensure_registry(self, session: AsyncSession) -> None:
         """Create the pgvector extension and the registry table if needed."""
@@ -446,9 +442,7 @@ class PostgresRagService(BaseRagService):
             "collections": [c["name"] for c in collections],
         }
 
-    # ------------------------------------------------------------------
     # Indexing
-    # ------------------------------------------------------------------
 
     async def index(
         self,
@@ -549,9 +543,7 @@ class PostgresRagService(BaseRagService):
             await session.commit()
             return rows
 
-    # ------------------------------------------------------------------
     # Deletion
-    # ------------------------------------------------------------------
 
     async def delete(
         self, item_id: UUID, collection_name: Optional[str] = None
@@ -600,9 +592,7 @@ class PostgresRagService(BaseRagService):
             )
             await session.commit()
 
-    # ------------------------------------------------------------------
     # Querying
-    # ------------------------------------------------------------------
 
     def _map_row(
         self,
@@ -979,9 +969,7 @@ class PostgresRagService(BaseRagService):
             await session.commit()
             return Normalizer(center_vector=_parse_vector(mean_vector))
 
-    # ------------------------------------------------------------------
     # Bulk export
-    # ------------------------------------------------------------------
 
     async def iter_entries(
         self, collection_name: str, batch_size: int = 500

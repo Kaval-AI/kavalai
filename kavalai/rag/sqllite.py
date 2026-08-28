@@ -72,7 +72,6 @@ class SqliteRagService(BaseRagService):
     stats are logged but not persisted (the index file has no stats table).
     """
 
-    #: Both optional methods of the interface are implemented here.
     capabilities = frozenset({"count_entries", "iter_entries"})
 
     def __init__(

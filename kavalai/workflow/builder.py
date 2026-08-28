@@ -130,7 +130,6 @@ class WorkflowBuilder:
         self._python_functions: list[PythonFunction] = []
         self._templates: list[TemplateModel] = []
 
-    # --------------------------------------------------------------- data types
     def data_type(
         self,
         name: str,
@@ -170,7 +169,6 @@ class WorkflowBuilder:
         self._data_types[name] = model.model_json_schema()
         return self
 
-    # -------------------------------------------------------------------- nodes
     def start(self, next: str, *, name: str = "start") -> "WorkflowBuilder":
         self._nodes.append(StartNode(name=name, next=next))
         return self
@@ -351,7 +349,6 @@ class WorkflowBuilder:
         )
         return self
 
-    # ---------------------------------------------------------------- resources
     def python_function(self, name: str, path: str) -> "WorkflowBuilder":
         """Register a Python tool by import path (e.g. ``pkg.mod.func``)."""
         self._python_functions.append(PythonFunction(name=name, path=path))
@@ -373,7 +370,6 @@ class WorkflowBuilder:
         self._templates.append(TemplateModel(name=name, value=value))
         return self
 
-    # -------------------------------------------------------------------- build
     def build(self) -> WorkflowGraph:
         """Validate and return the :class:`WorkflowGraph`."""
         return WorkflowGraph(

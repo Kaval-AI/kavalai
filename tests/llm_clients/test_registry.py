@@ -69,7 +69,6 @@ def clean_registry():
             reg.unregister(name)
 
 
-# --------------------------------------------------------------- target kinds
 def test_register_a_class(clean_registry):
     registry.register_llm_provider("fake", FakeLlmClient)
 
@@ -138,7 +137,6 @@ def test_parameters_and_stats_receiver_are_forwarded(clean_registry):
     assert client.model_stats_receiver is receiver
 
 
-# ------------------------------------------------------------------ resolution
 def test_exact_model_key_wins_over_the_provider_key(clean_registry):
     registry.register_llm_provider("acme", FakeLlmClient)
     registry.register_llm_provider(
@@ -174,7 +172,6 @@ def test_registry_error_is_a_value_error():
         make_client("nosuch/model")
 
 
-# ------------------------------------------------------------------- semantics
 def test_duplicate_registration_raises(clean_registry):
     registry.register_llm_provider("dup", FakeLlmClient)
 
@@ -222,7 +219,6 @@ def test_bad_registration_default_names_the_registration(clean_registry):
     assert "base_yrl" in str(error.value)
 
 
-# ------------------------------------------------------------------- laziness
 def test_listing_builtins_imports_no_sdk():
     """``import kavalai`` must work where no provider SDK is installed."""
     names = (
@@ -256,7 +252,6 @@ def test_lazy_clients_table_is_derived_from_the_registry():
         )
 
 
-# ---------------------------------------------------------------- verification
 def test_verify_raises_on_a_bad_dotted_path(clean_registry):
     registry.register_llm_provider("broken", "no.such.module.Class")
 
@@ -294,7 +289,6 @@ def test_validate_imports_immediately(clean_registry):
         registry.register_llm_provider("eager", "no.such.module.Class", validate=True)
 
 
-# --------------------------------------------------------------- other kinds
 def test_embedding_provider_registration(clean_registry):
     registry.register_embedding_provider("fake", FakeEmbeddingClient, host="h")
 

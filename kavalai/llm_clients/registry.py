@@ -33,6 +33,13 @@ Registration is deliberately explicit -- there is no scanning and no plugin
 path. The set of available backends is discovered; the behaviour of any given
 run is still passed, since an engine's ``client_factory`` and ``rag_services``
 arguments both outrank these registries.
+
+A registration ``Target`` is a class, a dotted path to one, or a factory
+callable. ``DEFAULT_NAME`` is the name looked up when a workflow does not name
+a backend explicitly; it matches ``BaseRagService``'s own default collection
+and source identifiers. ``BUILTIN_LLM_PACKAGES`` names the PyPI distribution
+behind each built-in LLM provider, so an import failure can say what to
+install.
 """
 
 import importlib
@@ -40,11 +47,8 @@ from typing import Any, Callable, Optional, Union
 
 from loguru import logger
 
-#: A registration target: a class, a dotted path to one, or a factory callable.
 Target = Union[type, str, Callable[..., Any]]
 
-#: Fallback name used when a workflow does not name a backend explicitly. It
-#: matches ``BaseRagService``'s own default collection and source identifiers.
 DEFAULT_NAME = "default"
 
 
@@ -93,22 +97,22 @@ class Registry:
     pair (``"mycorp/mymodel"``). Lookup tries the exact string first and then
     the part before the first ``/``, so a model-specific registration wins over
     a provider-wide one without either having to know about the other.
+
+    ``kind`` is the noun used in error messages ("LLM provider") and
+    ``register_hint`` the public function that registers into this registry,
+    so an error can name the call that fixes it. Names shipped with Kaval.AI
+    are marked as built-ins; :meth:`verify` skips them, because their SDKs
+    are optional extras that a given install need not have.
     """
 
     def __init__(self, kind: str, register_hint: str):
-        #: Human-readable noun used in error messages ("LLM provider").
         self.kind = kind
-        #: Name of the public function that registers into this registry.
         self.register_hint = register_hint
         self._targets: dict[str, Target] = {}
-        #: Dotted paths already imported, keyed by name.
         self._resolved: dict[str, Any] = {}
         self._defaults: dict[str, dict[str, Any]] = {}
-        #: Names shipped with Kaval.AI. ``verify`` skips them, because their
-        #: SDKs are optional extras that a given install need not have.
         self._builtins: set[str] = set()
 
-    # ------------------------------------------------------------- registering
     def register(
         self,
         name: str,
@@ -170,7 +174,6 @@ class Registry:
         """Every registered name, sorted. Resolves nothing."""
         return sorted(self._targets)
 
-    # ---------------------------------------------------------------- resolving
     def _resolve_target(self, name: str) -> Any:
         """Return the callable registered under ``name``, importing if needed."""
         if name in self._resolved:
@@ -273,7 +276,6 @@ _BUILTIN_LLM_PROVIDERS = {
     "browser": "kavalai.llm_clients.browser_client.BrowserLLMClient",
 }
 
-#: PyPI distribution behind each built-in LLM provider, for install hints.
 BUILTIN_LLM_PACKAGES = {
     "openai": "openai",
     "gemini": "google-genai",
@@ -304,7 +306,6 @@ for _registry, _builtins in (
         _registry.mark_builtin(_name)
 
 
-# ---------------------------------------------------------------- public API
 def register_llm_provider(
     name: str,
     target: Target,
