@@ -21,6 +21,7 @@ import json
 import tempfile
 import os
 from typing import Optional
+from uuid import UUID
 from sqlalchemy import select
 from sklearn.decomposition import IncrementalPCA
 import numpy as np
@@ -29,6 +30,9 @@ from loguru import logger
 from kavalai.backoffice.db import Project, ProjectCache
 from kavalai.llm_clients.streamer import ValueStreamer
 from kavalai.rag.base import BaseRagService
+
+#: How many indexed points are projected and cached as the explorer background.
+SAMPLE_SIZE = 500
 
 
 async def download_rag_index(
@@ -54,21 +58,20 @@ async def download_rag_index(
         writer = csv.writer(csvfile)
         count = 0
         async for item in rag_service.iter_entries(collection_name):
-            if item["embedding"]:
-                # Use content as label, fallback to source_id if content is empty
-                label = item["content"] or item["source_id"]
-                row = [label] + list(item["embedding"])
-                writer.writerow(row)
-                count += 1
-                if count % 100 == 0:
-                    msg = f"Downloaded {count}/{total_count} items..."
-                    if streamer:
-                        await streamer.stream_partial(msg)
+            if not item["embedding"]:
+                continue
+            label = item["content"] or item["source_id"]
+            writer.writerow([label, *item["embedding"]])
+            count += 1
+            if count % 100 == 0 and streamer:
+                await streamer.stream_partial(
+                    f"Downloaded {count}/{total_count} items..."
+                )
 
-        msg = f"Finished downloading {count}/{total_count} items."
-        logger.info(msg)
-        if streamer:
-            await streamer.stream_partial(msg)
+    msg = f"Finished downloading {count}/{total_count} items."
+    logger.info(msg)
+    if streamer:
+        await streamer.stream_partial(msg)
 
 
 async def compute_pca(
@@ -78,8 +81,7 @@ async def compute_pca(
     streamer: Optional[ValueStreamer] = None,
 ) -> IncrementalPCA:
     """
-    Given the CSV file, computes PCA model from the dataset using scikit-learn's IncrementalPCA.
-    Returns the fitted IncrementalPCA model.
+    Fit an IncrementalPCA model to the embeddings in the CSV, batch by batch.
 
     Args:
         csv_path: Path to the CSV file containing labels and embeddings.
@@ -90,10 +92,8 @@ async def compute_pca(
     Returns:
         IncrementalPCA: The fitted PCA model.
     """
-    # Fit IncrementalPCA model
     ipca = IncrementalPCA(n_components=n_components)
     batch = []
-    has_data = False
     row_count = 0
     batch_count = 0
 
@@ -102,7 +102,6 @@ async def compute_pca(
         for row in reader:
             if not row:
                 continue
-            has_data = True
             batch.append([float(x) for x in row[1:]])
             row_count += 1
             if len(batch) >= batch_size:
@@ -114,26 +113,58 @@ async def compute_pca(
                     if streamer:
                         await streamer.stream_partial(msg)
 
-        # Final partial_fit for remaining rows (if any)
-        if batch and len(batch) >= n_components:
+        # IncrementalPCA needs at least n_components rows per partial_fit; a
+        # smaller remainder is dropped.
+        if len(batch) >= n_components:
             ipca.partial_fit(np.array(batch))
             msg = f"Processed final {row_count} rows for PCA."
             logger.info(msg)
             if streamer:
                 await streamer.stream_partial(msg)
-        elif batch:
-            pass
 
-    if not has_data:
+    if row_count == 0:
         raise ValueError("No data found in CSV for PCA computation.")
 
     return ipca
 
 
+def _project_sample(csv_path: str, ipca: IncrementalPCA, size: int) -> list[dict]:
+    """Project the first ``size`` rows of the CSV onto the PCA plane."""
+    labels = []
+    batch = []
+    with open(csv_path, "r", encoding="utf-8") as csvfile:
+        for row in csv.reader(csvfile):
+            if not row:
+                continue
+            labels.append(row[0])
+            batch.append([float(x) for x in row[1:]])
+            if len(batch) >= size:
+                break
+    if not batch:
+        return []
+    transformed = ipca.transform(np.array(batch))
+    return [
+        {"label": label, "x": point[0], "y": point[1]}
+        for label, point in zip(labels, transformed)
+    ]
+
+
+async def _upsert_cache(bo_session, project_id, name: str, value: str) -> None:
+    """Set one ``project_cache`` entry, creating it when absent."""
+    stmt = select(ProjectCache).where(
+        ProjectCache.project_id == project_id, ProjectCache.name == name
+    )
+    entry = (await bo_session.execute(stmt)).scalar_one_or_none()
+    if entry:
+        entry.value = value
+    else:
+        bo_session.add(ProjectCache(project_id=project_id, name=name, value=value))
+
+
 async def train_pca(
     bo_session_maker,
     rag_service: BaseRagService,
-    project_name: str,
+    project_id: UUID,
     collection_name: str,
     streamer: Optional[ValueStreamer] = None,
 ):
@@ -143,7 +174,7 @@ async def train_pca(
     Args:
         bo_session_maker: Callable returning an async backoffice session.
         rag_service: RAG service holding the collection (storage backend-owned).
-        project_name: Name of the project.
+        project_id: Id of the backoffice project that owns the cache entries.
         collection_name: Name of the RAG collection.
         streamer: Optional streamer for progress reporting.
     """
@@ -153,16 +184,10 @@ async def train_pca(
             f"Starting PCA training for collection: {collection_name}"
         )
 
-    # 1. Find project_id by project_name
     async with bo_session_maker() as bo_session:
-        stmt = select(Project).where(Project.name == project_name)
-        result = await bo_session.execute(stmt)
-        project = result.scalar_one_or_none()
-        if not project:
-            raise ValueError(f"Project '{project_name}' not found.")
-        project_id = project.id
+        if await bo_session.get(Project, project_id) is None:
+            raise ValueError(f"Project '{project_id}' not found.")
 
-    # 2. Download embeddings to a temporary CSV
     with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as tmp:
         tmp_csv_path = tmp.name
 
@@ -176,7 +201,6 @@ async def train_pca(
             streamer=streamer,
         )
 
-        # 3. Fit PCA model
         if streamer:
             await streamer.stream_partial("Computing PCA model...")
         ipca = await compute_pca(
@@ -186,75 +210,26 @@ async def train_pca(
             streamer=streamer,
         )
 
-        # 4. Transform a sample of 500 points
+        # The first 500 points, projected, give the explorer its background.
         if streamer:
             await streamer.stream_partial("Generating sample points...")
-        sample_points = []
-        with open(tmp_csv_path, "r", encoding="utf-8") as csvfile:
-            reader = csv.reader(csvfile)
-            count = 0
-            batch = []
-            labels = []
-            for row in reader:
-                if not row:
-                    continue
-                labels.append(row[0])
-                batch.append([float(x) for x in row[1:]])
-                count += 1
-                if count >= 500:
-                    break
+        sample_points = _project_sample(tmp_csv_path, ipca, SAMPLE_SIZE)
 
-            if batch:
-                transformed = ipca.transform(np.array(batch))
-                for i in range(len(transformed)):
-                    sample_points.append(
-                        {
-                            "label": labels[i],
-                            "x": transformed[i][0],
-                            "y": transformed[i][1],
-                        }
-                    )
-
-        # 5. Store both the model and example points in project_cache table
         if streamer:
             await streamer.stream_partial("Storing results in cache...")
-        model_data = base64.b64encode(pickle.dumps(ipca)).decode("utf-8")
-        sample_data = json.dumps(sample_points)
-
         async with bo_session_maker() as bo_session:
-            # Upsert model
-            model_cache_name = f"pca_model_{collection_name}"
-            stmt = select(ProjectCache).where(
-                ProjectCache.project_id == project_id,
-                ProjectCache.name == model_cache_name,
+            await _upsert_cache(
+                bo_session,
+                project_id,
+                f"pca_model_{collection_name}",
+                base64.b64encode(pickle.dumps(ipca)).decode("utf-8"),
             )
-            res = await bo_session.execute(stmt)
-            cache_entry = res.scalar_one_or_none()
-            if cache_entry:
-                cache_entry.value = model_data
-            else:
-                bo_session.add(
-                    ProjectCache(
-                        project_id=project_id, name=model_cache_name, value=model_data
-                    )
-                )
-
-            # Upsert sample points
-            sample_cache_name = f"pca_sample_train_data_{collection_name}"
-            stmt = select(ProjectCache).where(
-                ProjectCache.project_id == project_id,
-                ProjectCache.name == sample_cache_name,
+            await _upsert_cache(
+                bo_session,
+                project_id,
+                f"pca_sample_train_data_{collection_name}",
+                json.dumps(sample_points),
             )
-            res = await bo_session.execute(stmt)
-            cache_entry = res.scalar_one_or_none()
-            if cache_entry:
-                cache_entry.value = sample_data
-            else:
-                bo_session.add(
-                    ProjectCache(
-                        project_id=project_id, name=sample_cache_name, value=sample_data
-                    )
-                )
             await bo_session.commit()
 
         if streamer:

@@ -33,10 +33,9 @@ class SessionSummary(BaseModel):
     session_id: UUID
     agent_id: UUID
     agent_name: str
-    #: The caller-supplied key for this conversation. Evaluation runs use a
-    #: structured ``eval:{suite}:{tag}:{case}:{repeat}`` prefix, so pasting one
-    #: into the filter lands on exactly the conversation a failing case
-    #: produced.
+    #: The caller-supplied key for this conversation. Evaluation runs record
+    #: ``eval:{tag}:{case}``, so pasting one into the filter lands on exactly
+    #: the conversation a failing case produced.
     external_id: str | None = None
     runs_count: int
     tasks_count: int
@@ -145,45 +144,29 @@ async def get_sessions_summary(
     ``search`` matches message content; ``external_id`` matches the session's
     caller-supplied key as a prefix. The two are separate because they answer
     different questions — "what did someone ask about" versus "show me this
-    exact conversation". Pasting ``eval:bakery-acceptance:pr-412:`` into the
-    latter shows every conversation that experiment produced.
+    exact conversation". Pasting ``eval:pr-412:`` into the latter shows every
+    conversation that experiment produced.
     """
-    # Get total count first
-    # We need to apply filters to count as well
-
-    # Subquery to identify sessions that match the search criteria in messages
-    session_filter_stmt = select(Session.id)
+    filters = []
     if agent_id:
-        session_filter_stmt = session_filter_stmt.where(Session.agent_id == agent_id)
+        filters.append(Session.agent_id == agent_id)
     if start_date:
-        session_filter_stmt = session_filter_stmt.where(
-            Session.created_at >= start_date
-        )
+        filters.append(Session.created_at >= start_date)
     if end_date:
-        session_filter_stmt = session_filter_stmt.where(Session.created_at <= end_date)
+        filters.append(Session.created_at <= end_date)
     if external_id:
-        session_filter_stmt = session_filter_stmt.where(
-            Session.external_id.ilike(f"{external_id}%")
-        )
-
+        filters.append(Session.external_id.ilike(f"{external_id}%"))
     if search:
-        # Search in ChatMessage content
-        search_subq = (
-            select(ChatMessage.session_id)
-            .where(ChatMessage.content.ilike(f"%{search}%"))
-            .distinct()
-            .subquery()
+        matching_sessions = select(ChatMessage.session_id).where(
+            ChatMessage.content.ilike(f"%{search}%")
         )
-        session_filter_stmt = session_filter_stmt.where(
-            Session.id.in_(select(search_subq.c.session_id))
-        )
+        filters.append(Session.id.in_(matching_sessions))
 
-    count_stmt = select(func.count()).select_from(session_filter_stmt.subquery())
+    count_stmt = select(func.count()).select_from(
+        select(Session.id).where(*filters).subquery()
+    )
+    total_count = (await session.execute(count_stmt)).scalar() or 0
 
-    total_count_res = await session.execute(count_stmt)
-    total_count = total_count_res.scalar() or 0
-
-    # Subquery for counts
     runs_count_sub = (
         select(Run.session_id, func.count(Run.id).label("count"))
         .group_by(Run.session_id)
@@ -215,14 +198,6 @@ async def get_sessions_summary(
         .subquery()
     )
 
-    # Subqueries for first and last messages
-    # Using window functions might be more efficient but let's try a common approach
-    # Or just fetch them in the main query if possible.
-    # Actually, let's use a more direct approach for first/last messages to keep it simple and readable.
-
-    # We'll use lateral joins or window functions if supported,
-    # but for compatibility let's try separate subqueries or a combined one.
-
     stmt = (
         select(
             Session.id.label("session_id"),
@@ -241,72 +216,62 @@ async def get_sessions_summary(
         .outerjoin(tasks_count_sub, Session.id == tasks_count_sub.c.session_id)
         .outerjoin(messages_count_sub, Session.id == messages_count_sub.c.session_id)
         .outerjoin(errors_count_sub, Session.id == errors_count_sub.c.session_id)
+        .where(*filters)
+        .order_by(desc(Session.updated_at))
+        .limit(limit)
+        .offset(offset)
     )
+    rows = (await session.execute(stmt)).all()
 
-    if agent_id:
-        stmt = stmt.where(Session.agent_id == agent_id)
-    if start_date:
-        stmt = stmt.where(Session.created_at >= start_date)
-    if end_date:
-        stmt = stmt.where(Session.created_at <= end_date)
-    if external_id:
-        stmt = stmt.where(Session.external_id.ilike(f"{external_id}%"))
-    if search:
-        # We already have search_subq defined earlier
-        stmt = stmt.where(Session.id.in_(select(search_subq.c.session_id)))
+    session_ids = [row.session_id for row in rows]
+    first_messages = await _boundary_messages(session, session_ids, asc)
+    last_messages = await _boundary_messages(session, session_ids, desc)
 
-    stmt = stmt.order_by(desc(Session.updated_at)).limit(limit).offset(offset)
-
-    result = await session.execute(stmt)
-    sessions_data = result.all()
-
-    summaries = []
-    for row in sessions_data:
-        # Fetch first and last message for each session
-        # This is N+1 but for a limited list it might be okay for now.
-        # Alternatively we can do it in one big query with window functions.
-
-        first_msg_stmt = (
-            select(ChatMessage.content)
-            .where(ChatMessage.session_id == row.session_id)
-            .order_by(ChatMessage.created_at.asc())
-            .limit(1)
+    summaries = [
+        SessionSummary(
+            session_id=row.session_id,
+            agent_id=row.agent_id,
+            agent_name=row.agent_name,
+            external_id=row.external_id,
+            runs_count=row.runs_count,
+            tasks_count=row.tasks_count,
+            messages_count=row.messages_count,
+            errors_count=row.errors_count,
+            first_message=first_messages.get(row.session_id),
+            last_message=last_messages.get(row.session_id),
+            created_at=row.created_at,
+            updated_at=row.updated_at,
         )
-        last_msg_stmt = (
-            select(ChatMessage.content)
-            .where(ChatMessage.session_id == row.session_id)
-            .order_by(ChatMessage.created_at.desc())
-            .limit(1)
-        )
-
-        first_msg = (await session.execute(first_msg_stmt)).scalar_one_or_none()
-        last_msg = (await session.execute(last_msg_stmt)).scalar_one_or_none()
-
-        summaries.append(
-            SessionSummary(
-                session_id=row.session_id,
-                agent_id=row.agent_id,
-                agent_name=row.agent_name,
-                external_id=row.external_id,
-                runs_count=row.runs_count,
-                tasks_count=row.tasks_count,
-                messages_count=row.messages_count,
-                errors_count=row.errors_count,
-                first_message=first_msg,
-                last_message=last_msg,
-                created_at=row.created_at,
-                updated_at=row.updated_at,
-            )
-        )
+        for row in rows
+    ]
 
     return {"sessions": summaries, "total_count": total_count}
+
+
+async def _boundary_messages(
+    session: AsyncSession, session_ids: list[UUID], direction
+) -> dict[UUID, str]:
+    """The oldest (``asc``) or newest (``desc``) message content per session.
+
+    One ``DISTINCT ON`` query for the whole page instead of one query per
+    session.
+    """
+    if not session_ids:
+        return {}
+    stmt = (
+        select(ChatMessage.session_id, ChatMessage.content)
+        .distinct(ChatMessage.session_id)
+        .where(ChatMessage.session_id.in_(session_ids))
+        .order_by(ChatMessage.session_id, direction(ChatMessage.created_at))
+    )
+    return dict((await session.execute(stmt)).all())
 
 
 async def get_session_details(
     session: AsyncSession,
     session_id: UUID,
 ) -> SessionDetails:
-    # Fetch messages
+    """The transcript, runs and tasks of one session."""
     msg_stmt = (
         select(ChatMessage)
         .where(ChatMessage.session_id == session_id)
@@ -317,7 +282,6 @@ async def get_session_details(
         ChatMessageSummary.model_validate(m) for m in msg_result.scalars().all()
     ]
 
-    # Fetch tasks count per run
     tasks_count_sub = (
         select(Task.run_id, func.count(Task.id).label("count"))
         .where(Task.session_id == session_id)
@@ -325,7 +289,6 @@ async def get_session_details(
         .subquery()
     )
 
-    # Fetch runs
     run_stmt = (
         select(
             Run.id,
@@ -344,7 +307,7 @@ async def get_session_details(
     run_result = await session.execute(run_stmt)
     runs = [RunSummary.model_validate(r) for r in run_result.all()]
 
-    # Fetch tasks. Ordered by run and then by ``seq``, which is the run's
+    # Ordered by run and then by ``seq``, which is the run's
     # actual execution order — ``created_at`` is approximate, and ties are
     # unordered once a `parallel` node has several branches writing at once.
     task_stmt = (

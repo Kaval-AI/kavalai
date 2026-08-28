@@ -1,3 +1,5 @@
+import uuid
+
 """
 Copyright 2026 OÜ KAVAL AI (registry code 17393877)
 
@@ -99,7 +101,7 @@ async def test_train_pca(
     await train_pca(
         bo_session_maker=bo_sm,
         rag_service=rag_service,
-        project_name=project_name,
+        project_id=project.id,
         collection_name=collection,
         streamer=value_streamer,
     )
@@ -166,11 +168,12 @@ async def test_train_pca_project_not_found(
         async def __aexit__(self, exc_type, exc_val, exc_tb):
             pass
 
-    with pytest.raises(ValueError, match="Project 'non_existent' not found"):
+    missing = uuid.uuid4()
+    with pytest.raises(ValueError, match=f"Project '{missing}' not found"):
         await train_pca(
             bo_session_maker=MockSessionMaker(backoffice_db),
             rag_service=MagicMock(),  # never reached: project lookup fails first
-            project_name="non_existent",
+            project_id=missing,
             collection_name="test",
         )
 

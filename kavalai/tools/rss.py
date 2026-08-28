@@ -30,8 +30,7 @@ from pydantic import BaseModel
 app = FastAPI(title="RSS-Parser", version="1.0.0")
 security = HTTPBasic()
 
-
-# These will be set from command line arguments
+# Environment defaults; ``main()`` overrides them from the command line.
 AUTH_USER = os.environ.get("RSS_AUTH_USER", "admin")
 AUTH_PASSWORD = os.environ.get("RSS_AUTH_PASSWORD", "password")
 
@@ -100,14 +99,20 @@ def get_rss_feed(
         feed = feedparser.parse(url)
         if not feed.entries:
             return Feed()
-        result = Feed(title=feed.feed.get("title"), url=url)
-        for entry in feed.entries[:max_results]:
-            title = entry.get("title", "No Title")
-            link = entry.get("link", "No Link")
-            summary = html.unescape(entry.get("summary", "No summary available."))
-
-            result.items.append(RssFeedItem(title=title, link=link, summary=summary))
-        return result
+        return Feed(
+            title=feed.feed.get("title"),
+            url=url,
+            items=[
+                RssFeedItem(
+                    title=entry.get("title", "No Title"),
+                    link=entry.get("link", "No Link"),
+                    summary=html.unescape(
+                        entry.get("summary", "No summary available.")
+                    ),
+                )
+                for entry in feed.entries[:max_results]
+            ],
+        )
     except Exception as e:
         raise Exception(f"Error parsing feed: {str(e)}")
 

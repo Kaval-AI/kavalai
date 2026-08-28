@@ -36,10 +36,12 @@ Modes:
 import argparse
 import asyncio
 import csv
-from loguru import logger
 import os
 import sys
-from typing import List, Optional, Generator, Dict, Any
+from itertools import islice
+from typing import Any, Dict, Generator, Iterable, List, Optional
+
+from loguru import logger
 
 from kavalai.llm_clients.registry import make_rag_service
 from kavalai.rag import BaseRagService, PostgresRagService
@@ -50,33 +52,24 @@ def csv_row_generator(
 ) -> Generator[Dict[str, str], None, None]:
     """Generator that yields rows from a CSV file up to a limit."""
     with open(csv_path, mode="r", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        count = 0
-        for row in reader:
-            if limit is not None and count >= limit:
-                break
-            yield row
-            count += 1
+        yield from islice(csv.DictReader(f), limit)
 
 
 def content_splitter_generator(
-    rows: Generator[Dict[str, str], None, None],
+    rows: Iterable[Dict[str, str]],
     index_fields: List[str],
     metadata_fields: List[str],
     source_field: str,
     mode: str,
-) -> Generator[Dict[str, any], None, None]:
+) -> Generator[Dict[str, Any], None, None]:
     """Generator that splits row content based on the mode."""
     for row in rows:
         row_meta = {col: val for col, val in row.items() if col in metadata_fields}
         source_id = row.get(source_field, "default")
 
         for field in index_fields:
-            if field not in row:
-                continue
-
-            content = row[field]
-            yield from _split_content(content, row_meta, source_id, mode)
+            if field in row:
+                yield from _split_content(row[field], row_meta, source_id, mode)
 
 
 def _split_content(
@@ -119,7 +112,7 @@ async def index_csv(
     *,
     csv_path: str,
     collection_name: str,
-    model: str = None,
+    model: Optional[str] = None,
     metadata_fields: List[str],
     index_fields: List[str],
     source_field: str,
@@ -139,55 +132,41 @@ async def index_csv(
 
     rows_processed = 0
     total_chunks = 0
-
     rows_gen = csv_row_generator(csv_path, limit)
 
-    while True:
-        batch_rows = []
-        try:
-            for _ in range(batch_size):
-                batch_rows.append(next(rows_gen))
-        except StopIteration:
-            pass
-
-        if not batch_rows:
-            break
-
-        texts = []
-        metas = []
-        source_ids = []
-
-        for entry in content_splitter_generator(
-            iter(batch_rows), index_fields, metadata_fields, source_field, mode
-        ):
-            texts.append(entry["text"])
-            metas.append(entry["meta"])
-            source_ids.append(entry["source_id"])
-
-        if texts:
-            if replace:
-                # Collect unique source_ids in this batch to delete them
-                unique_source_ids = list(set(source_ids))
-                await rag_service.delete_by_source_id(
-                    collection_name, unique_source_ids
-                )
-
-            rows_processed += len(batch_rows)
-            total_chunks += len(texts)
-            logger.info(
-                f"Indexing batch of {len(batch_rows)} rows generating {len(texts)} chunks (Total rows: {rows_processed}, total chunks: {total_chunks})..."
+    while batch_rows := list(islice(rows_gen, batch_size)):
+        entries = list(
+            content_splitter_generator(
+                batch_rows, index_fields, metadata_fields, source_field, mode
             )
-            await rag_service.index_batch(
-                texts=texts,
-                metadata_list=metas,
-                collection_name=collection_name,
-                source_ids=source_ids,
+        )
+        rows_processed += len(batch_rows)
+        if not entries:
+            continue
+
+        texts = [e["text"] for e in entries]
+        metas = [e["meta"] for e in entries]
+        source_ids = [e["source_id"] for e in entries]
+        if replace:
+            await rag_service.delete_by_source_id(
+                collection_name, list(set(source_ids))
             )
-        else:
-            rows_processed += len(batch_rows)
+
+        total_chunks += len(texts)
+        logger.info(
+            f"Indexing batch of {len(batch_rows)} rows generating {len(texts)} chunks "
+            f"(Total rows: {rows_processed}, total chunks: {total_chunks})..."
+        )
+        await rag_service.index_batch(
+            texts=texts,
+            metadata_list=metas,
+            collection_name=collection_name,
+            source_ids=source_ids,
+        )
 
     logger.info(
-        f"Finished indexing {rows_processed} rows ({total_chunks} chunks) into collection '{collection_name}'."
+        f"Finished indexing {rows_processed} rows ({total_chunks} chunks) "
+        f"into collection '{collection_name}'."
     )
 
 

@@ -48,7 +48,10 @@ async def test_projects_rag_query_with_source_ids(client):
 
         mock_bo_session = AsyncMock()
         mock_get_bo_session.return_value.__aenter__.return_value = mock_bo_session
-        mock_bo_session.execute.return_value.scalar_one_or_none.return_value = None
+        # A synchronous result object: no PCA model is cached for the collection.
+        mock_bo_session.execute.return_value = MagicMock(
+            scalar_one_or_none=MagicMock(return_value=None)
+        )
 
         mock_rag_service_instance = AsyncMock()
         mock_rag_service_class.return_value = mock_rag_service_instance

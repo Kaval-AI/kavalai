@@ -16,21 +16,19 @@ limitations under the License.
 
 from typing import List, Dict, Any, Optional
 from uuid import UUID
-from sqlalchemy import select, update as sa_update, delete as sa_delete
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from fastapi import HTTPException, status
+from loguru import logger
+from sqlalchemy import func, select, text, update as sa_update, delete as sa_delete
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from kavalai.backoffice import db
-from kavalai.crud import insert, get_one, update, delete
+from kavalai.crud import insert, update, delete
+from kavalai.db import db_manager
 
 
 class ProjectService:
     def __init__(self, session_maker: async_sessionmaker[AsyncSession]):
         self.session_maker = session_maker
-
-    async def get_project(self, project_id: UUID) -> Optional[db.Project]:
-        async with self.session_maker() as session:
-            return await get_one(session, db.Project, project_id)
 
     async def get_user_projects(self, user_id: UUID) -> List[Dict[str, Any]]:
         async with self.session_maker() as session:
@@ -39,7 +37,7 @@ class ProjectService:
     async def create_project(self, data: Dict[str, Any], owner_id: UUID) -> db.Project:
         async with self.session_maker() as session:
             new_project = await insert(session, db.Project, data)
-            # Automatically make the creator the owner in ProjectMembership.
+            # The creator is the project's first owner.
             membership_data = {
                 "user_id": owner_id,
                 "project_id": new_project.id,
@@ -81,24 +79,21 @@ class ProjectService:
         )
         async with self.session_maker() as session:
             result = await session.execute(stmt)
-            members = []
-            for user_obj, role in result.all():
-                members.append(
-                    {
-                        "id": str(user_obj.id),
-                        "name": user_obj.name,
-                        "email": user_obj.email,
-                        "picture": user_obj.picture,
-                        "role": role.value,
-                    }
-                )
-            return members
+            return [
+                {
+                    "id": str(user.id),
+                    "name": user.name,
+                    "email": user.email,
+                    "picture": user.picture,
+                    "role": role.value,
+                }
+                for user, role in result.all()
+            ]
 
     async def add_member(
         self, project_id: UUID, user_id: UUID, role: db.ProjectRole
     ) -> None:
         async with self.session_maker() as session:
-            # Check if already a member
             if await db.is_member(session, user_id, project_id):
                 raise HTTPException(status_code=400, detail="User is already a member.")
 
@@ -109,36 +104,46 @@ class ProjectService:
             }
             await insert(session, db.ProjectMembership, membership_data)
 
+    @staticmethod
+    async def _get_membership(
+        session: AsyncSession, project_id: UUID, user_id: UUID
+    ) -> db.ProjectMembership:
+        stmt = select(db.ProjectMembership).where(
+            db.ProjectMembership.project_id == project_id,
+            db.ProjectMembership.user_id == user_id,
+        )
+        membership = (await session.execute(stmt)).scalars().first()
+        if not membership:
+            raise HTTPException(status_code=404, detail="Membership not found.")
+        return membership
+
+    @staticmethod
+    async def _assert_not_last_owner(
+        session: AsyncSession, membership: db.ProjectMembership, detail: str
+    ) -> None:
+        """Refuse to strip ownership from a project's only owner."""
+        if membership.role != db.ProjectRole.owner:
+            return
+        stmt = (
+            select(func.count())
+            .select_from(db.ProjectMembership)
+            .where(
+                db.ProjectMembership.project_id == membership.project_id,
+                db.ProjectMembership.role == db.ProjectRole.owner,
+            )
+        )
+        if (await session.execute(stmt)).scalar_one() <= 1:
+            raise HTTPException(status_code=400, detail=detail)
+
     async def update_member_role(
         self, project_id: UUID, user_id: UUID, new_role: db.ProjectRole
     ) -> None:
         async with self.session_maker() as session:
-            # Check if membership exists
-            stmt = select(db.ProjectMembership).where(
-                db.ProjectMembership.project_id == project_id,
-                db.ProjectMembership.user_id == user_id,
-            )
-            result = await session.execute(stmt)
-            current_membership = result.scalars().first()
-            if not current_membership:
-                raise HTTPException(status_code=404, detail="Membership not found.")
-
-            if (
-                current_membership.role == db.ProjectRole.owner
-                and new_role != db.ProjectRole.owner
-            ):
-                # Check if this is the last owner
-                owner_stmt = select(db.ProjectMembership).where(
-                    db.ProjectMembership.project_id == project_id,
-                    db.ProjectMembership.role == db.ProjectRole.owner,
+            membership = await self._get_membership(session, project_id, user_id)
+            if new_role != db.ProjectRole.owner:
+                await self._assert_not_last_owner(
+                    session, membership, "Cannot demote the last owner of the project."
                 )
-                owners_result = await session.execute(owner_stmt)
-                owners = owners_result.scalars().all()
-                if len(owners) <= 1:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Cannot demote the last owner of the project.",
-                    )
 
             stmt = (
                 sa_update(db.ProjectMembership)
@@ -153,29 +158,10 @@ class ProjectService:
 
     async def remove_member(self, project_id: UUID, user_id: UUID) -> None:
         async with self.session_maker() as session:
-            # Check if membership exists
-            stmt = select(db.ProjectMembership).where(
-                db.ProjectMembership.project_id == project_id,
-                db.ProjectMembership.user_id == user_id,
+            membership = await self._get_membership(session, project_id, user_id)
+            await self._assert_not_last_owner(
+                session, membership, "Cannot remove the last owner of the project."
             )
-            result = await session.execute(stmt)
-            current_membership = result.scalars().first()
-            if not current_membership:
-                raise HTTPException(status_code=404, detail="Membership not found.")
-
-            if current_membership.role == db.ProjectRole.owner:
-                # Check if this is the last owner
-                owner_stmt = select(db.ProjectMembership).where(
-                    db.ProjectMembership.project_id == project_id,
-                    db.ProjectMembership.role == db.ProjectRole.owner,
-                )
-                owners_result = await session.execute(owner_stmt)
-                owners = owners_result.scalars().all()
-                if len(owners) <= 1:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Cannot remove the last owner of the project.",
-                    )
 
             stmt = sa_delete(db.ProjectMembership).where(
                 db.ProjectMembership.project_id == project_id,
@@ -189,13 +175,10 @@ class ProjectService:
             await self._clear_active_project(session, project_id, user_id)
 
     async def test_connection(self, project: db.Project) -> Dict[str, str]:
-        from kavalai.db import db_manager
-        from sqlalchemy import text
-        from loguru import logger
-
         try:
             logger.info(
-                f"Testing connection to project database: host={project.db_host}, port={project.db_port}, db={project.db_name}, user={project.db_user}"
+                f"Testing connection to project database: host={project.db_host}, "
+                f"port={project.db_port}, db={project.db_name}, user={project.db_user}"
             )
             project_session_maker = db_manager.get_sessionmaker(
                 user=project.db_user,

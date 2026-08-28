@@ -24,7 +24,6 @@ from pydantic import BaseModel
 from kavalai.functionkernel import pythontool
 
 
-# Constants
 DUCKDUCKGO_HTML_ENDPOINT = "https://duckduckgo.com/html/"
 
 # CSS extraction schema for the DuckDuckGo HTML result list.

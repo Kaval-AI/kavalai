@@ -101,7 +101,7 @@ class Project(Base):
     name: Mapped[str] = mapped_column(TEXT, nullable=False)
     description: Mapped[str | None] = mapped_column(TEXT)
 
-    # New Database Connection Columns
+    # Connection to the project's own agent database.
     db_host: Mapped[str | None] = mapped_column(TEXT)
     db_port: Mapped[int | None] = mapped_column(Integer, default=5432)
     db_user: Mapped[str | None] = mapped_column(TEXT)
@@ -242,25 +242,20 @@ async def get_user_projects(db: AsyncSession, user_id: UUID) -> list[dict]:
 
     result = await db.execute(stmt)
 
-    projects_with_roles = []
-    for row in result.all():
-        project_obj: Project = row[0]
-        role: ProjectRole = row[1]
-
-        project_data = {
-            "id": str(project_obj.id),
-            "name": project_obj.name,
-            "description": project_obj.description,
-            "db_host": project_obj.db_host,
-            "db_port": project_obj.db_port,
-            "db_user": project_obj.db_user,
-            "db_name": project_obj.db_name,
-            "db_schema": project_obj.db_schema,
-            "db_password": project_obj.db_password,
-            "created_at": project_obj.created_at.isoformat(),
-            "updated_at": project_obj.updated_at.isoformat(),
+    return [
+        {
+            "id": str(project.id),
+            "name": project.name,
+            "description": project.description,
+            "db_host": project.db_host,
+            "db_port": project.db_port,
+            "db_user": project.db_user,
+            "db_name": project.db_name,
+            "db_schema": project.db_schema,
+            "db_password": project.db_password,
+            "created_at": project.created_at.isoformat(),
+            "updated_at": project.updated_at.isoformat(),
             "role": role.value,
         }
-        projects_with_roles.append(project_data)
-
-    return projects_with_roles
+        for project, role in result.all()
+    ]

@@ -15,6 +15,7 @@ limitations under the License.
 """
 
 import copy
+from typing import Any
 
 
 class OpenApiSpecParser:
@@ -40,26 +41,19 @@ class OpenApiSpecParser:
 
         return current
 
-    def _resolve_all(self, data: any, seen_refs=None) -> any:
-        if seen_refs is None:
-            seen_refs = set()
-
+    def _resolve_all(self, data: Any, seen_refs: frozenset = frozenset()) -> Any:
+        """Inline every local ``$ref``; a circular reference is left as is."""
         if isinstance(data, dict):
             if "$ref" in data:
                 ref = data["$ref"]
                 if ref in seen_refs:
-                    return data  # Stop recursion on circularity
-
-                # Update seen_refs for this branch
-                new_seen = seen_refs | {ref}
-                resolved_data = self._get_referenced_data(ref)
-                return self._resolve_all(resolved_data, new_seen)
-
-            # Recurse into dictionary values
+                    return data
+                return self._resolve_all(
+                    self._get_referenced_data(ref), seen_refs | {ref}
+                )
             return {k: self._resolve_all(v, seen_refs) for k, v in data.items()}
 
-        elif isinstance(data, list):
-            # Recurse into list items
+        if isinstance(data, list):
             return [self._resolve_all(item, seen_refs) for item in data]
 
         return data

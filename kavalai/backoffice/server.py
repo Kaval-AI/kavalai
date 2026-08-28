@@ -14,32 +14,38 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-from loguru import logger
+import asyncio
+import base64
+import json
 import os
+import pickle
+from contextlib import asynccontextmanager
 from datetime import datetime
 from uuid import UUID
 
+import numpy as np
 import uvicorn
 from authlib.integrations.starlette_client import OAuth
-from fastapi import FastAPI, Request, HTTPException, status, Body
+from fastapi import Body, FastAPI, HTTPException, Request, status
+from loguru import logger
 from sqlalchemy.exc import SQLAlchemyError
-from kavalai.crud import insert, select, delete, update, get_one, get_all
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sse_starlette.sse import EventSourceResponse
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import JSONResponse, RedirectResponse, Response
-from kavalai.backoffice import db, sessions as agent_sessions
-from kavalai.backoffice.db import is_owner, is_member
-from kavalai.backoffice.project_service import ProjectService
-from kavalai.agent_service import AgentService
-from kavalai.db import db_manager, Agent
-from kavalai import stats as agent_stats
-from kavalai.rag import PostgresRagService
-from kavalai.llm_clients.streamer import StreamContent, Streamer
-from kavalai.backoffice.embedding_projector import train_pca
-from sse_starlette.sse import EventSourceResponse
-from contextlib import asynccontextmanager
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
-# Set up the app logger
-logger.propagate = True
+from kavalai import stats as agent_stats
+from kavalai.agent_service import AgentService
+from kavalai.backoffice import db
+from kavalai.backoffice import sessions as agent_sessions
+from kavalai.backoffice.db import is_member, is_owner
+from kavalai.backoffice.embedding_projector import train_pca
+from kavalai.backoffice.project_service import ProjectService
+from kavalai.crud import delete, get_all, get_one, insert, select, update
+from kavalai.db import Agent, db_manager
+from kavalai.llm_clients.streamer import StreamContent, Streamer
+from kavalai.rag import PostgresRagService
 
 app = FastAPI()
 
@@ -65,13 +71,9 @@ async def get_backoffice_session():
         )
 
 
-@asynccontextmanager
-async def get_project_session(project: db.Project):
-    """
-    Context manager to provide a session for a specific project's agent database.
-    Handles connection errors gracefully.
-    """
-    sessionmaker = db_manager.get_sessionmaker(
+def project_sessionmaker(project: db.Project) -> async_sessionmaker[AsyncSession]:
+    """A sessionmaker for the agent database the project points at."""
+    return db_manager.get_sessionmaker(
         user=project.db_user,
         password=project.db_password,
         host=project.db_host,
@@ -79,6 +81,15 @@ async def get_project_session(project: db.Project):
         db_name=project.db_name,
         schema=project.db_schema,
     )
+
+
+@asynccontextmanager
+async def get_project_session(project: db.Project):
+    """
+    Context manager to provide a session for a specific project's agent database.
+    Handles connection errors gracefully.
+    """
+    sessionmaker = project_sessionmaker(project)
     try:
         async with sessionmaker() as session:
             yield session
@@ -93,12 +104,9 @@ async def get_project_session(project: db.Project):
         )
 
 
-# OAuth setup
 oauth = OAuth()
 
-# Enable forwarding for proxy/Docker
-from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
-
+# Trust X-Forwarded-* headers from the reverse proxy / Docker network.
 app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
 
 oauth.register(
@@ -109,7 +117,6 @@ oauth.register(
     client_kwargs={"scope": "openid email profile"},
 )
 
-# Add SessionMiddleware with a fixed secret key and appropriate cookie settings
 app.add_middleware(
     SessionMiddleware,
     secret_key=os.getenv("SESSION_SECRET_KEY", "fallback-secret-key-for-dev-only"),
@@ -122,13 +129,9 @@ app.add_middleware(
 
 async def authenticate_and_sync_user(user_info: dict):
     async with get_backoffice_session() as session:
-        # Check if user exists in the database.
         email = user_info.get("email")
         stmt = select(db.User).where(db.User.email == email)
-        result = await session.execute(stmt)
-        user = result.scalars().first()
-
-        # If not, raise exception.
+        user = (await session.execute(stmt)).scalars().first()
         if not user:
             logger.warning(f"Unauthorized login attempt: {email}")
             raise HTTPException(
@@ -171,9 +174,14 @@ async def assert_is_owner(session: db.AsyncSession, request: Request, project_id
     if not await is_owner(
         session, UUID(request.session.get("user_info")["id"]), project_id
     ):
-        raise HTTPException(
-            status_code=403, detail="Only administrators can create new projects."
-        )
+        raise HTTPException(status_code=403, detail="Only project owners can do this.")
+
+
+async def assert_is_admin_or_owner(
+    session: db.AsyncSession, request: Request, project_id: UUID
+):
+    if not request.session.get("user_info").get("is_admin"):
+        await assert_is_owner(session, request, project_id)
 
 
 async def assert_is_member(
@@ -211,8 +219,7 @@ async def logout(request: Request):
 
 @app.get("/user/get_details")
 async def user_details(request: Request):
-    if not is_logged_in(request):
-        raise HTTPException(status_code=401, detail="Unauthorized.")
+    assert_logged_in(request)
     user_info = request.session.get("user_info")
 
     # The cookie may still carry an active project the user can no longer
@@ -253,8 +260,8 @@ async def google_auth_callback(request: Request):
             del request.session["_google_authlib_state_"]
 
         return RedirectResponse(url=os.environ["FRONTEND_URL"])
-    except HTTPException as e:
-        raise e
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Auth error: {e}")
         # If it's a mismatching state error, it might be due to stale session
@@ -268,14 +275,9 @@ async def set_active_project(project_id: UUID, request: Request):
     assert_logged_in(request)
     user_id = UUID(request.session.get("user_info")["id"])
     async with get_backoffice_session() as session:
-        if not await db.is_member(session, user_id, project_id):
-            raise HTTPException(
-                status_code=403, detail="Must be a member of the project."
-            )
-
+        await assert_is_member(session, request, project_id)
         await update(session, db.User, user_id, {"active_project_id": project_id})
 
-        # Update session
         user_info = request.session.get("user_info", {})
         user_info["active_project_id"] = str(project_id)
         request.session["user_info"] = user_info
@@ -407,10 +409,7 @@ async def agents_get_all(project_id: UUID, request: Request):
     project = await get_project_and_assert_access(request, project_id)
 
     async with get_project_session(project) as session:
-        stmt = select(Agent)
-        result = await session.execute(stmt)
-        agents = result.scalars().all()
-        return agents
+        return await get_all(session, Agent)
 
 
 @app.get("/agents/stats/{project_id}")
@@ -452,9 +451,8 @@ async def agents_get_sessions(
     """Fetch session summaries for a specific project.
 
     ``external_id`` matches the session's caller-supplied key as a prefix.
-    Evaluation runs tag their sessions ``eval:{suite}:{tag}:{case}:{repeat}``,
-    so this is the click-through from a failing case in a result file to the
-    conversation that produced it.
+    Evaluation runs record their sessions as ``eval:{tag}:{case}``, so this is
+    the click-through from a failing case to the conversation that produced it.
     """
     assert_logged_in(request)
     project = await get_project_and_assert_access(request, project_id)
@@ -498,19 +496,9 @@ async def projects_get_llm_call_stats(
     assert_logged_in(request)
     project = await get_project_and_assert_access(request, project_id)
 
-    def sessionmaker_factory():
-        return db_manager.get_sessionmaker(
-            user=project.db_user,
-            password=project.db_password,
-            host=project.db_host,
-            port=project.db_port,
-            db_name=project.db_name,
-            schema=project.db_schema,
-        )
-
-    # Since AgentService manages its own sessions, we wrap the whole call to catch connection errors
+    # AgentService opens its own sessions, so connection errors surface here.
     try:
-        service = AgentService(sessionmaker_factory())
+        service = AgentService(project_sessionmaker(project))
         return await service.get_model_call_stats(
             call_type=call_type, limit=limit, offset=offset
         )
@@ -520,6 +508,92 @@ async def projects_get_llm_call_stats(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Database is not connected for project '{project.name}'. Please check your database settings.",
         )
+
+
+def _reuse_session(session: AsyncSession):
+    """A session factory that hands out one already-open session."""
+
+    @asynccontextmanager
+    async def factory():
+        yield session
+
+    return factory
+
+
+async def _cache_value(
+    bo_session: db.AsyncSession, project_id: UUID, name: str
+) -> str | None:
+    stmt = select(db.ProjectCache).where(
+        db.ProjectCache.project_id == project_id, db.ProjectCache.name == name
+    )
+    entry = (await bo_session.execute(stmt)).scalar_one_or_none()
+    return entry.value if entry else None
+
+
+async def _pca_projection(
+    project_id: UUID,
+    collection_name: str,
+    rag_service: PostgresRagService,
+    text: str,
+    normalizer,
+    results,
+) -> dict | None:
+    """Project the query and its results onto the collection's trained PCA plane.
+
+    Returns ``None`` when no model has been trained for the collection or the
+    projection fails — the query results are still worth returning on their
+    own.
+    """
+    async with get_backoffice_session() as bo_session:
+        model_data = await _cache_value(
+            bo_session, project_id, f"pca_model_{collection_name}"
+        )
+        if model_data is None:
+            return None
+        try:
+            ipca = pickle.loads(base64.b64decode(model_data))  # nosec B301
+
+            embeddings, _ = await rag_service.embedding_client.compute_embeddings(
+                texts=[text], normalizer=normalizer
+            )
+            query_point = ipca.transform(np.array(embeddings))[0]
+
+            # RagServiceResult carries no embedding; fetch them through the
+            # service, which owns the storage.
+            id_to_embedding = await rag_service.get_embeddings_by_ids(
+                collection_name, [r.id for r in results]
+            )
+            result_points = []
+            for r in results:
+                emb = id_to_embedding.get(r.id)
+                if emb is None:
+                    continue
+                try:
+                    pt = ipca.transform(np.array([emb]))[0]
+                except Exception as e:
+                    logger.error(
+                        f"Failed to transform embedding for result {r.id}: {e}"
+                    )
+                    continue
+                result_points.append(
+                    {"label": r.content[:100], "x": float(pt[0]), "y": float(pt[1])}
+                )
+
+            sample_data = await _cache_value(
+                bo_session, project_id, f"pca_sample_train_data_{collection_name}"
+            )
+            return {
+                "query": {
+                    "label": text,
+                    "x": float(query_point[0]),
+                    "y": float(query_point[1]),
+                },
+                "results": result_points,
+                "samples": json.loads(sample_data) if sample_data else [],
+            }
+        except Exception as e:
+            logger.error(f"Failed to process PCA data: {e}")
+            return None
 
 
 @app.post("/projects/{project_id}/rag/query")
@@ -535,17 +609,11 @@ async def projects_rag_query(
     model = query_data.get("model")
     text = query_data.get("text")
     collection_name = query_data.get("collection_name")
-    top_k = query_data.get("top_k", 5)
-    source_ids = query_data.get("source_ids")
-    keep_best = query_data.get("keep_best", False)
-    normalizer_yaml = query_data.get("normalizer_yaml")
-
     if not model or not text:
         raise HTTPException(status_code=400, detail="model and text are required")
 
-    # Connect to the project database
     normalizer = None
-    if normalizer_yaml:
+    if normalizer_yaml := query_data.get("normalizer_yaml"):
         from kavalai.normalizer import Normalizer
 
         try:
@@ -556,107 +624,25 @@ async def projects_rag_query(
             )
 
     async with get_project_session(project) as session:
-        from contextlib import asynccontextmanager
-
-        @asynccontextmanager
-        async def session_factory():
-            yield session
-
         rag_service = PostgresRagService(
-            session_factory, model, normalizer=normalizer, schema=project.db_schema
+            _reuse_session(session),
+            model,
+            normalizer=normalizer,
+            schema=project.db_schema,
         )
         results = await rag_service.query(
             text=text,
-            top_k=top_k,
+            top_k=query_data.get("top_k", 5),
             collection_name=collection_name,
-            source_ids=source_ids,
-            keep_best=keep_best,
+            source_ids=query_data.get("source_ids"),
+            keep_best=query_data.get("keep_best", False),
         )
 
-        # Check for precomputed PCA model
         pca_data = None
         if collection_name:
-            from kavalai.backoffice.db import ProjectCache
-            import pickle
-            import base64
-            import json
-            import numpy as np
-
-            model_cache_name = f"pca_model_{collection_name}"
-            stmt = select(ProjectCache).where(
-                ProjectCache.project_id == project_id,
-                ProjectCache.name == model_cache_name,
+            pca_data = await _pca_projection(
+                project_id, collection_name, rag_service, text, normalizer, results
             )
-            async with get_backoffice_session() as bo_session:
-                res = await bo_session.execute(stmt)
-                cache_entry = res.scalar_one_or_none()
-
-                if cache_entry:
-                    try:
-                        ipca = pickle.loads(base64.b64decode(cache_entry.value))  # nosec B301
-
-                        # Get query embedding
-                        (
-                            embeddings,
-                            _,
-                        ) = await rag_service.embedding_client.compute_embeddings(
-                            texts=[text], normalizer=normalizer
-                        )
-                        query_point = ipca.transform(np.array(embeddings))[0]
-                        query_point = [float(x) for x in query_point]
-
-                        # RagServiceResult doesn't include embeddings; fetch
-                        # them through the service (storage is backend-owned).
-                        result_ids = [r.id for r in results]
-                        logger.debug(
-                            f"Fetching embeddings for result IDs: {result_ids}"
-                        )
-                        id_to_embedding = await rag_service.get_embeddings_by_ids(
-                            collection_name, result_ids
-                        )
-                        logger.debug(f"Found {len(id_to_embedding)} embeddings")
-
-                        result_points = []
-                        for r in results:
-                            emb = id_to_embedding.get(r.id)
-                            if emb is not None:
-                                try:
-                                    pt = ipca.transform(np.array([emb]))[0]
-                                    result_points.append(
-                                        {
-                                            "label": r.content[:100],
-                                            "x": float(pt[0]),
-                                            "y": float(pt[1]),
-                                        }
-                                    )
-                                except Exception as e:
-                                    logger.error(
-                                        f"Failed to transform embedding for result {r.id}: {e}"
-                                    )
-
-                        # Get sample points
-                        sample_cache_name = f"pca_sample_train_data_{collection_name}"
-                        stmt_sample = select(ProjectCache).where(
-                            ProjectCache.project_id == project_id,
-                            ProjectCache.name == sample_cache_name,
-                        )
-                        res_sample = await bo_session.execute(stmt_sample)
-                        sample_entry = res_sample.scalar_one_or_none()
-                        sample_points = (
-                            json.loads(sample_entry.value) if sample_entry else []
-                        )
-
-                        pca_data = {
-                            "query": {
-                                "label": text,
-                                "x": query_point[0],
-                                "y": query_point[1],
-                            },
-                            "results": result_points,
-                            "samples": sample_points,
-                        }
-                    except Exception as e:
-                        logger.error(f"Failed to process PCA data: {e}")
 
         return {"results": results, "pca_data": pca_data}
 
@@ -667,17 +653,10 @@ async def projects_rag_stats(project_id: UUID, request: Request):
     assert_logged_in(request)
     project = await get_project_and_assert_access(request, project_id)
 
-    # Connect to the project database; stats come from the RAG backend's
-    # collection registry (no embedding model needed).
+    # Stats come from the collection registry, so no embedding model is needed.
     async with get_project_session(project) as session:
-        from contextlib import asynccontextmanager
-
-        @asynccontextmanager
-        async def session_factory():
-            yield session
-
         rag_service = PostgresRagService(
-            session_factory, model=None, schema=project.db_schema
+            _reuse_session(session), model=None, schema=project.db_schema
         )
         return await rag_service.get_stats()
 
@@ -687,8 +666,6 @@ async def projects_train_pca(project_id: UUID, collection_name: str, request: Re
     """Trigger PCA training for a specific project and collection."""
     assert_logged_in(request)
     project = await get_project_and_assert_access(request, project_id)
-
-    import asyncio
 
     streamer = Streamer(stream_delta=True)
 
@@ -703,7 +680,7 @@ async def projects_train_pca(project_id: UUID, collection_name: str, request: Re
             await train_pca(
                 bo_session_maker=get_backoffice_session,
                 rag_service=rag_service,
-                project_name=project.name,
+                project_id=project.id,
                 collection_name=collection_name,
                 streamer=streamer.get_value_streamer("pca_streamer"),
             )
@@ -762,10 +739,7 @@ async def projects_add_member(
     role = db.ProjectRole(data["role"])
 
     async with get_backoffice_session() as session:
-        # Only owner or admin can add members
-        is_admin = request.session.get("user_info").get("is_admin")
-        if not is_admin:
-            await assert_is_owner(session, request, project_id)
+        await assert_is_admin_or_owner(session, request, project_id)
 
     service = ProjectService(db.AsyncBackofficeSession)
     await service.add_member(project_id, user_id, role)
@@ -781,9 +755,7 @@ async def projects_update_member(
     new_role = db.ProjectRole(data["role"])
 
     async with get_backoffice_session() as session:
-        is_admin = request.session.get("user_info").get("is_admin")
-        if not is_admin:
-            await assert_is_owner(session, request, project_id)
+        await assert_is_admin_or_owner(session, request, project_id)
 
     service = ProjectService(db.AsyncBackofficeSession)
     await service.update_member_role(project_id, user_id, new_role)
@@ -794,9 +766,7 @@ async def projects_update_member(
 async def projects_remove_member(project_id: UUID, user_id: UUID, request: Request):
     assert_logged_in(request)
     async with get_backoffice_session() as session:
-        is_admin = request.session.get("user_info").get("is_admin")
-        if not is_admin:
-            await assert_is_owner(session, request, project_id)
+        await assert_is_admin_or_owner(session, request, project_id)
 
     service = ProjectService(db.AsyncBackofficeSession)
     await service.remove_member(project_id, user_id)
