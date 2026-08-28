@@ -122,26 +122,14 @@ notebook that walks through the same loop in depth.
 For instance, let's define some "facts" about a fictional Green Village
 ```python
 FACTS = """\
-President of Green Village is Thomas Cook (born 12.04.1994).
 Green Village has 104 residents.
 Green Village was founded on 03.09.1887 by shepherd Elias Thornbury.
-The tallest building in Green Village is the Old Grain Tower at 23 meters.
-Green Village's official flower is the marsh marigold.
-The village bakery, run by Greta Lindqvist (born 27.11.1968), sells exactly 340 loaves every week.
-Green Village has one school with 14 pupils and 2 teachers.
-The annual Turnip Festival takes place every year on the third Saturday of October.
-Green Village's fire brigade consists of 7 volunteers and one dalmatian named Pepper.
-The village pond, Lake Miller, is 1.2 meters deep at its deepest point.
+President of Green Village is Thomas Cook (born 12.04.1994).
 Green Village's oldest resident is Agnes Whitlow (born 02.06.1929).
-The village has 3 streets: Main Road, Willow Lane, and Cobbler's Path.
+The annual Turnip Festival takes place every year on the third Saturday of October.
+The village bakery, run by Greta Lindqvist (born 27.11.1968), sells exactly 340 loaves every week.
 Green Village's football team, FC Green Rovers, has won the regional cup twice (1997 and 2013).
-The local church bell weighs 412 kilograms and was cast in 1901.
-Green Village produces 8 tons of honey per year from its 26 beehives.
-The village library owns 1,847 books and is open on Tuesdays and Fridays.
-Green Village's mayor before Thomas Cook was Henrietta Voss (served 2009-2021).
-The speed limit everywhere in Green Village is 30 km/h.
 Green Village's only pub, The Rusty Anchor, has been operating since 1923.
-Every resident of Green Village receives a free pumpkin on their birthday, a tradition started in 1954.
 """.splitlines()
 ```
 
