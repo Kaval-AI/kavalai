@@ -2,7 +2,7 @@
 
 They never compute a real embedding: the RAG service is a stand-in that
 records what it was handed. What is worth testing here is the part this
-example owns --- which columns become the text, which become metadata, how
+example owns — which columns become the text, which become metadata, how
 rows are filtered and batched, and which backend a given ``--index`` selects.
 """
 

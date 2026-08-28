@@ -18,17 +18,15 @@ Hide the other fields and see only the conversation::
 
     python -m examples.chat_client.chat_client --extra-width 0
 
-For example, against the Green Village chatbot (start it first; see
-``examples/green_village/README.md``)::
+For example, against the Green Village chatbot, which listens on port
+25000 (start it first)::
 
-    KAVALAI_AGENT_WORKFLOW_PATH=examples/green_village/chatbot.yaml \
-    KAVALAI_AGENT_SETUP_MODULE=examples/green_village/eval_setup.py \
-        uv run --env-file .env python -m kavalai.server
-    python -m examples.chat_client.chat_client
+    uv run --env-file .env \
+        python -m examples.green_village.green_village_support_in_memory
+    python -m examples.chat_client.chat_client --base-url http://localhost:25000
 
     you: How deep is Lake Miller?
     bot: Lake Miller is 1.2 metres deep at its deepest point.
-         {"used_ids": ["fact-09"]}
 
 Works with every agent whose request carries a ``user_message`` field and whose
 reply carries an ``agent_response`` field — the shape shared by the chat

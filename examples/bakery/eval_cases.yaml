@@ -1,4 +1,4 @@
-# dotenv run kavalai-eval examples/bakery/eval_cases.yaml --port 25001 --tag baseline
+# dotenv run kavalai-eval examples/bakery/eval_cases.yaml --port 25100 --tag baseline
 #
 # Most cases are `simple`: the assistant's `status`, `order_id` and `missing`
 # are decided by Python, not written by a model, so the outcome of a run is a
@@ -66,8 +66,6 @@ cases:
       missing: {equals: []}
       order_id: {regex: '^ord-\d+$'}
 
-  # "sourdough bread" is not what the catalogue calls it. The alias table
-  # resolves it, and the stored row says "sourdough loaf".
   # "sourdough bread" is not a catalogue key. Mapping the customer's words
   # onto `sourdough_loaf` is the parse step's job -- there is no alias table
   # in Python to fall back on.

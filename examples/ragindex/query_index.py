@@ -16,7 +16,7 @@ Query the Postgres collection the backoffice RAG explorer shows::
         --index postgres --collection songs --top-k 5
 
 Similarity is cosine, **higher is better**, and identical across backends for
-the same model --- ``1.0`` is a perfect match.
+the same model — ``1.0`` is a perfect match.
 """
 
 import argparse

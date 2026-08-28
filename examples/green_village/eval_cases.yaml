@@ -1,4 +1,4 @@
-# dotenv run kavalai-eval examples/green_village/eval_cases.yaml --port 25001 --tag baseline
+# dotenv run kavalai-eval examples/green_village/eval_cases.yaml --port 25000 --tag baseline
 
 name: green-village
 

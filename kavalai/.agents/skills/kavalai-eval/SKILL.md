@@ -99,7 +99,7 @@ An empty or absent `expected` asserts only that the agent answered.
 
 ## Which cases to make literal, and which to judge
 
-This is the design decision the suite lives or dies by.
+This is the decision that determines whether a suite is worth running.
 
 - **Literal** whatever your Python decided. If the workflow stamps `status`,
   `order_id` or `missing` onto the answer, those are values to compare, and the

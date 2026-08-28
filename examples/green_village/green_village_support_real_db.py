@@ -1,6 +1,7 @@
 """The Green Village chatbot again, but on Postgres instead of in-memory SQLite.
 
-Bring up the docker postgres database
+Bring up the Postgres database and run it from the repository root::
+
     docker compose up -d postgres_db
     dotenv run python -m kavalai.migrate_db agents
     dotenv run python -m examples.green_village.green_village_support_real_db
@@ -44,7 +45,8 @@ from kavalai.server import create_agent_router, mask_db_uri
 from kavalai.workflow import WorkflowBuilder
 from kavalai.workflow.tasklog import PostgresTaskLogger
 
-# See https://qdrant.github.io/fastembed/examples/Supported_Models/ for list of models
+# See https://qdrant.github.io/fastembed/examples/Supported_Models/ for the
+# full list. This one is small, local and needs no API key.
 EMBEDDING_MODEL = "fastembed/BAAI/bge-small-en-v1.5"
 LLM_MODEL = "openai/gpt-5.6-luna"
 
@@ -127,8 +129,8 @@ rag = PostgresRagService.from_session_maker(
 )
 
 # Build the workflow engine.
-# 1. We query RAG with facts related to the user message
-# 2. We construct the reply using the facts.
+# 1. Query the RAG index for the facts related to the user message.
+# 2. Write the reply from those facts.
 engine = (
     WorkflowBuilder(
         "Green Village support",
@@ -153,7 +155,7 @@ engine = (
         prompt=(
             "You are the AI assistant of the Green Village tourist "
             "information centre. Help users with their inquiries.\n"
-            "NB! Green Village is a fictionary village so rely only about the facts given in the context.\n"
+            "NB! Green Village is a fictional village, so rely only on the facts given in the context.\n"
             "Steer any offtopic requests back to green village.\n"
             "Related facts:\n{{ context.facts }}"
         ),

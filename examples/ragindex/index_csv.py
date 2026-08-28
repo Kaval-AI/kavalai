@@ -14,15 +14,17 @@ Index the bundled 100 made-up songs into a local SQLite file::
 Index them into the Postgres database from ``.env`` instead, which is what
 the backoffice RAG explorer reads::
 
-    dotenv run python -m examples.ragindex.index_csv examples/ragindex/songs.csv --index postgres --collection songs
+    dotenv run python -m examples.ragindex.index_csv \
+        examples/ragindex/songs.csv --index postgres --collection songs
 
-Take a slice of a much bigger file --- here the first 2000 English rows of a
-lyrics dump --- and put it in its own collection::
+Take a slice of a much bigger file — here the first 2000 English rows of a
+lyrics dump — and put it in its own collection::
 
-    dotenv run python -m examples.ragindex.index_csv local_data/song_lyrics.csv --index postgres \
+    dotenv run python -m examples.ragindex.index_csv \
+        local_data/song_lyrics.csv --index postgres \
         --collection lyrics_sample --where language=en --limit 2000
 
-Add to a collection without paying for it twice --- rows whose source id is
+Add to a collection without paying for it twice — rows whose source id is
 already there are never embedded, which is the expensive part::
 
     dotenv run python -m examples.ragindex.index_csv \
@@ -56,7 +58,7 @@ DEFAULT_COLLECTION = "songs"
 
 # What the bundled songs.csv wants. Putting the title and artist in front of
 # the lyrics costs nothing at query time and makes the indexed text readable
-# on its own --- the backoffice embedding projector labels each point with
+# on its own — the backoffice embedding projector labels each point with
 # the first 100 characters of the content, so the title is what you see.
 DEFAULT_TEXT_COLUMNS = "title,artist,lyrics"
 DEFAULT_METADATA_COLUMNS = "title,artist,tag,year"
@@ -158,7 +160,7 @@ def read_rows(
 
     The file is read lazily and never held in memory, so a nine-gigabyte
     export costs the same as a small one. Rows whose text ends up empty are
-    skipped --- there is nothing to embed.
+    skipped — there is nothing to embed.
 
     Args:
         csv_path: Path of the CSV file.
@@ -275,7 +277,7 @@ async def index_rows(
             first, which makes re-running the script idempotent instead of
             doubling the collection.
         skip_source_ids: Source ids to leave alone. A skipped row is never
-            embedded, which is the whole point --- see
+            embedded, which is the whole point — see
             :func:`existing_source_ids`.
 
     Returns:

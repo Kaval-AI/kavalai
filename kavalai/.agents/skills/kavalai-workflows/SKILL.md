@@ -95,8 +95,8 @@ measurably improves what comes back. This is a rule, not a nicety.
   `rag_query`, whose output shape is Kaval.AI's, not yours.
 - `llm_model` is `provider/model`; a provider containing `.` is rejected (a
   workflow names a registration, never a Python path).
-- `rag_service` is a registered **name**; a value containing `://` is rejected
-  (never a connection string).
+- `rag_service` is a registered **name**; a value containing `://` or `@` is
+  rejected (never a connection string).
 - A `rag_query` node naming a service that was neither passed to the engine nor
   registered fails when the engine is **constructed**, not on the first request
   that reaches the node.
@@ -155,7 +155,8 @@ written; `history` is a value recorded in an earlier run of the session. In
 ```
 
 `switch` stringifies `expr` and matches it against `cases`; with no match and
-no `default` the run fails with a `WorkflowException`.
+no `default` the run fails with a `WorkflowException` (`Workflow halted at node
+'x' with no next node and without reaching an end node.`).
 
 Expressions are evaluated through an **AST whitelist, never Python `eval`**:
 comparisons, `and` / `or` / `not`, `in`, arithmetic, and dotted/indexed access
@@ -178,8 +179,8 @@ subgraph walked up to but not including the join. All branches start together
 and the run resumes at `next` once every branch has arrived there.
 
 Rejected at load time: overlapping branch subgraphs, two branches writing the
-same `output` variable, an `end` node inside a branch, or a branch re-entering
-the parallel node. Each branch gets its own copy of the run context (a node
+same `output` variable, an `end` node inside a branch, a branch re-entering
+the parallel node, or a branch reaching the `start` node. Each branch gets its own copy of the run context (a node
 cannot observe a sibling's output mid-flight); outputs merge at the join.
 
 Three properties worth designing around: branch events interleave on the single

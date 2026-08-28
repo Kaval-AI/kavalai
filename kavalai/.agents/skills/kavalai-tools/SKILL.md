@@ -54,9 +54,12 @@ kernel = FunctionKernel()
 kernel.register_python_tool("measure_pond", measure_pond)   # python://measure_pond
 ```
 
-- **The decorator is mandatory.** Registering a plain function raises
-  `Function 'f' must be decorated with @kavalai.pythontool`. The decorator only
-  sets a flag; the function stays directly callable and directly testable.
+- **The decorator is mandatory.** `register_python_tool` refuses a plain
+  function with `Function 'f' must be decorated with @kavalai.pythontool`. The
+  decorator only sets a flag; the function stays directly callable and
+  directly testable. (A function named under a workflow's `python_functions`
+  is decorated by the engine when it is not already, so the error is only
+  raised on the Python API.)
 - The input model is generated from the signature: each parameter becomes a
   field, its hint becomes the type, a default makes it optional, a missing hint
   becomes `Any`. **Type every parameter** — an untyped one becomes `Any` and
@@ -118,7 +121,9 @@ await kernel.close()                 # shut them down
 - **Connections are kernel lifetime, never per run.** `WorkflowEngine` wraps
   both ends as `await engine.connect()` / `await engine.aclose()`, or use it as
   an async context manager. Opening a kernel or engine per request is a bug.
-- Server names are unique; a duplicate raises `WorkflowException`.
+- Server names are unique; a duplicate raises `FunctionKernelException`
+  (`MCP server 'x' is already registered.`), a subclass of
+  `WorkflowException`. The same holds for REST servers and Python tool names.
 
 ## Secrets in a workflow file
 
@@ -149,8 +154,9 @@ keeping.
 
 ## The setup module
 
-The agent server and an eval run import a module *before* the workflow loads,
-which is where `python://` tools and named RAG services get registered:
+The agent server imports a module *before* the workflow loads, which is where
+`python://` tools and named RAG services get registered (an eval run needs no
+setup module — it talks to the server over HTTP):
 
 ```bash
 export KAVALAI_AGENT_SETUP_MODULE=myapp/agent_setup.py   # dotted name or .py path
@@ -170,7 +176,9 @@ usual cause of "it works in my script but not on the server".
 
 ## Bundled tools
 
-Ordinary `@pythontool` functions; register them like any other.
+Ordinary `@pythontool` functions; register them like any other. Two of them
+read the environment (`http_request`, `get_rss_feed`'s endpoint) — the
+exception to the rule that library code does not.
 
 | Tool | Import path | Needs |
 |---|---|---|
@@ -198,8 +206,10 @@ python_functions:
 - `http_request(...)` is the escape hatch for an endpoint that does not deserve
   a full `rest://` registration; `use_proxy=True` routes through the Tor proxy
   at `TOR_PROXY_HOST` / `TOR_PROXY_PORT`.
-- `get_rss_feed(url, max_results=5)`; protected feeds use `RSS_AUTH_USER` /
-  `RSS_AUTH_PASSWORD`.
+- `get_rss_feed(url, max_results=5)` fetches a feed anonymously.
+  `RSS_AUTH_USER` / `RSS_AUTH_PASSWORD` protect the tool's *own* HTTP endpoint
+  (`python -m kavalai.tools.rss`), not the feed it reads; they default to
+  `admin` / `password`.
 
 **Security**: handing an agent a general HTTP tool lets it call any URL it can
 compose, internal addresses included. Prefer specific `rest://` tools, or pin

@@ -10,7 +10,7 @@ Then talk to it from the terminal chat client::
 
 or straight over HTTP::
 
-    curl -s http://localhost:10000/run_agent \
+    curl -s http://localhost:25000/run_agent \
         -H 'Content-Type: application/json' \
         -d '{"data": {"user_message": "How deep is Lake Miller?"}}'
 
@@ -29,7 +29,8 @@ from kavalai.rag import SqliteRagService
 from kavalai.server import create_agent_router
 from kavalai.workflow import WorkflowBuilder
 
-# See https://qdrant.github.io/fastembed/examples/Supported_Models/ for list of models
+# See https://qdrant.github.io/fastembed/examples/Supported_Models/ for the
+# full list. This one is small, local and needs no API key.
 EMBEDDING_MODEL = "fastembed/BAAI/bge-small-en-v1.5"
 LLM_MODEL = "openai/gpt-5.6-luna"
 
@@ -37,7 +38,7 @@ LLM_MODEL = "openai/gpt-5.6-luna"
 HOST = "0.0.0.0"
 PORT = 25000
 
-# Use in-memory SQLLite for both agent db and RAG index.
+# In-memory SQLite for both the agent database and the RAG index.
 AGENT_DB_PATH = ":memory:"
 INDEX_PATH = ":memory:"
 
@@ -88,8 +89,8 @@ logger.info(f"Initializing RAG with model {EMBEDDING_MODEL}")
 rag = SqliteRagService(INDEX_PATH, EMBEDDING_MODEL)
 
 # Build the workflow engine.
-# 1. We query RAG with facts related to the user message
-# 2. We construct the reply using the facts.
+# 1. Query the RAG index for the facts related to the user message.
+# 2. Write the reply from those facts.
 engine = (
     WorkflowBuilder("Green Village support", llm_model=LLM_MODEL)
     .data_model("input", Message)
@@ -110,7 +111,7 @@ engine = (
         prompt=(
             "You are the AI assistant of the Green Village tourist "
             "information centre. Help users with their inquiries.\n"
-            "NB! Green Village is a fictionary village so rely only about the facts given in the context.\n"
+            "NB! Green Village is a fictional village, so rely only on the facts given in the context.\n"
             "Steer any offtopic requests back to green village.\n"
             "Related facts:\n{{ context.facts }}"
         ),

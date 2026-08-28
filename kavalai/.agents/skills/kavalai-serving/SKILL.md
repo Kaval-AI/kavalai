@@ -56,7 +56,7 @@ conversation, with history replayed into every `llm` node that has
 Because the schemas come from the graph, `/docs` describes your actual types and
 a malformed request is rejected before the model is ever called.
 
-## Streaming — three things that will bite you
+## Streaming — three properties of the endpoint
 
 ```bash
 curl -N -X POST localhost:10000/stream_agent -H 'Content-Type: application/json' \
@@ -66,7 +66,7 @@ curl -N -X POST localhost:10000/stream_agent -H 'Content-Type: application/json'
 1. **A failed run still returns 200.** A response cannot change its status code
    after the headers are sent, so a failure ends the stream with a
    `workflow_failed` event. **Clients must treat the event, not the status
-   code, as the failure signal.** Any client you write must handle this.
+   code, as the failure signal.**
 2. **Disconnecting aborts the run.** Closing the stream cancels the engine
    generator, and the abort is recorded on the run row.
 3. **Browsers cannot use `EventSource`** — it supports neither a request body
@@ -220,13 +220,17 @@ one; compute cost outside, from the token columns
 
 ```bash
 docker compose up postgres_db backoffice-migrations backoffice   # UI on :8000
-docker compose up agent-migrations                               # runtime tables
 ```
 
-Images: `agent-server` (needs `KAVALAI_AGENT_WORKFLOW_PATH`, `KAVALAI_DB_URI`,
-`KAVALAI_DB_SCHEMA`), `agent-migrations`, `backoffice-server` (needs
-`KAVALAI_BO_DB_URI`, `KAVALAI_BO_DB_SCHEMA`), `backoffice-migrations`. Optional
-services: `ollama` (11434), `crawl4ai` (11235), `torproxy`.
+`docker-compose.yml` defines `postgres_db` (pgvector), `backoffice-migrations`,
+`backoffice`, and the optional `ollama` (11434), `crawl4ai` (11235) and
+`torproxy` services. The agent server is not in it: build
+`dockerfiles/agent.Dockerfile` and run the image with the entrypoint mode
+`agent-migrations` (needs `KAVALAI_DB_URI`, `KAVALAI_DB_SCHEMA`) and then
+`agent-server` (additionally `KAVALAI_AGENT_WORKFLOW_PATH`). The backoffice
+image (`dockerfiles/backoffice.Dockerfile`) takes `backoffice-migrations` and
+`backoffice-server` the same way, and needs `KAVALAI_BO_DB_URI` and
+`KAVALAI_BO_DB_SCHEMA`.
 
 The backoffice reaches an agent database through a **project** — a project row
 carries the host, port, database and schema — so one UI can watch local,

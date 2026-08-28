@@ -76,9 +76,9 @@ those fields plus `similarity`.
 a document indexed as many chunks. `include_content=False` omits the text when
 the caller only needs scores.
 
-Writing your own backend? Implement the required tier, declare the optional one
-through `supports()`, normalise your store's score to the higher-is-better
-convention, and accept a UUID id (as text if your store insists) — then run it
+A backend of your own implements the required tier, declares the optional one
+through `supports()`, normalises the store's score to the higher-is-better
+convention, and accepts a UUID id (as text if the store insists) — then runs
 against the library's RAG conformance suite rather than only against its own
 tests.
 
@@ -99,8 +99,8 @@ The target may be a class, a dotted path (imported on first use) or a callable;
 `**defaults` are bound at registration, so everything the backend needs is
 supplied here. Duplicates raise; `replace=True` warns.
 
-Do this in the **setup module** (`KAVALAI_AGENT_SETUP_MODULE`, or a suite's
-`setup`) so the server and an eval run both see it — see `kavalai-tools`.
+Do this in the **setup module** (`KAVALAI_AGENT_SETUP_MODULE`) so the agent
+server sees it before the workflow loads — see `kavalai-tools`.
 
 Alternatively pass the object straight to the engine:
 
@@ -180,8 +180,9 @@ registered service to index into; unset means the Postgres service built from
 ## Embeddings
 
 `make_embedding_client("openai/text-embedding-3-small")`, or
-`fastembed/<model>` to embed locally with no API key.
-`KAVALAI_DEFAULT_EMBEDDING_MODEL` supplies the default. In a container set
+`fastembed/<model>` to embed locally with no API key. The model is always an
+argument; only the CSV indexer falls back to `KAVALAI_DEFAULT_EMBEDDING_MODEL`
+when `--model` is omitted. In a container set
 `FASTEMBED_CACHE_DIR` so the model is not re-downloaded on every start, and
 `FASTEMBED_THREADS` to bound CPU. For an NVIDIA GPU, install the `gpu` extra by
 *replacing* `fastembed` — no code change follows.

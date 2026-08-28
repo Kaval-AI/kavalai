@@ -22,8 +22,7 @@ environment.
 | Variable | Description |
 |---|---|
 | `KAVALAI_DEFAULT_LLM_MODEL` | Model when a workflow and its nodes both omit `llm_model`, as `provider/model` |
-| `KAVALAI_DEFAULT_EMBEDDING_MODEL` | Default embedding model for RAG and embedding clients |
-| `KAVALAI_OPENAI_SERVICE_TIER` | OpenAI service tier (e.g. `priority`). Read by the agent server |
+| `KAVALAI_DEFAULT_EMBEDDING_MODEL` | Embedding model `python -m kavalai.tools.index_csv` uses when `--model` is omitted, as `provider/model`. `make_embedding_client` and the RAG services take the model as an argument and do not read it |
 | `FASTEMBED_THREADS` | Thread count for local `fastembed` embedding |
 | `FASTEMBED_CACHE_DIR` | Where `fastembed` caches models. Worth setting in a container so the model is not re-downloaded on every start |
 | `KAVALAI_EMBEDDING_NORMALIZER_YAML` | Path to a YAML file describing a custom `Normalizer` |
@@ -63,13 +62,13 @@ Read by `python -m kavalai.server` and `python -m kavalai.migrate_db agents`.
 | `KAVALAI_BO_PORT` | Port. Default `8000` |
 | `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Google OAuth sign-in |
 | `SESSION_SECRET_KEY` | Signing key for session cookies. **Set this in production** — the fallback is a well-known development value |
-| `FRONTEND_URL` | Where to redirect after a successful login |
+| `FRONTEND_URL` | Where the Angular frontend is served from; used for the post-login redirect and CORS |
 
 ## Tools
 
 | Variable | Description |
 |---|---|
-| `RSS_AUTH_USER` / `RSS_AUTH_PASSWORD` | Basic auth for protected RSS feeds |
+| `RSS_AUTH_USER` / `RSS_AUTH_PASSWORD` | Basic auth protecting the bundled RSS tool's own HTTP endpoint. Default `admin` / `password` |
 | `TOR_PROXY_HOST` / `TOR_PROXY_PORT` | Tor proxy used by `http_request(use_proxy=True)` |
 
 ## A worked `.env` for local development

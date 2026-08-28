@@ -68,7 +68,9 @@ answer = await client.prompt("What is the capital of Estonia?")
 **`provider/model` is the id format everywhere in the framework** — in
 `make_client`, in a workflow's `llm_model`, in a node override, in
 `KAVALAI_DEFAULT_LLM_MODEL`, in an eval suite's `judge_model`. A bare model
-name raises `Model must be in 'provider/model' form`.
+name is rejected: `make_client` raises `Model must be in 'provider/model'
+form, got 'x'.`, and a workflow fails to load with `… is 'x', which is not in
+'provider/model' form.`
 
 Providers: `openai/…`, `gemini/…`, `anthropic/…`, `ollama/…`, `browser/…`.
 Switching provider is a change of one string; nothing else moves. Keys come
@@ -81,8 +83,8 @@ notebook.
 
 ## Ask for a type, not for prose
 
-The single highest-value idiom in the library. Pass a Pydantic model and you
-get a validated object, with any provider:
+The idiom the rest of the library is built on. Pass a Pydantic model and the
+call returns a validated object, with any provider:
 
 ```python
 from pydantic import BaseModel
