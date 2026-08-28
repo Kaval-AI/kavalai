@@ -40,17 +40,7 @@ See
 
 ### Call a model
 
-Name a model as `provider/model` and `make_client` does the rest, reading the
-API key from the environment:
-
-```python
-import os
-
-os.environ["OPENAI_API_KEY"] = '...'
-os.environ["GEMINI_API_KEY"] = '...'
-os.environ["ANTHROPIC_API_KEY"] = '...'
-```
-
+Name a model as `provider/model` and `make_client` does the rest.
 ```python
 from kavalai import make_client
 
