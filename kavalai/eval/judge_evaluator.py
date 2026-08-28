@@ -23,7 +23,7 @@ from pydantic import BaseModel
 
 from kavalai.eval.base import AgentEvaluator, EvalResult
 from kavalai.llm_clients.base_client import BaseLlmClient
-from kavalai.workflow.clients import make_client
+from kavalai.workflow.clients import build_parameters, make_client
 
 DEFAULT_JUDGE_MODEL = "openai/gpt-5.4-mini"
 
@@ -74,6 +74,8 @@ class JudgeEvaluator(AgentEvaluator):
         transport: Optional httpx transport, used by tests.
         model: ``provider/model`` of the judge.
         llm_client: A ready-made judge client, overriding ``model``.
+        llm_parameters: ``llm_kwargs`` for the judge (temperature, timeouts,
+            …) — ``kavalai-eval`` passes the ``KAVALAI_LLM_*`` defaults here.
         prompt: The grading prompt; must accept ``{inputs}``, ``{output}``
             and ``{criterion}``.
 
@@ -100,6 +102,7 @@ class JudgeEvaluator(AgentEvaluator):
         model: str = DEFAULT_JUDGE_MODEL,
         llm_client: Optional[BaseLlmClient] = None,
         prompt: str = JUDGE_PROMPT,
+        llm_parameters: Optional[dict] = None,
     ):
         super().__init__(
             base_url,
@@ -111,13 +114,16 @@ class JudgeEvaluator(AgentEvaluator):
         )
         self.model = model
         self.prompt = prompt
+        self.llm_parameters = dict(llm_parameters or {})
         self._llm_client = llm_client
 
     @property
     def llm_client(self) -> BaseLlmClient:
         """The judging model, built on first use."""
         if self._llm_client is None:
-            self._llm_client = make_client(self.model)
+            self._llm_client = make_client(
+                self.model, build_parameters(self.llm_parameters)
+            )
         return self._llm_client
 
     def build_prompt(

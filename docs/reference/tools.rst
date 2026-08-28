@@ -41,9 +41,6 @@ In a workflow, declare them under ``python_functions`` instead — see
    * - ``http_request``
      - ``kavalai.tools.webtools.http_client``
      - —
-   * - ``get_rss_feed``
-     - ``kavalai.tools.rss``
-     - —
 
 Web crawling
 ------------
@@ -130,7 +127,8 @@ Returns ``status_code``, ``headers``, ``text`` and ``json_data`` (parsed when
 the response is JSON, otherwise ``None``).
 
 ``use_proxy=True`` routes the request through the Tor proxy configured by
-``TOR_PROXY_HOST`` / ``TOR_PROXY_PORT``; ``docker-compose.yml`` provides a
+``KAVALAI_TOR_PROXY_HOST`` / ``KAVALAI_TOR_PROXY_PORT``; ``docker-compose.yml``
+provides a
 ``torproxy`` service.
 
 .. warning::
@@ -139,24 +137,6 @@ the response is JSON, otherwise ``None``).
    including internal addresses. Prefer registering specific ``rest://`` tools,
    or restrict the node with ``allowed_tools``, when the model chooses the
    target.
-
-Feeds
------
-
-``get_rss_feed``
-^^^^^^^^^^^^^^^^
-
-Fetches and parses an RSS or Atom feed.
-
-.. code-block:: python
-
-   get_rss_feed(url: str, max_results: int = 5) -> Feed
-
-Returns ``title``, ``url`` and ``items`` (each with ``title``, ``link`` and
-``summary``). The same module is also a small FastAPI service
-(``python -m kavalai.tools.rss``) exposing the tool at ``GET /get_rss_feed``;
-``RSS_AUTH_USER`` / ``RSS_AUTH_PASSWORD`` are the basic-auth credentials that
-service requires from its callers, not credentials for the feed.
 
 Writing your own
 ----------------

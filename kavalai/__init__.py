@@ -172,7 +172,7 @@ from kavalai.rag import (
     RagServiceResult,
     SqliteRagService,
 )
-from kavalai.normalizer import Normalizer
+from kavalai.normalizer import Normalizer, set_default_normalizer
 from kavalai.db import EngineOptionsConflictError, db_manager
 
 __all__ = [
@@ -250,6 +250,7 @@ __all__ = [
     "RagServiceResult",
     "SqliteRagService",
     "Normalizer",
+    "set_default_normalizer",
     "db_manager",
     "EngineOptionsConflictError",
 ]

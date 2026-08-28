@@ -1,6 +1,6 @@
 ---
 name: kavalai-tools
-description: Give a Kaval.AI agent or workflow tools — `@pythontool` functions, REST servers, MCP servers — and scope what a node may call with `allowed_tools`. Use when registering a tool, writing a tool URI, wiring MCP, using the bundled web/HTTP/RSS tools, or when a tool call fails validation or a tool is invisible to the model.
+description: Give a Kaval.AI agent or workflow tools — `@pythontool` functions, REST servers, MCP servers — and scope what a node may call with `allowed_tools`. Use when registering a tool, writing a tool URI, wiring MCP, using the bundled web/HTTP tools, or when a tool call fails validation or a tool is invisible to the model.
 ---
 
 # Kaval.AI tools
@@ -176,16 +176,15 @@ usual cause of "it works in my script but not on the server".
 
 ## Bundled tools
 
-Ordinary `@pythontool` functions; register them like any other. Two of them
-read the environment (`http_request`, `get_rss_feed`'s endpoint) — the
-exception to the rule that library code does not.
+Ordinary `@pythontool` functions; register them like any other. One of them
+reads the environment (`http_request`, for its proxy) — the exception to the
+rule that library code does not.
 
 | Tool | Import path | Needs |
 |---|---|---|
 | `crawl_url` | `kavalai.tools.webtools.crawl4ai` | a headless browser |
 | `web_search` | `kavalai.tools.webtools.crawl4ai` | a headless browser |
 | `http_request` | `kavalai.tools.webtools.http_client` | — |
-| `get_rss_feed` | `kavalai.tools.rss` | — |
 
 ```yaml
 python_functions:
@@ -205,11 +204,7 @@ python_functions:
   container.
 - `http_request(...)` is the escape hatch for an endpoint that does not deserve
   a full `rest://` registration; `use_proxy=True` routes through the Tor proxy
-  at `TOR_PROXY_HOST` / `TOR_PROXY_PORT`.
-- `get_rss_feed(url, max_results=5)` fetches a feed anonymously.
-  `RSS_AUTH_USER` / `RSS_AUTH_PASSWORD` protect the tool's *own* HTTP endpoint
-  (`python -m kavalai.tools.rss`), not the feed it reads; they default to
-  `admin` / `password`.
+  at `KAVALAI_TOR_PROXY_HOST` / `KAVALAI_TOR_PROXY_PORT`.
 
 **Security**: handing an agent a general HTTP tool lets it call any URL it can
 compose, internal addresses included. Prefer specific `rest://` tools, or pin

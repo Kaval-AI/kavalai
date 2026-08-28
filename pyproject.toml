@@ -55,7 +55,6 @@ common = [
     "crawl4ai",
     "fastapi[standard]",
     "fastembed",
-    "feedparser",
     "google-genai",
     "itsdangerous",
     "mcp",

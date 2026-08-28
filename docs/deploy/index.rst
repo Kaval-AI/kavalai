@@ -163,10 +163,10 @@ The backoffice needs its own database and Google OAuth credentials:
 
    export KAVALAI_BO_DB_URI=postgresql://user:pass@db:5432/kavalai
    export KAVALAI_BO_DB_SCHEMA=backoffice
-   export GOOGLE_OAUTH_CLIENT_ID=...
-   export GOOGLE_OAUTH_CLIENT_SECRET=...
-   export SESSION_SECRET_KEY=...        # set this; the fallback is a dev value
-   export FRONTEND_URL=https://backoffice.example.com
+   export KAVALAI_BO_GOOGLE_CLIENT_ID=...
+   export KAVALAI_BO_GOOGLE_CLIENT_SECRET=...
+   export KAVALAI_BO_SESSION_SECRET_KEY=...
+   export KAVALAI_BO_FRONTEND_URL=https://backoffice.example.com
 
    python -m kavalai.backoffice.server
 
@@ -176,8 +176,9 @@ on every request. The last owner of a project cannot be removed or demoted.
 Production checklist
 --------------------
 
-**Set ``SESSION_SECRET_KEY``.** Without it the backoffice signs session cookies
-with a well-known development value.
+**Set ``KAVALAI_BO_SESSION_SECRET_KEY``.** The backoffice refuses to start
+without it; there is no development fallback, so a cookie is never signed with
+a key that is also in the documentation.
 
 **Keep credentials out of the workflow YAML.** Use the ``url_env``,
 ``command_env``, ``username_env`` and ``password_env`` fields so the file can be

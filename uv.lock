@@ -1172,18 +1172,6 @@ wheels = [
 ]
 
 [[package]]
-name = "feedparser"
-version = "6.0.12"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "sgmllib3k" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/dc/79/db7edb5e77d6dfbc54d7d9df72828be4318275b2e580549ff45a962f6461/feedparser-6.0.12.tar.gz", hash = "sha256:64f76ce90ae3e8ef5d1ede0f8d3b50ce26bcce71dd8ae5e82b1cd2d4a5f94228", size = 286579, upload-time = "2025-09-10T13:33:59.486Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/4e/eb/c96d64137e29ae17d83ad2552470bafe3a7a915e85434d9942077d7fd011/feedparser-6.0.12-py3-none-any.whl", hash = "sha256:6bbff10f5a52662c00a2e3f86a38928c37c48f77b3c511aedcd51de933549324", size = 81480, upload-time = "2025-09-10T13:33:58.022Z" },
-]
-
-[[package]]
 name = "filelock"
 version = "3.29.4"
 source = { registry = "https://pypi.org/simple" }
@@ -1957,7 +1945,6 @@ common = [
     { name = "crawl4ai" },
     { name = "fastapi", extra = ["standard"] },
     { name = "fastembed" },
-    { name = "feedparser" },
     { name = "google-genai" },
     { name = "itsdangerous" },
     { name = "mcp" },
@@ -1987,7 +1974,6 @@ test = [
     { name = "crawl4ai" },
     { name = "fastapi", extra = ["standard"] },
     { name = "fastembed" },
-    { name = "feedparser" },
     { name = "google-genai" },
     { name = "itsdangerous" },
     { name = "mcp" },
@@ -2016,7 +2002,6 @@ requires-dist = [
     { name = "fastapi", extras = ["standard"], marker = "extra == 'common'" },
     { name = "fastembed", marker = "extra == 'common'" },
     { name = "fastembed-gpu", marker = "extra == 'gpu'" },
-    { name = "feedparser", marker = "extra == 'common'" },
     { name = "google-genai", marker = "extra == 'common'" },
     { name = "httpx" },
     { name = "ipykernel", marker = "extra == 'docs'", specifier = ">=7.3.0" },
@@ -4044,12 +4029,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/f6/5d/a343201726150e05f
 wheels = [
     { url = "https://files.pythonhosted.org/packages/3d/07/05440381627877aae223fd68f330df9b9fc6641d08bf65328b55235617a2/sentry_sdk-2.62.0-py3-none-any.whl", hash = "sha256:27f61d13a86c3c1648dec666dd5a64f79772dd6a84b446f11866601ecab24f6f", size = 490586, upload-time = "2026-06-08T13:23:47.486Z" },
 ]
-
-[[package]]
-name = "sgmllib3k"
-version = "1.0.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/9e/bd/3704a8c3e0942d711c1299ebf7b9091930adae6675d7c8f476a7ce48653c/sgmllib3k-1.0.0.tar.gz", hash = "sha256:7868fb1c8bfa764c1ac563d3cf369c381d1325d36124933a726f29fcdaa812e9", size = 5750, upload-time = "2010-08-24T14:33:52.445Z" }
 
 [[package]]
 name = "shapely"

@@ -14,7 +14,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-import os
 import numpy as np
 import yaml
 from typing import List, Optional, Union
@@ -117,22 +116,25 @@ class Normalizer:
             return cls.from_yaml(f.read())
 
 
-_default_normalizer = None
+_default_normalizer: Optional["Normalizer"] = None
 
 
-def get_default_normalizer() -> Normalizer:
-    """Returns the default normalizer, loading it from environment variable if defined."""
+def set_default_normalizer(normalizer: Optional["Normalizer"]) -> None:
+    """Install the normalizer every embedding client uses unless given one.
+
+    ``None`` restores the built-in default, an L2 normalizer. The library
+    never reads a normalizer from the environment: the agent server applies
+    ``KAVALAI_EMBEDDING_NORMALIZER_YAML`` by calling this at start-up.
+    """
     global _default_normalizer
-    if _default_normalizer is not None:
-        return _default_normalizer
+    _default_normalizer = normalizer
 
-    env_path = os.getenv("KAVALAI_EMBEDDING_NORMALIZER_YAML")
-    if env_path and os.path.exists(env_path):
-        logger.debug(f"Loading default normalizer from {env_path}")
-        _default_normalizer = Normalizer.load_from_yaml(env_path)
-    else:
-        # Default with simple L2 norm
+
+def get_default_normalizer() -> "Normalizer":
+    """The default normalizer — the one installed with
+    :func:`set_default_normalizer`, or an L2 normalizer."""
+    global _default_normalizer
+    if _default_normalizer is None:
         logger.debug("No default normalizer defined, using L2 norm")
         _default_normalizer = Normalizer(l2=True)
-
     return _default_normalizer

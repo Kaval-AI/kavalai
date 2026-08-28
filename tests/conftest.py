@@ -2,8 +2,6 @@ import os
 import logging
 from loguru import logger
 
-os.environ["KAVALAI_DEFAULT_LLM_MODEL"] = "openai/gpt-4o-mini"
-
 import pytest
 import pytest_asyncio
 from sqlalchemy import text

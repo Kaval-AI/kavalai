@@ -325,6 +325,26 @@ def test_main_returns_zero_when_rows_were_indexed(csv_file, monkeypatch):
     assert main() == 0
 
 
+def test_main_installs_the_normalizer_from_the_environment(
+    csv_file, tmp_path, monkeypatch
+):
+    """The indexer must embed through the same normalizer the server uses."""
+    import kavalai.normalizer
+    from kavalai.normalizer import Normalizer, get_default_normalizer
+
+    path = tmp_path / "normalizer.yaml"
+    Normalizer(l1=True, l2=False).save_to_yaml(str(path))
+    monkeypatch.setenv("KAVALAI_EMBEDDING_NORMALIZER_YAML", str(path))
+    monkeypatch.setattr(kavalai.normalizer, "_default_normalizer", None)
+    monkeypatch.setattr(
+        "examples.ragindex.index_csv.make_rag_service", lambda *a, **k: FakeRag()
+    )
+    monkeypatch.setattr("sys.argv", ["index_csv", csv_file])
+
+    assert main() == 0
+    assert get_default_normalizer().l1 is True
+
+
 def test_main_returns_one_when_nothing_matched(csv_file, monkeypatch):
     monkeypatch.setattr(
         "examples.ragindex.index_csv.make_rag_service", lambda *a, **k: FakeRag()

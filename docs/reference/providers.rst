@@ -379,9 +379,9 @@ for tests, CI and eval fixtures; ``openai`` and ``gemini`` embeddings need a key
 and a round trip per batch; ``browser`` keeps the text on the device. All four
 implement the same interface, so the choice is one string.
 
-``KAVALAI_DEFAULT_EMBEDDING_MODEL`` supplies the model for
-``python -m kavalai.tools.index_csv`` when ``--model`` is omitted. Library code
-reads no environment variables of its own — see :doc:`config`.
+The embedding model is always an argument — to ``make_embedding_client``, to a
+RAG service, to the ``ragindex`` example's ``--model`` flag. Library code reads
+no environment variables of its own — see :doc:`config`.
 
 Adding a provider of your own
 -----------------------------

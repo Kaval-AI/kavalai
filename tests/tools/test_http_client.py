@@ -117,7 +117,8 @@ def test_http_request_proxy():
     mock_response.text = "proxy ok"
 
     with patch.dict(
-        os.environ, {"TOR_PROXY_HOST": "proxy.host", "TOR_PROXY_PORT": "9999"}
+        os.environ,
+        {"KAVALAI_TOR_PROXY_HOST": "proxy.host", "KAVALAI_TOR_PROXY_PORT": "9999"},
     ):
         with patch("httpx.Client") as mock_client_class:
             mock_client_instance = mock_client_class.return_value.__enter__.return_value

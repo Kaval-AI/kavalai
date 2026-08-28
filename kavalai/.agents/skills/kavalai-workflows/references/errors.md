@@ -14,7 +14,7 @@ message, make one edit, reload. Do not guess-and-retry.
 | `… names provider 'x'. A workflow names a registered provider, never an importable Python path …` | Provider contains `.` — a Python path was given | Register the provider and name the registration. |
 | `Node 'x' service 'y' looks like a connection string` | `service:` contains `://` or `@` | Name a registered RAG service, never a URI. |
 | `Node 'x' needs RAG service 'y', which is neither passed to the engine … nor …` | Service not passed nor registered | Pass `rag_services=` or call `register_rag_service`, usually from the setup module. |
-| `No LLM model configured (set node.llm_model, graph.llm_model …)` | No model anywhere | Set `llm_model` on the node, on the graph, or `KAVALAI_DEFAULT_LLM_MODEL`. |
+| `No LLM model configured (set node.llm_model, graph.llm_model …)` | No model anywhere | Set `llm_model` on the node or the graph, pass `default_llm_model=` to the engine, or set `KAVALAI_DEFAULT_LLM_MODEL` for `python -m kavalai.server`. |
 | `End node 'x' was reached inside a parallel branch; only the main path may end a run.` | `end` inside a branch | Rejoin at the parallel node's `next` and end after the join. |
 | `… into the parallel node itself. A branch must rejoin at …` | Branch re-enters the parallel node | Point the branch's last node at the join node. |
 | `… join node ('next'), so the branch is empty.` | Branch entry is the join itself | Give the branch at least one node. |

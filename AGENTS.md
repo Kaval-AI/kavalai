@@ -35,7 +35,7 @@ Two components:
 | `kavalai/llm_clients/` | OpenAI, Gemini, Anthropic, Ollama and in-browser clients behind one streaming interface; `registry.py` makes that set extensible |
 | `kavalai/eval/` | Evaluation against a **running** agent server: `base.py` (`AgentEvaluator`, `EvalResult`), `simple_evaluator.py` (literal matchers), `judge_evaluator.py` (a model grades a plain-language criterion), `eval_runner.py` (YAML cases + the `kavalai-eval` console script) |
 | `kavalai/rag/` | `BaseRagService` (three capability tiers), `PostgresRagService` (pgvector), `SqliteRagService` (portable file index) |
-| `kavalai/tools/` | Bundled tools: browser, RSS, web search, HTTP |
+| `kavalai/tools/` | Bundled tools: browser, web search, HTTP |
 | `kavalai/migrations/` | Alembic sets: `agents` and `backoffice` |
 | `backoffice/`, `frontend/` | Management API and Angular UI |
 | `tests/` | Pytest suite for the library; mock MCP servers in `tests/helpers/`. An example's tests live beside it under `examples/`, and `testpaths` covers both |
@@ -59,8 +59,12 @@ check a change against the list before proposing it.
    `await engine.connect()` and released by `await engine.aclose()` — never per
    run.
 4. **Library code reads no environment variables.** Only entry-point `main()`
-   functions do. Everything else takes its configuration as an argument. The
-   backend registries are the one bounded exception, and arguments still win:
+   functions do, through `kavalai/settings.py` where two of them read the
+   same names; `tests/test_config_drift.py` pins the list of modules allowed
+   to touch `os.environ`. Everything else takes its configuration as an
+   argument — the engine's `default_llm_model` / `default_llm_parameters`,
+   `set_default_normalizer()`. The backend registries are the one bounded
+   exception, and arguments still win:
    `client_factory` outranks the LLM registry, `rag_services=` outranks the RAG
    one.
    **A workflow document names a registration, never a Python path or a

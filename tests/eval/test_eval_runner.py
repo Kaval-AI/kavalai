@@ -23,6 +23,7 @@ from kavalai.eval.eval_runner import (
     main,
     resolve_base_url,
 )
+from kavalai.settings import LLM_PARAMETER_VARIABLES
 from kavalai.eval.judge_evaluator import JudgeVerdict
 from tests.eval.conftest import FakeJudge, agent_transport
 
@@ -55,7 +56,9 @@ def suite_file(tmp_path):
 def fake_judge(monkeypatch):
     """Every JudgeEvaluator in the run grades with this stand-in model."""
     judge = FakeJudge(verdict=JudgeVerdict(passed=True))
-    monkeypatch.setattr("kavalai.eval.judge_evaluator.make_client", lambda model: judge)
+    monkeypatch.setattr(
+        "kavalai.eval.judge_evaluator.make_client", lambda model, parameters=None: judge
+    )
     return judge
 
 
@@ -198,7 +201,7 @@ async def test_the_judge_model_can_be_overridden(monkeypatch):
     models = []
     monkeypatch.setattr(
         "kavalai.eval.judge_evaluator.make_client",
-        lambda model: (
+        lambda model, parameters=None: (
             models.append(model) or FakeJudge(verdict=JudgeVerdict(passed=True))
         ),
     )
@@ -271,6 +274,27 @@ def test_the_cli_returns_zero_when_every_case_passes(
     assert "2/2 passed" in out
     assert "PASS  greets" in out
     assert "demo: 2 cases against http://testserver:25000" in out
+
+
+def test_the_cli_passes_the_llm_defaults_to_the_judge(
+    suite_file, fake_judge, cli_transport, monkeypatch
+):
+    """The runner's ``main`` is the only place ``kavalai.eval`` reads the shell."""
+    seen = {}
+    real_run_suite = eval_runner.run_suite
+
+    async def spy(suite, base_url, **kwargs):
+        seen.update(kwargs)
+        return await real_run_suite(suite, base_url, **kwargs)
+
+    monkeypatch.setattr(eval_runner, "run_suite", spy)
+    for name in LLM_PARAMETER_VARIABLES:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("KAVALAI_LLM_TEMPERATURE", "0.25")
+
+    main([str(suite_file), "--port", "25000"])
+
+    assert seen["judge_parameters"] == {"temperature": 0.25}
 
 
 def test_the_cli_reports_the_tag_it_is_running_under(

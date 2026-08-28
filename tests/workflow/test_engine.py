@@ -541,8 +541,7 @@ nodes:
         WorkflowEngine.from_yaml(bad_yaml)
 
 
-def test_resolve_model_missing_raises(monkeypatch):
-    monkeypatch.delenv("KAVALAI_DEFAULT_LLM_MODEL", raising=False)
+def test_resolve_model_missing_raises():
     nodes = [
         {"name": "s", "type": "start", "next": "n"},
         {"name": "n", "type": "llm", "prompt": "p", "output": "output", "next": "e"},
@@ -553,6 +552,63 @@ def test_resolve_model_missing_raises(monkeypatch):
     engine = WorkflowEngine.from_dict(g, client_factory=make_factory())
     with pytest.raises(WorkflowException, match="No LLM model configured"):
         engine._resolve_model(None)
+
+
+def test_resolve_model_falls_back_to_the_engine_default():
+    """The engine reads no environment variable; the server passes the default."""
+    nodes = [
+        {"name": "s", "type": "start", "next": "n"},
+        {"name": "n", "type": "llm", "prompt": "p", "output": "output", "next": "e"},
+        {"name": "e", "type": "end", "output": "output"},
+    ]
+    g = dict(graph_dict(nodes))
+    g.pop("llm_model")
+    engine = WorkflowEngine.from_dict(
+        g, client_factory=make_factory(), default_llm_model="openai/fleet"
+    )
+    assert engine._resolve_model(None) == "openai/fleet"
+    assert engine._resolve_model("openai/node") == "openai/node"
+
+
+def test_default_llm_parameters_sit_below_graph_and_node():
+    """node > graph > engine defaults > provider defaults."""
+    from kavalai.run_context import RunContext
+
+    seen = {}
+
+    def factory(model, parameters, stats_receiver):
+        seen["parameters"] = parameters
+        return make_factory()(model, parameters, stats_receiver)
+
+    nodes = [
+        {"name": "s", "type": "start", "next": "n"},
+        {
+            "name": "n",
+            "type": "llm",
+            "prompt": "p",
+            "output": "output",
+            "next": "e",
+            "llm_kwargs": {"top_p": 0.1},
+        },
+        {"name": "e", "type": "end", "output": "output"},
+    ]
+    g = dict(graph_dict(nodes))
+    g["llm_kwargs"] = {"temperature": 0.5}
+    engine = WorkflowEngine.from_dict(
+        g,
+        client_factory=factory,
+        default_llm_parameters={
+            "temperature": 0.9,
+            "top_p": 0.9,
+            "timeout_seconds": 7.0,
+        },
+    )
+    node = engine.node_map["n"]
+    engine._make_llm_client(node.llm_model, node.llm_kwargs, RunContext())
+    parameters = seen["parameters"]
+    assert parameters.temperature == 0.5  # graph beats the engine default
+    assert parameters.top_p == 0.1  # node beats both
+    assert parameters.timeout_seconds == 7.0  # nobody else set it
 
 
 async def test_use_history_includes_prior_messages():

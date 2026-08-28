@@ -106,20 +106,42 @@ async def get_project_session(project: db.Project):
 
 oauth = OAuth()
 
+
+def required_setting(name: str) -> str:
+    """A setting the backoffice cannot run without.
+
+    There is no development fallback on purpose: a cookie signed with a
+    well-known key, or an OAuth client with no id, is a backoffice that looks
+    as if it works right up to the moment it is exposed.
+    """
+    value = os.environ.get(name, "")
+    if not value:
+        raise RuntimeError(
+            f"{name} is not set. The backoffice needs KAVALAI_BO_GOOGLE_CLIENT_ID, "
+            "KAVALAI_BO_GOOGLE_CLIENT_SECRET, KAVALAI_BO_SESSION_SECRET_KEY and "
+            "KAVALAI_BO_FRONTEND_URL — see .env.example."
+        )
+    return value
+
+
 # Trust X-Forwarded-* headers from the reverse proxy / Docker network.
 app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
 
 oauth.register(
     name="google",
-    client_id=os.getenv("GOOGLE_OAUTH_CLIENT_ID"),
-    client_secret=os.getenv("GOOGLE_OAUTH_CLIENT_SECRET"),
+    client_id=required_setting("KAVALAI_BO_GOOGLE_CLIENT_ID"),
+    client_secret=required_setting("KAVALAI_BO_GOOGLE_CLIENT_SECRET"),
     server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
     client_kwargs={"scope": "openid email profile"},
 )
 
+# Where a completed sign-in lands. Read once, so a missing value fails at
+# start-up rather than at the first login.
+FRONTEND_URL = required_setting("KAVALAI_BO_FRONTEND_URL")
+
 app.add_middleware(
     SessionMiddleware,
-    secret_key=os.getenv("SESSION_SECRET_KEY", "fallback-secret-key-for-dev-only"),
+    secret_key=required_setting("KAVALAI_BO_SESSION_SECRET_KEY"),
     same_site="lax",
     https_only=False,  # Set to True if you are using HTTPS
     domain=None,  # Should be None for localhost/development
@@ -259,7 +281,7 @@ async def google_auth_callback(request: Request):
         if "_google_authlib_state_" in request.session:
             del request.session["_google_authlib_state_"]
 
-        return RedirectResponse(url=os.environ["FRONTEND_URL"])
+        return RedirectResponse(url=FRONTEND_URL)
     except HTTPException:
         raise
     except Exception as e:

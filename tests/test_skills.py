@@ -145,7 +145,7 @@ class TestDrift:
         candidates = {
             name
             for name in documented
-            if name.startswith(("KAVALAI_", "FASTEMBED_", "TOR_PROXY_", "RSS_AUTH_"))
+            if name.startswith(("KAVALAI_", "FASTEMBED_"))
             or name.endswith(("_API_KEY", "_CLIENT_ID", "_CLIENT_SECRET"))
         }
         assert candidates <= known, sorted(candidates - known)

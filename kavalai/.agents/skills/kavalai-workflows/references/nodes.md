@@ -10,7 +10,7 @@ type. This file is the exhaustive list; the skill body covers the rules.
 | `name` | yes | Workflow name. Runs are recorded under this name as the agent. |
 | `description` | no | Shown in the backoffice. |
 | `version` | no | Schema version. Defaults to `"2.0"`. |
-| `llm_model` | no | Default `provider/model` for every `llm` and `agent` node. Falls back to `KAVALAI_DEFAULT_LLM_MODEL`. |
+| `llm_model` | no | Default `provider/model` for every `llm` and `agent` node. Falls back to the engine's `default_llm_model` (`KAVALAI_DEFAULT_LLM_MODEL` under `python -m kavalai.server`). |
 | `llm_kwargs` | no | Defaults merged into `LlmClientParameters` (`temperature`, `top_p`, `timeout_seconds`, …). Nodes may override individual keys. |
 | `rag_service` | no | Default RAG service **name** for `rag_query` nodes. Falls back to `"default"`. |
 | `rag_collection` | no | Default collection for `rag_query` nodes. |

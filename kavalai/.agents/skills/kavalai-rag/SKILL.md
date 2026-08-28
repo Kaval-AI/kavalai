@@ -173,16 +173,15 @@ python -m kavalai.tools.index_csv data.csv \
 `--source-field` (required) becomes `source_id`; `--metadata-fields` are kept
 alongside. `--mode lines` indexes each line of the field as its own entry.
 `--replace` deletes matching `(collection_name, source_id)` rows first — use it
-for a re-index, omit it and you will duplicate. `KAVALAI_RAG_SERVICE` names a
-registered service to index into; unset means the Postgres service built from
-`KAVALAI_DB_URI`.
+for a re-index, omit it and you will duplicate. `--index` names where to index
+into: `postgres` (from `KAVALAI_DB_URI` / `KAVALAI_DB_SCHEMA`), a database URI
+or a SQLite file path.
 
 ## Embeddings
 
 `make_embedding_client("openai/text-embedding-3-small")`, or
 `fastembed/<model>` to embed locally with no API key. The model is always an
-argument; only the CSV indexer falls back to `KAVALAI_DEFAULT_EMBEDDING_MODEL`
-when `--model` is omitted. In a container set
+argument — there is no environment default for it. In a container set
 `FASTEMBED_CACHE_DIR` so the model is not re-downloaded on every start, and
 `FASTEMBED_THREADS` to bound CPU. For an NVIDIA GPU, install the `gpu` extra by
 *replacing* `fastembed` — no code change follows.
@@ -190,6 +189,7 @@ when `--model` is omitted. In a container set
 **The embedding model is part of the index.** Changing it invalidates existing
 vectors; re-index rather than mixing models in one collection.
 
-A `Normalizer` (`KAVALAI_EMBEDDING_NORMALIZER_YAML`) can be learned from the
-corpus and applied to embeddings; `learn_normalizer` is the defaulted method
-that produces one.
+A `Normalizer` can be learned from the corpus and applied to embeddings;
+`learn_normalizer` is the defaulted method that produces one, and
+`set_default_normalizer` installs it for every embedding client — the agent
+server does that from `KAVALAI_EMBEDDING_NORMALIZER_YAML` at start-up.

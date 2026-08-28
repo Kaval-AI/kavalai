@@ -65,8 +65,8 @@ def http_request(
 
     proxy = None
     if use_proxy:
-        proxy_host = os.environ.get("TOR_PROXY_HOST", "localhost")
-        proxy_port = os.environ.get("TOR_PROXY_PORT", "8118")
+        proxy_host = os.environ.get("KAVALAI_TOR_PROXY_HOST", "localhost")
+        proxy_port = os.environ.get("KAVALAI_TOR_PROXY_PORT", "8118")
         proxy = f"http://{proxy_host}:{proxy_port}"
 
     with httpx.Client(timeout=timeout, proxy=proxy, auth=auth) as client:

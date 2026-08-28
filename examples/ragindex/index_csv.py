@@ -34,6 +34,8 @@ already there are never embedded, which is the expensive part::
 ``--index`` decides the backend: ``postgres`` reads ``KAVALAI_DB_URI`` and
 ``KAVALAI_DB_SCHEMA`` from the environment, anything containing ``://`` is
 used as a database URI verbatim, and anything else is a SQLite file path.
+``KAVALAI_EMBEDDING_NORMALIZER_YAML``, when set, names the normalizer the
+embeddings go through — the same one the agent server would use.
 """
 
 import argparse
@@ -48,6 +50,7 @@ from loguru import logger
 
 from kavalai.rag import PostgresRagService, SqliteRagService
 from kavalai.rag.base import BaseRagService
+from kavalai.settings import apply_normalizer_from_env
 
 # See https://qdrant.github.io/fastembed/examples/Supported_Models/ for the
 # full list. This one is small, local and needs no API key.
@@ -450,6 +453,7 @@ def main() -> int:
     csv.field_size_limit(min(sys.maxsize, 2**31 - 1))
     args = build_parser().parse_args()
     try:
+        apply_normalizer_from_env()
         report = asyncio.run(run(args))
     except (ValueError, KeyError, FileNotFoundError) as error:
         logger.error(error)

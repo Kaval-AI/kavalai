@@ -43,7 +43,8 @@ Top level
      - no
      - Default model for every ``llm`` and ``agent`` node, as
        ``provider/model``. A node may override it. If omitted here and on the
-       node, the ``KAVALAI_DEFAULT_LLM_MODEL`` environment variable is used.
+       node, the engine's ``default_llm_model`` is used — which
+       ``python -m kavalai.server`` fills from ``KAVALAI_DEFAULT_LLM_MODEL``.
        The provider is a registration name, never an import path: a provider
        containing ``.`` is rejected when the workflow loads, and a provider
        that is not registered only logs a warning at load, so a

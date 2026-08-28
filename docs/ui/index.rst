@@ -84,15 +84,14 @@ passwords. Create an OAuth client in the Google Cloud console, register
 
 .. code-block:: bash
 
-   GOOGLE_OAUTH_CLIENT_ID=...
-   GOOGLE_OAUTH_CLIENT_SECRET=...
+   KAVALAI_BO_GOOGLE_CLIENT_ID=...
+   KAVALAI_BO_GOOGLE_CLIENT_SECRET=...
 
-   # Signs the session cookie. The unset fallback is a well-known development
-   # value and must be replaced anywhere real.
-   SESSION_SECRET_KEY=...
+   # Signs the session cookie. Required: there is no development fallback.
+   KAVALAI_BO_SESSION_SECRET_KEY=...
 
-   # Where a completed sign-in is redirected to, and the origin allowed by CORS.
-   FRONTEND_URL=http://localhost:8000
+   # Where a completed sign-in is redirected to.
+   KAVALAI_BO_FRONTEND_URL=http://localhost:8000
 
 Starting the service
 ^^^^^^^^^^^^^^^^^^^^
@@ -107,8 +106,8 @@ serves the interface — API and compiled front end together — at
 
 To run it from a checkout instead, start the API and the Angular development
 server separately. The API binds to ``KAVALAI_BO_HOST`` / ``KAVALAI_BO_PORT``,
-and the front end proxies to it, so ``FRONTEND_URL`` must then name the Angular
-port:
+and the front end proxies to it, so ``KAVALAI_BO_FRONTEND_URL`` must then name
+the Angular port:
 
 .. code-block:: bash
 

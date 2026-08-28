@@ -301,7 +301,7 @@ def test_registered_provider_is_accepted():
 
 
 def test_no_model_at_all_is_accepted():
-    # KAVALAI_DEFAULT_LLM_MODEL may supply one at run time.
+    # The engine's default_llm_model may supply one at run time.
     assert make_graph(MINIMAL_NODES).llm_model is None
 
 

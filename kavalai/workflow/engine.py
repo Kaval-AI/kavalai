@@ -18,7 +18,6 @@ import asyncio
 import importlib
 import itertools
 import json
-import os
 import time
 from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass
@@ -167,6 +166,15 @@ class WorkflowEngine:
         still works.
     max_node_visits: int
         Safety cap on total node executions to guard against infinite loops.
+    default_llm_model: Optional[str]
+        Model used when neither a node nor the graph names one, as
+        ``provider/model``. The engine reads no environment variable for it:
+        ``python -m kavalai.server`` passes ``KAVALAI_DEFAULT_LLM_MODEL`` here.
+    default_llm_parameters: Optional[dict]
+        Fleet-wide ``llm_kwargs`` applied to every model call, below the
+        graph's and the node's own: node > graph > these > provider defaults.
+        ``python -m kavalai.server`` fills it from the ``KAVALAI_LLM_*``
+        variables.
     """
 
     def __init__(
@@ -179,12 +187,16 @@ class WorkflowEngine:
         data_models: Optional[dict[str, type[BaseModel]]] = None,
         rag_services: Optional[Union[Any, dict[str, Any]]] = None,
         max_node_visits: int = DEFAULT_MAX_NODE_VISITS,
+        default_llm_model: Optional[str] = None,
+        default_llm_parameters: Optional[dict] = None,
     ):
         self.graph = graph
         self.agent_service = agent_service
         self.task_logger = task_logger
         self.client_factory = client_factory or client_factory_module.make_client
         self.max_node_visits = max_node_visits
+        self.default_llm_model = default_llm_model
+        self.default_llm_parameters = dict(default_llm_parameters or {})
 
         # A single service is stored under "default", so the common case --- one
         # index, one collection --- names nothing at all in the YAML.
@@ -290,15 +302,11 @@ class WorkflowEngine:
         return self.models.get(name) if name else None
 
     def _resolve_model(self, node_model: Optional[str]) -> str:
-        model = (
-            node_model
-            or self.graph.llm_model
-            or os.environ.get("KAVALAI_DEFAULT_LLM_MODEL")
-        )
+        model = node_model or self.graph.llm_model or self.default_llm_model
         if not model:
             raise WorkflowException(
                 "No LLM model configured (set node.llm_model, graph.llm_model "
-                "or KAVALAI_DEFAULT_LLM_MODEL)."
+                "or the engine's default_llm_model)."
             )
         return model
 
@@ -350,7 +358,11 @@ class WorkflowEngine:
         self, node_model: Optional[str], llm_kwargs: dict, run_context: RunContext
     ) -> BaseLlmClient:
         model = self._resolve_model(node_model)
-        merged = {**self.graph.llm_kwargs, **(llm_kwargs or {})}
+        merged = {
+            **self.default_llm_parameters,
+            **self.graph.llm_kwargs,
+            **(llm_kwargs or {}),
+        }
         parameters = client_factory_module.build_parameters(merged)
         # The accumulator belongs to the run, not the engine: one engine serves
         # many concurrent runs (see ``kavalai.server``), and a shared counter

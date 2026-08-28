@@ -46,6 +46,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 
 from kavalai.eval.base import EvalResult
 from kavalai.eval.judge_evaluator import DEFAULT_JUDGE_MODEL, JudgeEvaluator
+from kavalai.settings import llm_parameters_from_env
 from kavalai.eval.simple_evaluator import SimpleEvaluator
 
 #: Exit code for a run whose cases all passed.
@@ -133,6 +134,7 @@ async def run_suite(
     password: Optional[str] = None,
     timeout: float = 120.0,
     judge_model: Optional[str] = None,
+    judge_parameters: Optional[dict] = None,
     tag: Optional[str] = None,
     transport: Optional[Any] = None,
     on_result: Optional[Callable[[EvalResult], None]] = None,
@@ -149,6 +151,7 @@ async def run_suite(
         password: HTTP Basic Auth password.
         timeout: Seconds to wait for one agent run.
         judge_model: ``provider/model`` of the judge, overriding the suite's.
+        judge_parameters: ``llm_kwargs`` for the judge.
         tag: Names this run inside each case's ``external_id``, so the
             sessions of two runs — two model versions, two prompts — can be
             told apart in the agent database afterwards.
@@ -169,7 +172,11 @@ async def run_suite(
     )
     evaluators = {
         "simple": SimpleEvaluator(**connection),
-        "judge": JudgeEvaluator(**connection, model=judge_model or suite.judge_model),
+        "judge": JudgeEvaluator(
+            **connection,
+            model=judge_model or suite.judge_model,
+            llm_parameters=judge_parameters,
+        ),
     }
 
     results = []
@@ -276,6 +283,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 password=password or None,
                 timeout=args.timeout,
                 judge_model=args.judge_model,
+                judge_parameters=llm_parameters_from_env(),
                 tag=args.tag,
                 on_result=lambda result: print(format_result(result)),
             )

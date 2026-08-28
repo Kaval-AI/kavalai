@@ -161,31 +161,25 @@ def clean_default_normalizer():
     kavalai.normalizer._default_normalizer = original
 
 
-def test_get_default_normalizer(tmp_path, monkeypatch, clean_default_normalizer):
-    from kavalai.normalizer import get_default_normalizer
-    import kavalai.normalizer
+def test_get_default_normalizer(tmp_path, clean_default_normalizer):
+    from kavalai.normalizer import get_default_normalizer, set_default_normalizer
 
-    # 1. Default (no env var)
+    # 1. Nothing installed: an L2 normalizer, built once.
     normalizer = get_default_normalizer()
     assert normalizer.l2 is True
     assert normalizer.center_enabled is False
+    assert get_default_normalizer() is normalizer
 
-    # 2. With env var
-    kavalai.normalizer._default_normalizer = None
-    yaml_path = os.path.join(tmp_path, "custom_normalizer.yaml")
+    # 2. Installed explicitly — the library reads no environment variable.
     custom = Normalizer(l1=True, l2=False, center=True, center_vector=[0.1, 0.2])
-    custom.save_to_yaml(yaml_path)
+    set_default_normalizer(custom)
+    assert get_default_normalizer() is custom
 
-    monkeypatch.setenv("KAVALAI_EMBEDDING_NORMALIZER_YAML", yaml_path)
-    normalizer2 = get_default_normalizer()
-    assert normalizer2.l1 is True
-    assert normalizer2.l2 is False
-    assert normalizer2.center_enabled is True
-    assert np.allclose(normalizer2.center_vector, [0.1, 0.2])
-
-    # 3. Caching
-    normalizer3 = get_default_normalizer()
-    assert normalizer3 is normalizer2
+    # 3. ``None`` restores the default.
+    set_default_normalizer(None)
+    restored = get_default_normalizer()
+    assert restored is not custom
+    assert restored.l2 is True
 
 
 def test_center_vector_none():

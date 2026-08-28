@@ -93,7 +93,7 @@ def test_the_judging_model_is_only_built_when_it_is_needed(monkeypatch):
     """A suite of literal cases must not need a provider key."""
     built = []
 
-    def fake_make_client(model):
+    def fake_make_client(model, parameters=None):
         built.append(model)
         return FakeJudge()
 
@@ -109,12 +109,31 @@ def test_the_model_can_be_chosen(monkeypatch):
     built = []
     monkeypatch.setattr(
         "kavalai.eval.judge_evaluator.make_client",
-        lambda model: built.append(model) or FakeJudge(),
+        lambda model, parameters=None: built.append(model) or FakeJudge(),
     )
 
     assert JudgeEvaluator("http://testserver", model="anthropic/claude").llm_client
 
     assert built == ["anthropic/claude"]
+
+
+def test_the_judge_takes_llm_parameters(monkeypatch):
+    """``kavalai-eval`` hands the ``KAVALAI_LLM_*`` defaults to the judge."""
+    built = []
+    monkeypatch.setattr(
+        "kavalai.eval.judge_evaluator.make_client",
+        lambda model, parameters=None: built.append(parameters) or FakeJudge(),
+    )
+
+    evaluator = JudgeEvaluator(
+        "http://testserver", llm_parameters={"temperature": 0.0, "top_p": 0.5}
+    )
+    assert evaluator.llm_client
+
+    (parameters,) = built
+    assert parameters.temperature == 0.0
+    assert parameters.top_p == 0.5
+    assert parameters.timeout_seconds == 30.0
 
 
 async def test_the_prompt_can_be_replaced():

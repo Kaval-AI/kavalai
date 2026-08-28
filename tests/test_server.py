@@ -9,6 +9,7 @@ from fastapi.security import HTTPBasicCredentials
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import kavalai.server as server_module
+from kavalai.settings import LLM_PARAMETER_VARIABLES
 from kavalai.server import (
     create_agent_app,
     create_app_from_env_conf,
@@ -370,6 +371,16 @@ def env_configured_agent(tmp_path, monkeypatch):
     monkeypatch.setenv("KAVALAI_DB_SCHEMA", "agents")
     monkeypatch.setenv("KAVALAI_AGENT_BASIC_AUTH_USER", "u")
     monkeypatch.setenv("KAVALAI_AGENT_BASIC_AUTH_PASSWORD", "p")
+    # A developer's .env may set fleet defaults; the tests decide their own.
+    # ``environs`` falls back to the .env file it read at import, so that
+    # copy has to go as well.
+    monkeypatch.setattr(server_module.env, "_environ", {})
+    for name in (
+        "KAVALAI_DEFAULT_LLM_MODEL",
+        "KAVALAI_EMBEDDING_NORMALIZER_YAML",
+        *LLM_PARAMETER_VARIABLES,
+    ):
+        monkeypatch.delenv(name, raising=False)
     return workflow_path
 
 
@@ -377,6 +388,47 @@ def test_create_app_from_env_conf_builds_the_agent(env_configured_agent):
     app = create_app_from_env_conf()
 
     assert app.state.engine.graph.name == "srv"
+
+
+def test_create_app_from_env_conf_passes_the_llm_defaults_to_the_engine(
+    env_configured_agent, monkeypatch
+):
+    """The engine reads no environment variable; the server hands them over."""
+    monkeypatch.setenv("KAVALAI_DEFAULT_LLM_MODEL", "openai/fleet-default")
+    monkeypatch.setenv("KAVALAI_LLM_TEMPERATURE", "0.1")
+    monkeypatch.setenv("KAVALAI_LLM_TIMEOUT_SECONDS", "12")
+
+    app = create_app_from_env_conf()
+
+    engine = app.state.engine
+    assert engine.default_llm_model == "openai/fleet-default"
+    assert engine.default_llm_parameters == {
+        "temperature": 0.1,
+        "timeout_seconds": 12.0,
+    }
+
+
+def test_create_app_from_env_conf_without_llm_defaults(env_configured_agent):
+    app = create_app_from_env_conf()
+
+    assert app.state.engine.default_llm_model is None
+    assert app.state.engine.default_llm_parameters == {}
+
+
+def test_create_app_from_env_conf_installs_the_normalizer(
+    env_configured_agent, monkeypatch, tmp_path
+):
+    import kavalai.normalizer
+    from kavalai.normalizer import Normalizer, get_default_normalizer
+
+    path = tmp_path / "normalizer.yaml"
+    Normalizer(l1=True, l2=False).save_to_yaml(str(path))
+    monkeypatch.setenv("KAVALAI_EMBEDDING_NORMALIZER_YAML", str(path))
+    monkeypatch.setattr(kavalai.normalizer, "_default_normalizer", None)
+
+    create_app_from_env_conf()
+
+    assert get_default_normalizer().l1 is True
 
 
 def test_create_app_from_env_conf_arguments_override_the_environment(

@@ -16,6 +16,11 @@ os.environ.setdefault("KAVALAI_BO_DB_SCHEMA", "public")
 os.environ.setdefault("KAVALAI_BO_DB_URI", "postgresql://user:pass@localhost:5432/db")
 os.environ.setdefault("KAVALAI_DB_SCHEMA", "public")
 os.environ.setdefault("KAVALAI_DB_URI", "postgresql://user:pass@localhost:5432/db")
+# The backoffice refuses to import without these; autodoc only needs the import.
+os.environ.setdefault("KAVALAI_BO_GOOGLE_CLIENT_ID", "docs-build")
+os.environ.setdefault("KAVALAI_BO_GOOGLE_CLIENT_SECRET", "docs-build")
+os.environ.setdefault("KAVALAI_BO_SESSION_SECRET_KEY", "docs-build")
+os.environ.setdefault("KAVALAI_BO_FRONTEND_URL", "http://localhost:8000")
 
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information

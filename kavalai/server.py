@@ -38,6 +38,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from kavalai.agent_service import AgentService
 from kavalai.db import db_manager
+from kavalai.settings import apply_normalizer_from_env, llm_parameters_from_env
 from kavalai.workflow import WorkflowEngine
 from kavalai.workflow.models import WorkflowException, WorkflowStreamEvent
 from kavalai.workflow.tasklog.postgres import PostgresTaskLogger
@@ -485,6 +486,14 @@ def create_app_from_env_conf(
     - KAVALAI_SQL_ECHO: Whether to log SQL queries (optional, default: False).
     - KAVALAI_PROVIDER_MODULES: Comma-separated modules to import before the
       workflow loads, so their backend registrations exist (optional).
+    - KAVALAI_DEFAULT_LLM_MODEL: Model used when the workflow and its nodes
+      name none, passed to the engine as ``default_llm_model`` (optional).
+    - KAVALAI_LLM_TEMPERATURE, KAVALAI_LLM_TOP_P, KAVALAI_LLM_REASONING_EFFORT,
+      KAVALAI_LLM_SERVICE_TIER, KAVALAI_LLM_TIMEOUT_SECONDS,
+      KAVALAI_LLM_STREAM_TIMEOUT_SECONDS: fleet-wide defaults for every model
+      call, passed to the engine as ``default_llm_parameters`` (optional).
+    - KAVALAI_EMBEDDING_NORMALIZER_YAML: Normalizer installed as the default
+      before the workflow loads (optional).
 
     Args:
         workflow_path: Path to the workflow YAML file.
@@ -561,9 +570,22 @@ def create_app_from_env_conf(
         logger.info(f"Importing agent setup module {setup_module}.")
         _import_setup_module(setup_module)
 
+    normalizer = apply_normalizer_from_env()
+    if normalizer is not None:
+        logger.info("Default embedding normalizer loaded from the environment.")
+
+    default_llm_model = env.str("KAVALAI_DEFAULT_LLM_MODEL", "") or None
+    default_llm_parameters = llm_parameters_from_env()
+    logger.info(f"Default LLM model: {default_llm_model or '(none)'}")
+    logger.info(f"Default LLM parameters: {default_llm_parameters or '(none)'}")
+
     logger.info(f"Loading workflow from {workflow_path}.")
     engine = WorkflowEngine.from_yaml_path(
-        workflow_path, agent_service=agent_service, task_logger=task_logger
+        workflow_path,
+        agent_service=agent_service,
+        task_logger=task_logger,
+        default_llm_model=default_llm_model,
+        default_llm_parameters=default_llm_parameters,
     )
 
     return create_agent_app(

@@ -23,6 +23,23 @@ async def client():
         yield ac
 
 
+def test_a_missing_required_setting_stops_the_backoffice(monkeypatch):
+    """No development fallback: a cookie key nobody set is a cookie key
+    everybody knows."""
+    from kavalai.backoffice.server import required_setting
+
+    monkeypatch.delenv("KAVALAI_BO_SESSION_SECRET_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="KAVALAI_BO_SESSION_SECRET_KEY is not set"):
+        required_setting("KAVALAI_BO_SESSION_SECRET_KEY")
+
+    monkeypatch.setenv("KAVALAI_BO_SESSION_SECRET_KEY", "")
+    with pytest.raises(RuntimeError, match="is not set"):
+        required_setting("KAVALAI_BO_SESSION_SECRET_KEY")
+
+    monkeypatch.setenv("KAVALAI_BO_SESSION_SECRET_KEY", "s3cret")
+    assert required_setting("KAVALAI_BO_SESSION_SECRET_KEY") == "s3cret"
+
+
 @pytest.mark.asyncio
 async def test_user_details_unauthorized(client):
     response = await client.get("/user/get_details")
@@ -67,15 +84,17 @@ async def test_projects_create_unauthorized(client):
 @pytest.mark.asyncio
 async def test_projects_all(client, backoffice_db):
     # To test this, we need to bypass assert_logged_in or mock the session
-    with patch("kavalai.backoffice.server.is_logged_in", return_value=True), patch(
-        "kavalai.backoffice.server.Request.session", new_callable=MagicMock
+    with (
+        patch("kavalai.backoffice.server.is_logged_in", return_value=True),
+        patch("kavalai.backoffice.server.Request.session", new_callable=MagicMock),
     ):
         user_id = str(uuid.uuid4())
         # mock_session.get.return_value = {"id": user_id} # This doesn't work easily with FastAPI Request
 
         # Alternative: mock assert_logged_in and get user_info from session differently
-        with patch("kavalai.backoffice.server.assert_logged_in"), patch(
-            "starlette.requests.Request.session", {"user_info": {"id": user_id}}
+        with (
+            patch("kavalai.backoffice.server.assert_logged_in"),
+            patch("starlette.requests.Request.session", {"user_info": {"id": user_id}}),
         ):
             with patch("kavalai.backoffice.db.get_user_projects", return_value=[]):
                 response = await client.get("/projects/all")
@@ -99,9 +118,14 @@ async def test_projects_test_connection_success(client, backoffice_db):
     backoffice_db.add(project)
     await backoffice_db.commit()
 
-    with patch("kavalai.backoffice.server.assert_logged_in"), patch(
-        "kavalai.backoffice.server.get_project_and_assert_access", return_value=project
-    ), patch("kavalai.db.db_manager.get_sessionmaker") as mock_sm:
+    with (
+        patch("kavalai.backoffice.server.assert_logged_in"),
+        patch(
+            "kavalai.backoffice.server.get_project_and_assert_access",
+            return_value=project,
+        ),
+        patch("kavalai.db.db_manager.get_sessionmaker") as mock_sm,
+    ):
         mock_session = AsyncMock()
         mock_sm.return_value = MagicMock(return_value=mock_session)
         mock_session.__aenter__.return_value = mock_session
@@ -113,9 +137,10 @@ async def test_projects_test_connection_success(client, backoffice_db):
 
 @pytest.mark.asyncio
 async def test_projects_test_connection_new_success(client, backoffice_db):
-    with patch("kavalai.backoffice.server.assert_logged_in"), patch(
-        "kavalai.db.db_manager.get_sessionmaker"
-    ) as mock_sm:
+    with (
+        patch("kavalai.backoffice.server.assert_logged_in"),
+        patch("kavalai.db.db_manager.get_sessionmaker") as mock_sm,
+    ):
         mock_session = AsyncMock()
         mock_sm.return_value = MagicMock(return_value=mock_session)
         mock_session.__aenter__.return_value = mock_session
@@ -148,9 +173,14 @@ async def test_agents_get_all(client, backoffice_db):
     backoffice_db.add(project)
     await backoffice_db.commit()
 
-    with patch("kavalai.backoffice.server.assert_logged_in"), patch(
-        "kavalai.backoffice.server.get_project_and_assert_access", return_value=project
-    ), patch("kavalai.db.db_manager.get_sessionmaker") as mock_sm:
+    with (
+        patch("kavalai.backoffice.server.assert_logged_in"),
+        patch(
+            "kavalai.backoffice.server.get_project_and_assert_access",
+            return_value=project,
+        ),
+        patch("kavalai.db.db_manager.get_sessionmaker") as mock_sm,
+    ):
         mock_session = AsyncMock()
         mock_sm.return_value = MagicMock(return_value=mock_session)
         mock_session.__aenter__.return_value = mock_session
@@ -175,12 +205,15 @@ async def test_access_denied_propagates_403_not_503(client, backoffice_db):
     from fastapi import HTTPException
 
     project_id = uuid.uuid4()
-    with patch("kavalai.backoffice.server.assert_logged_in"), patch(
-        "kavalai.backoffice.server.assert_is_member",
-        new=AsyncMock(
-            side_effect=HTTPException(
-                status_code=403, detail="Must be a member of the project."
-            )
+    with (
+        patch("kavalai.backoffice.server.assert_logged_in"),
+        patch(
+            "kavalai.backoffice.server.assert_is_member",
+            new=AsyncMock(
+                side_effect=HTTPException(
+                    status_code=403, detail="Must be a member of the project."
+                )
+            ),
         ),
     ):
         response = await client.get(f"/agents/all/{project_id}")
@@ -210,9 +243,14 @@ async def test_agents_get_stats(client, backoffice_db):
         "messages": [],
     }
 
-    with patch("kavalai.backoffice.server.assert_logged_in"), patch(
-        "kavalai.backoffice.server.get_project_and_assert_access", return_value=project
-    ), patch("kavalai.db.db_manager.get_sessionmaker") as mock_sm:
+    with (
+        patch("kavalai.backoffice.server.assert_logged_in"),
+        patch(
+            "kavalai.backoffice.server.get_project_and_assert_access",
+            return_value=project,
+        ),
+        patch("kavalai.db.db_manager.get_sessionmaker") as mock_sm,
+    ):
         mock_session = AsyncMock()
         mock_sm.return_value = MagicMock(return_value=mock_session)
         mock_session.__aenter__.return_value = mock_session
@@ -256,9 +294,14 @@ async def test_agents_get_summary_stats(client, backoffice_db):
         "total_sessions": 56,
     }
 
-    with patch("kavalai.backoffice.server.assert_logged_in"), patch(
-        "kavalai.backoffice.server.get_project_and_assert_access", return_value=project
-    ), patch("kavalai.db.db_manager.get_sessionmaker") as mock_sm:
+    with (
+        patch("kavalai.backoffice.server.assert_logged_in"),
+        patch(
+            "kavalai.backoffice.server.get_project_and_assert_access",
+            return_value=project,
+        ),
+        patch("kavalai.db.db_manager.get_sessionmaker") as mock_sm,
+    ):
         mock_session = AsyncMock()
         mock_sm.return_value = MagicMock(return_value=mock_session)
         mock_session.__aenter__.return_value = mock_session
@@ -297,9 +340,14 @@ async def test_projects_get_llm_call_stats(client, backoffice_db):
     backoffice_db.add(project)
     await backoffice_db.commit()
 
-    with patch("kavalai.backoffice.server.assert_logged_in"), patch(
-        "kavalai.backoffice.server.get_project_and_assert_access", return_value=project
-    ), patch("kavalai.db.db_manager.get_sessionmaker") as mock_sm:
+    with (
+        patch("kavalai.backoffice.server.assert_logged_in"),
+        patch(
+            "kavalai.backoffice.server.get_project_and_assert_access",
+            return_value=project,
+        ),
+        patch("kavalai.db.db_manager.get_sessionmaker") as mock_sm,
+    ):
         mock_session = AsyncMock()
         # mock_sm returns an async_sessionmaker object
         # which when called returns a context manager (mock_session)
@@ -321,11 +369,13 @@ async def test_projects_get_llm_call_stats(client, backoffice_db):
 @pytest.mark.asyncio
 async def test_users_all(client, backoffice_db):
     user_id = str(uuid.uuid4())
-    with patch("kavalai.backoffice.server.assert_logged_in"), patch(
-        "kavalai.backoffice.server.assert_is_admin"
-    ), patch(
-        "starlette.requests.Request.session",
-        {"user_info": {"id": user_id, "is_admin": True}},
+    with (
+        patch("kavalai.backoffice.server.assert_logged_in"),
+        patch("kavalai.backoffice.server.assert_is_admin"),
+        patch(
+            "starlette.requests.Request.session",
+            {"user_info": {"id": user_id, "is_admin": True}},
+        ),
     ):
         # Add some users to backoffice_db
         u1 = db.User(email="u1@test.com", name="User 1")
@@ -345,11 +395,13 @@ async def test_users_all(client, backoffice_db):
 @pytest.mark.asyncio
 async def test_users_create(client, backoffice_db):
     user_id = str(uuid.uuid4())
-    with patch("kavalai.backoffice.server.assert_logged_in"), patch(
-        "kavalai.backoffice.server.assert_is_admin"
-    ), patch(
-        "starlette.requests.Request.session",
-        {"user_info": {"id": user_id, "is_admin": True}},
+    with (
+        patch("kavalai.backoffice.server.assert_logged_in"),
+        patch("kavalai.backoffice.server.assert_is_admin"),
+        patch(
+            "starlette.requests.Request.session",
+            {"user_info": {"id": user_id, "is_admin": True}},
+        ),
     ):
         new_user_data = {"email": "new@test.com", "name": "New User", "is_admin": False}
         response = await client.post("/users/create", json=new_user_data)
@@ -365,11 +417,13 @@ async def test_users_update(client, backoffice_db):
     await backoffice_db.commit()
 
     user_id = str(uuid.uuid4())
-    with patch("kavalai.backoffice.server.assert_logged_in"), patch(
-        "kavalai.backoffice.server.assert_is_admin"
-    ), patch(
-        "starlette.requests.Request.session",
-        {"user_info": {"id": user_id, "is_admin": True}},
+    with (
+        patch("kavalai.backoffice.server.assert_logged_in"),
+        patch("kavalai.backoffice.server.assert_is_admin"),
+        patch(
+            "starlette.requests.Request.session",
+            {"user_info": {"id": user_id, "is_admin": True}},
+        ),
     ):
         update_data = {"name": "Updated Name"}
         response = await client.put(f"/users/update/{target_user_id}", json=update_data)
@@ -385,11 +439,13 @@ async def test_users_delete(client, backoffice_db):
     await backoffice_db.commit()
 
     user_id = str(uuid.uuid4())
-    with patch("kavalai.backoffice.server.assert_logged_in"), patch(
-        "kavalai.backoffice.server.assert_is_admin"
-    ), patch(
-        "starlette.requests.Request.session",
-        {"user_info": {"id": user_id, "is_admin": True}},
+    with (
+        patch("kavalai.backoffice.server.assert_logged_in"),
+        patch("kavalai.backoffice.server.assert_is_admin"),
+        patch(
+            "starlette.requests.Request.session",
+            {"user_info": {"id": user_id, "is_admin": True}},
+        ),
     ):
         response = await client.delete(f"/users/delete/{target_user_id}")
         assert response.status_code == 200
@@ -403,11 +459,13 @@ async def test_users_delete_self_fails(client, backoffice_db):
     backoffice_db.add(u)
     await backoffice_db.commit()
 
-    with patch("kavalai.backoffice.server.assert_logged_in"), patch(
-        "kavalai.backoffice.server.assert_is_admin"
-    ), patch(
-        "starlette.requests.Request.session",
-        {"user_info": {"id": user_id, "is_admin": True}},
+    with (
+        patch("kavalai.backoffice.server.assert_logged_in"),
+        patch("kavalai.backoffice.server.assert_is_admin"),
+        patch(
+            "starlette.requests.Request.session",
+            {"user_info": {"id": user_id, "is_admin": True}},
+        ),
     ):
         response = await client.delete(f"/users/delete/{user_id}")
         # Initially this might be 200, but we want it to be 400

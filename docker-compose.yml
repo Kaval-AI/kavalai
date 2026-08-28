@@ -39,7 +39,7 @@ services:
     environment:
       - KAVALAI_BO_DB_URI=postgresql://kavalai_dev:kavalai_dev@postgres_db:5432/kavalai_dev
       - KAVALAI_BO_DB_SCHEMA=backoffice
-      - FRONTEND_URL=http://localhost:8000
+      - KAVALAI_BO_FRONTEND_URL=http://localhost:8000
     depends_on:
       - backoffice-migrations
     networks:
