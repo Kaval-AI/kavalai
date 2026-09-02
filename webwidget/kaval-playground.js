@@ -37,16 +37,16 @@
     cmBase: "https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/",
     webllmUrl: "https://esm.run/@mlc-ai/web-llm",
     wheelUrl: null,
-    // In-browser chat models offered in the picker. q4f32 builds run on GPUs
-    // without FP16 shaders (e.g. GTX 10xx); q4f16 needs an FP16 GPU. The chosen
-    // id is exposed to Python as the KAVAL_BROWSER_MODEL global.
+    // In-browser chat models offered in the picker, all q4f32 builds (they run
+    // on GPUs without FP16 shaders, unlike q4f16). Curated to models that hold
+    // a multi-turn conversation — 1B-class models parrot their context instead
+    // of answering, so the smallest offered chat default is Qwen2.5-1.5B. The
+    // chosen id is exposed to Python as the KAVAL_BROWSER_MODEL global.
     models: [
-      ["Llama-3.2-1B-Instruct-q4f32_1-MLC", "Llama-3.2-1B · q4f32 (≈1.1 GB)"],
-      ["Llama-3.2-3B-Instruct-q4f32_1-MLC", "Llama-3.2-3B · q4f32 (≈2.9 GB)"],
-      ["Qwen2.5-1.5B-Instruct-q4f32_1-MLC", "Qwen2.5-1.5B · q4f32 (≈1.6 GB)"],
-      ["Qwen2.5-0.5B-Instruct-q4f32_1-MLC", "Qwen2.5-0.5B · q4f32 (≈0.6 GB)"],
-      ["Llama-3.2-1B-Instruct-q4f16_1-MLC", "Llama-3.2-1B · q4f16 (FP16 GPU)"],
-      ["Llama-3.2-3B-Instruct-q4f16_1-MLC", "Llama-3.2-3B · q4f16 (FP16 GPU)"],
+      ["Qwen2.5-1.5B-Instruct-q4f32_1-MLC", "Qwen2.5-1.5B · ~1.9 GB VRAM"],
+      ["Qwen2.5-3B-Instruct-q4f32_1-MLC", "Qwen2.5-3B · ~2.9 GB VRAM"],
+      ["Llama-3.2-3B-Instruct-q4f32_1-MLC", "Llama-3.2-3B · ~3.0 GB VRAM"],
+      ["Qwen2.5-0.5B-Instruct-q4f32_1-MLC", "Qwen2.5-0.5B · ~1.1 GB VRAM"],
     ],
     // A small, full-precision (q0f32) embedding model — no FP16 GPU required.
     embedModel: "snowflake-arctic-embed-s-q0f32-MLC-b4",
@@ -183,14 +183,36 @@
     // Reuse the engine while the model is unchanged; rebuild on a switch
     // (e.g. moving from a chat model to an embedding model).
     if (enginePromise && loadedModel === modelId) return enginePromise;
-    loadedModel = modelId;
     var webllm = await loadWebLLM();
-    enginePromise = webllm.CreateMLCEngine(modelId, {
-      initProgressCallback: function (report) {
-        sinkStatus(report && report.text ? report.text : "Loading model…");
-      },
+    var previous = enginePromise;
+    loadedModel = modelId;
+    var loading = (async function () {
+      if (previous) {
+        // Two models rarely fit in VRAM together, so release the previous
+        // engine's GPU buffers before loading the next one.
+        try {
+          await (await previous).unload();
+        } catch (e) {
+          /* the previous engine never loaded or is already unusable */
+        }
+      }
+      return webllm.CreateMLCEngine(modelId, {
+        initProgressCallback: function (report) {
+          sinkStatus(report && report.text ? report.text : "Loading model…");
+        },
+      });
+    })();
+    enginePromise = loading;
+    // A failed load (download error, GPU out of memory, FP16 shaders missing)
+    // must not be cached, or every retry would replay the stale rejection —
+    // recovering used to require a page reload.
+    loading.catch(function () {
+      if (enginePromise === loading) {
+        enginePromise = null;
+        loadedModel = null;
+      }
     });
-    return enginePromise;
+    return loading;
   }
 
   function installBrowserLLMBridge() {
@@ -309,6 +331,14 @@
       }
     }
 
+    // A snippet using the picked chat model would otherwise trigger the model
+    // download inside the engine's reply timeout window — load it up front,
+    // like the chat bridge does. The embedding model is small enough not to
+    // need this.
+    if (/KAVAL_BROWSER_MODEL/.test(code)) {
+      await getWebLLMEngine(ctx.model || CONFIG.models[0][0]);
+    }
+
     ctx.sink.status("Running…");
     // Auto-load bundled Pyodide packages referenced by imports (numpy, …).
     await pyodide.loadPackagesFromImports(code);
@@ -395,11 +425,15 @@
     // engine accumulates chat history under it. reset() starts a fresh chat.
     var sessionId = newSessionId();
 
+    // The same in-browser model the playground's picker selected.
+    function pickedModel() {
+      return lsGet(LS.model) || CONFIG.models[0][0];
+    }
+
     // Run a single turn: refresh the globals the snippet reads, then execute it.
     async function runTurn(pyodide, message) {
-      // Run against the same in-browser model the playground's picker selected.
       setModelGlobals(pyodide, {
-        model: lsGet(LS.model) || CONFIG.models[0][0],
+        model: pickedModel(),
         embedModel: CONFIG.embedModel,
       });
       pyodide.globals.set("_kaval_chat_msg", String(message));
@@ -418,6 +452,16 @@
         };
       }
       var pyodide = await ensurePyodide();
+
+      // Load the model before entering Python: the first use of a model
+      // downloads it (minutes on a slow connection), and the engine's response
+      // streamer would count that against its inactivity timeout and fail the
+      // turn. Loading here keeps the download outside the timed reply.
+      try {
+        await getWebLLMEngine(pickedModel());
+      } catch (err) {
+        return { error: String((err && err.message) || err) };
+      }
 
       var data = await runTurn(pyodide, message);
       // If nothing has defined `workflow` yet and the host gave us a way to

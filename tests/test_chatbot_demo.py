@@ -18,7 +18,7 @@ from kavalai.llm_clients.base_client import BaseLlmClient
 DEMO_HTML = (
     Path(__file__).resolve().parents[1] / "docs" / "_includes" / "chatbot-demo.html"
 )
-MODEL = "Llama-3.2-1B-Instruct-q4f32_1-MLC"
+MODEL = "Qwen2.5-1.5B-Instruct-q4f32_1-MLC"
 
 
 def _chatbot_code() -> str:

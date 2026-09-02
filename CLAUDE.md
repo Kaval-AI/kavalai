@@ -191,6 +191,15 @@ when asked. When it is, keep to the pattern it already follows:
 - WebLLM / `browser/` examples belong **only** in
   `docs/tutorials/run_in_browser.rst`, which also hosts the live chat widget
   (`docs/_includes/chatbot-demo.html`, extracted by `tests/test_chatbot_demo.py`).
+- **Run-in-browser acceptance test.** Any change touching the in-browser stack
+  (`docs/tutorials/run_in_browser.rst`, `docs/_includes/chatbot-demo.html`,
+  `webwidget/`, `docs/_static/pyodide/`, `kavalai/llm_clients/browser_client.py`)
+  must pass the memory check in a real WebGPU browser against the built docs:
+  in the chat widget send "Hi, I am John", then in the next turn ask "What is
+  my name?" — the reply must contain the name. `tests/test_chatbot_demo.py::
+  test_chatbot_remembers_earlier_turns` covers only the Python/engine layer;
+  the JS bridge and WebLLM layer (model loading, session reuse, history
+  delivery) is exercised only by this manual check, so run it before committing.
 - **Writing style.** The documentation is written in an academic, clean
   register, and new pages and edits must match it:
   - Declarative sentences in the present tense; plain, precise vocabulary.

@@ -58,15 +58,16 @@ Models, and how they download (WebLLM)
 A ``"browser/<model-id>"`` provider id routes inference to the page's WebLLM
 bridge. The first time a model is used it is **downloaded** (hundreds of MB to a
 few GB) and then **cached by the browser**, so later runs start instantly and
-work offline. The model id maps to a WebLLM build:
+work offline. The playground's toolbar dropdown offers a curated set of builds
+that hold a multi-turn conversation and run on any WebGPU device:
 
-* ``Llama-3.2-1B-Instruct-q4f32_1-MLC`` (~1.1 GB) and the 3B variant (~2.9 GB)
-* ``Qwen2.5-0.5B-Instruct-q4f32_1-MLC`` (~0.6 GB) and the 1.5B variant
+* ``Qwen2.5-1.5B-Instruct-q4f32_1-MLC`` (~1.9 GB VRAM) — the default
+* ``Qwen2.5-3B-Instruct-q4f32_1-MLC`` (~2.9 GB VRAM)
+* ``Llama-3.2-3B-Instruct-q4f32_1-MLC`` (~3.0 GB VRAM)
+* ``Qwen2.5-0.5B-Instruct-q4f32_1-MLC`` (~1.1 GB VRAM)
 * an embedding model, ``snowflake-arctic-embed-s-q0f32-MLC-b4``
 
-The ``q4f32`` builds run on GPUs **without** FP16 shaders (e.g. older cards);
-``q4f16`` builds are smaller/faster but need an FP16-capable GPU. In the
-playground you pick the chat model from the toolbar dropdown — it is exposed to
+You pick the chat model from the toolbar dropdown — it is exposed to
 your code as ``KAVAL_BROWSER_MODEL`` (and the embedding model as
 ``KAVAL_BROWSER_EMBED_MODEL``) — so you never hardcode an id:
 
@@ -79,6 +80,46 @@ your code as ``KAVAL_BROWSER_MODEL`` (and the embedding model as
    print(f"Loading {KAVAL_BROWSER_MODEL} "
          "(the first run downloads it; afterwards it is cached)…")
    print(await client.prompt("Say hello in one short sentence."))
+
+Finding and choosing a model
+----------------------------
+
+Any model in WebLLM's prebuilt registry can be named as
+``browser/<model-id>``. The registry is the ``prebuiltAppConfig.model_list``
+array in the WebLLM sources (`config.ts
+<https://github.com/mlc-ai/web-llm/blob/main/src/config.ts>`_); the weights
+behind each entry live in the `mlc-ai organisation on Hugging Face
+<https://huggingface.co/mlc-ai>`_, one repository per model id. The list for
+the WebLLM version a page has loaded can be printed from the browser console:
+
+.. code-block:: javascript
+
+   const webllm = await import("https://esm.run/@mlc-ai/web-llm");
+   console.table(
+     webllm.prebuiltAppConfig.model_list.map((m) => ({
+       id: m.model_id,
+       vram_MB: m.vram_required_MB,
+     }))
+   );
+
+Three conventions in the ids matter when choosing:
+
+* ``q4f32`` builds compute in 32-bit floats and run on any WebGPU device.
+  ``q4f16`` builds are smaller and faster but require FP16 shader support —
+  on a GPU without it (for example a GTX 10xx card) they fail at shader
+  compilation with a WebGPU validation error rather than a readable message.
+* A ``-1k`` suffix is the same model with its context window reduced to 1k
+  tokens, for devices with little memory.
+* ``vram_required_MB`` in the registry must fit in the GPU memory actually
+  available to the browser.
+
+Capability sets the lower bound. Models of about one billion parameters
+follow a structured-output schema, but do not hold a conversation: asked to
+use earlier turns, they tend to echo their prompt or their own previous
+answer instead of answering. ``Qwen2.5-1.5B`` is the smallest build that
+handles a multi-turn chat with memory reliably, and is therefore the
+playground default; the 0.5B build is listed for single-turn experiments on
+small GPUs.
 
 Embeddings in the browser
 -------------------------
