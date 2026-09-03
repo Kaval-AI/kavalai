@@ -98,6 +98,27 @@
                 @if (!accessDetailsCollapsed) {
                   <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     <div class="form-control w-full">
+                      <label class="label pb-1"><span class="label-text opacity-70 font-bold text-xs uppercase">Database Type</span></label>
+                      @if (isEditing) {
+                        <select [(ngModel)]="editableProject.db_type" class="select select-bordered w-full">
+                          <option value="postgresql">PostgreSQL</option>
+                          <option value="sqlite">SQLite (local file)</option>
+                        </select>
+                      } @else {
+                        <div class="bg-base-200 p-3 rounded-box font-mono text-sm">{{ selectedProject.db_type || 'postgresql' }}</div>
+                      }
+                    </div>
+                    @if ((isEditing ? editableProject.db_type : selectedProject.db_type) === 'sqlite') {
+                      <div class="form-control w-full lg:col-span-2">
+                        <label class="label pb-1"><span class="label-text opacity-70 font-bold text-xs uppercase">Database File</span></label>
+                        @if (isEditing) {
+                          <input type="text" [(ngModel)]="editableProject.db_name" class="input input-bordered w-full" placeholder="/path/to/agents.db">
+                        } @else {
+                          <div class="bg-base-200 p-3 rounded-box font-mono text-sm truncate">{{ selectedProject.db_name || '-' }}</div>
+                        }
+                      </div>
+                    } @else {
+                    <div class="form-control w-full">
                       <label class="label pb-1"><span class="label-text opacity-70 font-bold text-xs uppercase">Host</span></label>
                       @if (isEditing) {
                         <input type="text" [(ngModel)]="editableProject.db_host" class="input input-bordered w-full">
@@ -150,6 +171,7 @@
                         <div class="bg-base-200 p-3 rounded-box font-mono text-sm">{{ selectedProject.db_schema || '-' }}</div>
                       }
                     </div>
+                    }
                   </div>
                 }
               </div>

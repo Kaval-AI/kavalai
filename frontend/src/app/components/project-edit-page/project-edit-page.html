@@ -16,36 +16,55 @@
 
         <div class="form-row">
           <div class="form-field">
-            <label for="db_host">Host</label>
-            <input id="db_host" type="text" formControlName="db_host" placeholder="localhost">
-          </div>
-          <div class="form-field port-field">
-            <label for="db_port">Port</label>
-            <input id="db_port" type="number" formControlName="db_port">
-          </div>
-        </div>
-
-        <div class="form-row">
-          <div class="form-field">
-            <label for="db_name">Database Name</label>
-            <input id="db_name" type="text" formControlName="db_name">
-          </div>
-          <div class="form-field">
-            <label for="db_schema">Schema</label>
-            <input id="db_schema" type="text" formControlName="db_schema">
+            <label for="db_type">Database Type</label>
+            <select id="db_type" formControlName="db_type">
+              <option value="postgresql">PostgreSQL</option>
+              <option value="sqlite">SQLite (local file)</option>
+            </select>
           </div>
         </div>
 
-        <div class="form-row">
-          <div class="form-field">
-            <label for="db_user">Username</label>
-            <input id="db_user" type="text" formControlName="db_user">
+        @if (isSqlite) {
+          <div class="form-row">
+            <div class="form-field">
+              <label for="db_name">Database File</label>
+              <input id="db_name" type="text" formControlName="db_name" placeholder="/path/to/agents.db">
+            </div>
           </div>
-          <div class="form-field">
-            <label for="db_password">Password</label>
-            <input id="db_password" type="password" formControlName="db_password">
+        } @else {
+          <div class="form-row">
+            <div class="form-field">
+              <label for="db_host">Host</label>
+              <input id="db_host" type="text" formControlName="db_host" placeholder="localhost">
+            </div>
+            <div class="form-field port-field">
+              <label for="db_port">Port</label>
+              <input id="db_port" type="number" formControlName="db_port">
+            </div>
           </div>
-        </div>
+
+          <div class="form-row">
+            <div class="form-field">
+              <label for="db_name">Database Name</label>
+              <input id="db_name" type="text" formControlName="db_name">
+            </div>
+            <div class="form-field">
+              <label for="db_schema">Schema</label>
+              <input id="db_schema" type="text" formControlName="db_schema">
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-field">
+              <label for="db_user">Username</label>
+              <input id="db_user" type="text" formControlName="db_user">
+            </div>
+            <div class="form-field">
+              <label for="db_password">Password</label>
+              <input id="db_password" type="password" formControlName="db_password">
+            </div>
+          </div>
+        }
 
         @if (projectId) {
           <div class="test-connection-row">

@@ -108,7 +108,13 @@ class Project(Base):
     name: Mapped[str] = mapped_column(TEXT, nullable=False)
     description: Mapped[str | None] = mapped_column(TEXT)
 
-    # Connection to the project's own agent database.
+    # Connection to the project's own agent database. ``db_type`` selects the
+    # backend: ``postgresql`` uses host, port, user, password, database and
+    # schema; ``sqlite`` reads ``db_name`` as the file path and ignores the
+    # rest.
+    db_type: Mapped[str] = mapped_column(
+        TEXT, nullable=False, default="postgresql", server_default="postgresql"
+    )
     db_host: Mapped[str | None] = mapped_column(TEXT)
     db_port: Mapped[int | None] = mapped_column(Integer, default=5432)
     db_user: Mapped[str | None] = mapped_column(TEXT)
@@ -252,6 +258,7 @@ async def get_user_projects(db: AsyncSession, user_id: UUID) -> list[dict]:
             "id": str(project.id),
             "name": project.name,
             "description": project.description,
+            "db_type": project.db_type,
             "db_host": project.db_host,
             "db_port": project.db_port,
             "db_user": project.db_user,

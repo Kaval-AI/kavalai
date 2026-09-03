@@ -108,6 +108,16 @@ describe('ProjectEditPage', () => {
     expect(routerSpy.navigate).toHaveBeenCalledWith(['/']);
   });
 
+  it('should default to PostgreSQL and switch the form to a file for SQLite', () => {
+    expect(component.projectForm.value.db_type).toBe('postgresql');
+    expect(component.isSqlite).toBeFalse();
+
+    component.projectForm.patchValue({ db_type: 'sqlite', db_name: '/data/agents.db' });
+
+    expect(component.isSqlite).toBeTrue();
+    expect(component.projectForm.value.db_name).toBe('/data/agents.db');
+  });
+
   it('should test connection for existing project', () => {
     component.projectId = '1';
     const mockRes = { status: 'success', message: 'Connected' };

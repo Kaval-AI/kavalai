@@ -41,11 +41,11 @@ from kavalai.backoffice import db
 from kavalai.backoffice import sessions as agent_sessions
 from kavalai.backoffice.db import is_member, is_owner
 from kavalai.backoffice.embedding_projector import train_pca
-from kavalai.backoffice.project_service import ProjectService
+from kavalai.backoffice.project_service import ProjectService, project_sessionmaker
 from kavalai.crud import delete, get_all, get_one, insert, select, update
 from kavalai.db import Agent, db_manager
 from kavalai.llm_clients.streamer import StreamContent, Streamer
-from kavalai.rag import PostgresRagService
+from kavalai.rag import CollectionRagService, PostgresRagService, SqliteRagService
 
 app = FastAPI()
 
@@ -69,18 +69,6 @@ async def get_backoffice_session():
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Backoffice database is not connected. Please check your database settings.",
         )
-
-
-def project_sessionmaker(project: db.Project) -> async_sessionmaker[AsyncSession]:
-    """A sessionmaker for the agent database the project points at."""
-    return db_manager.get_sessionmaker(
-        user=project.db_user,
-        password=project.db_password,
-        host=project.db_host,
-        port=project.db_port,
-        db_name=project.db_name,
-        schema=project.db_schema,
-    )
 
 
 @asynccontextmanager
@@ -542,6 +530,30 @@ def _reuse_session(session: AsyncSession):
     return factory
 
 
+def rag_service_for_project(
+    project: db.Project,
+    model: str | None = None,
+    normalizer=None,
+    session_factory=None,
+) -> CollectionRagService:
+    """The RAG service over the project's agent database.
+
+    Both backends share one storage model, so the explorer endpoints only
+    differ in how they reach the database: a SQLite project's index lives in
+    the same file as its agent tables, a PostgreSQL project's in the same
+    schema, reached through ``session_factory`` (the project's sessionmaker
+    unless one is given).
+    """
+    if project.db_type == "sqlite":
+        return SqliteRagService(project.db_name, model=model, normalizer=normalizer)
+    return PostgresRagService(
+        session_factory or project_sessionmaker(project),
+        model,
+        normalizer=normalizer,
+        schema=project.db_schema,
+    )
+
+
 async def _cache_value(
     bo_session: db.AsyncSession, project_id: UUID, name: str
 ) -> str | None:
@@ -555,7 +567,7 @@ async def _cache_value(
 async def _pca_projection(
     project_id: UUID,
     collection_name: str,
-    rag_service: PostgresRagService,
+    rag_service: CollectionRagService,
     text: str,
     normalizer,
     results,
@@ -646,11 +658,8 @@ async def projects_rag_query(
             )
 
     async with get_project_session(project) as session:
-        rag_service = PostgresRagService(
-            _reuse_session(session),
-            model,
-            normalizer=normalizer,
-            schema=project.db_schema,
+        rag_service = rag_service_for_project(
+            project, model, normalizer, session_factory=_reuse_session(session)
         )
         results = await rag_service.query(
             text=text,
@@ -677,8 +686,8 @@ async def projects_rag_stats(project_id: UUID, request: Request):
 
     # Stats come from the collection registry, so no embedding model is needed.
     async with get_project_session(project) as session:
-        rag_service = PostgresRagService(
-            _reuse_session(session), model=None, schema=project.db_schema
+        rag_service = rag_service_for_project(
+            project, session_factory=_reuse_session(session)
         )
         return await rag_service.get_stats()
 
@@ -691,10 +700,9 @@ async def projects_train_pca(project_id: UUID, collection_name: str, request: Re
 
     streamer = Streamer(stream_delta=True)
 
-    rag_service = PostgresRagService(
-        lambda: get_project_session(project),
-        model=None,  # export-only: PCA training never computes embeddings
-        schema=project.db_schema,
+    # Export-only: PCA training never computes embeddings, so no model.
+    rag_service = rag_service_for_project(
+        project, session_factory=lambda: get_project_session(project)
     )
 
     async def run_training():

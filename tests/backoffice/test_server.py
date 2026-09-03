@@ -431,3 +431,86 @@ async def test_user_details_keeps_valid_active_project(client, backoffice_db):
 
     assert response.status_code == 200
     assert response.json()["active_project_id"] == str(project.id)
+
+
+def test_rag_service_for_project_follows_the_database_type(tmp_path):
+    """One helper picks the backend, so every explorer endpoint agrees."""
+    from kavalai.backoffice.server import rag_service_for_project
+    from kavalai.rag import PostgresRagService, SqliteRagService
+
+    sqlite_project = db.Project(
+        name="local", db_type="sqlite", db_name=str(tmp_path / "agents.db")
+    )
+    service = rag_service_for_project(sqlite_project, model="fake/model")
+    assert isinstance(service, SqliteRagService)
+    assert service.model == "fake/model"
+    service.close()
+
+    postgres_project = db.Project(
+        name="pg",
+        db_host="h",
+        db_port=5432,
+        db_user="u",
+        db_password="p",
+        db_name="d",
+        db_schema="agents",
+    )
+    factory = MagicMock()
+    service = rag_service_for_project(postgres_project, session_factory=factory)
+    assert isinstance(service, PostgresRagService)
+    assert service.session_maker is factory
+    assert service.schema == "agents"
+    assert service.model is None
+
+
+@pytest.mark.asyncio
+async def test_a_sqlite_project_is_browsed_from_its_file(
+    client, backoffice_db, tmp_path
+):
+    """End to end on a SQLite project: the agent tables an agent server
+    created with ``init_sqlite`` and a RAG index in the same file are read by
+    the stats, connection-test and RAG endpoints."""
+    from kavalai.db import db_manager
+    from kavalai.rag import SqliteRagService
+
+    path = str(tmp_path / "agents.db")
+    await db_manager.init_sqlite(db_path=path)
+    index = SqliteRagService(path, model="fake/model")
+    index.embedding_client = MagicMock(
+        compute_embeddings=AsyncMock(
+            return_value=(
+                [[1.0, 0.0], [0.0, 1.0]],
+                MagicMock(total_tokens=2, batch_size=2),
+            )
+        )
+    )
+    await index.index_batch(
+        texts=["a", "b"], metadata_list=[{}, {}], collection_name="facts"
+    )
+    index.close()
+
+    project = db.Project(id=uuid.uuid4(), name="local", db_type="sqlite", db_name=path)
+    backoffice_db.add(project)
+    await backoffice_db.commit()
+
+    with (
+        patch("kavalai.backoffice.server.assert_logged_in"),
+        patch(
+            "kavalai.backoffice.server.get_project_and_assert_access",
+            return_value=project,
+        ),
+    ):
+        response = await client.get(f"/projects/{project.id}/rag/stats")
+        assert response.status_code == 200
+        assert response.json() == {
+            "total_entries": 2,
+            "total_collections": 1,
+            "collections": ["facts"],
+        }
+
+        response = await client.get(f"/projects/{project.id}/llm-call-stats")
+        assert response.status_code == 200
+
+        response = await client.post(f"/projects/test-connection/{project.id}")
+        assert response.status_code == 200
+        assert response.json()["status"] == "success"

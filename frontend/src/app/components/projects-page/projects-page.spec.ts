@@ -226,6 +226,15 @@ describe('ProjectsPage', () => {
     expect(uri).not.toContain('••••••••');
   });
 
+  it('should render file URIs for a SQLite project', () => {
+    component.selectedProject = { db_type: 'sqlite', db_name: '/data/agents.db' } as Project;
+
+    expect(component.getDbUri('postgresql')).toBe('sqlite:////data/agents.db');
+    expect(component.getDbUri('asyncpg')).toBe('sqlite+aiosqlite:////data/agents.db');
+    expect(component.getDbUri('jdbc')).toBe('jdbc:sqlite:/data/agents.db');
+    expect(component.getDbUri('env')).toBe('KAVALAI_DB_URI=sqlite:////data/agents.db');
+  });
+
   it('should copy text to clipboard and show success toast with position', async () => {
     const text = 'test connection string';
     const event = { clientX: 100, clientY: 200 } as MouseEvent;

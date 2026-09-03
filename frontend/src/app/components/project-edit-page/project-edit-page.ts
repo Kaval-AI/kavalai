@@ -48,6 +48,10 @@ export class ProjectEditPage implements OnInit {
   canManageMembers = false;
   activeRoleDropdown: string | null = null;
 
+  get isSqlite() {
+    return this.projectForm.controls.db_type.value === 'sqlite';
+  }
+
   get filteredUsers() {
     const memberIds = this.members.map(m => m.id);
     return this.allUsers.filter(u => !memberIds.includes(u.id));
@@ -56,6 +60,7 @@ export class ProjectEditPage implements OnInit {
   projectForm = this.fb.group({
     name: ['', [Validators.required]],
     description: ['', []],
+    db_type: ['postgresql', []],
     db_host: ['', []],
     db_port: [5432, [Validators.min(1), Validators.max(65535)]],
     db_user: ['', []],
