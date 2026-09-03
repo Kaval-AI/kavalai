@@ -104,12 +104,28 @@ class VectorType(TypeDecorator):
 
 
 def ensure_async_scheme(uri: str) -> str:
-    """Ensures the URI uses the postgresql+asyncpg driver."""
+    """Return ``uri`` with the async driver for its backend.
+
+    ``postgresql`` (any driver) becomes ``postgresql+asyncpg`` and ``sqlite``
+    becomes ``sqlite+aiosqlite``; anything else is returned unchanged.
+    """
     if uri and "://" in uri:
         scheme, rest = uri.split("://", 1)
         if scheme.startswith("postgresql"):
             return f"postgresql+asyncpg://{rest}"
+        if scheme.startswith("sqlite"):
+            return f"sqlite+aiosqlite://{rest}"
     return uri
+
+
+def is_sqlite_uri(uri: str) -> bool:
+    """Whether ``uri`` names a SQLite database (any driver spelling)."""
+    return bool(uri) and uri.split("://", 1)[0].startswith("sqlite")
+
+
+def sqlite_path_from_uri(uri: str) -> str:
+    """The file path a ``sqlite:///...`` URI points at (``:memory:`` included)."""
+    return make_url(uri).database or ":memory:"
 
 
 def build_db_uri(
@@ -189,6 +205,10 @@ class DatabaseManager:
     ):
         """Return an ``async_sessionmaker`` for the given database and schema.
 
+        A ``sqlite://`` URI is served by :meth:`get_sqlite_sessionmaker`: the
+        file named by the URI, foreign keys on, one shared connection, and
+        ``schema`` ignored because SQLite has none.
+
         ``schema`` selects the schema the ORM tables live in. The models are
         defined schema-less; the schema is applied per-engine via SQLAlchemy's
         ``schema_translate_map``, so the same models can target any schema at
@@ -207,6 +227,13 @@ class DatabaseManager:
             url = ensure_async_scheme(uri)
         else:
             url = build_db_uri(user, password, host, port, db_name)
+
+        # A SQLite URI takes the SQLite engine: no connection pool to size and
+        # no schemas, so ``schema`` and the pool options do not apply.
+        if is_sqlite_uri(url):
+            return self.get_sqlite_sessionmaker(
+                db_path=sqlite_path_from_uri(url), echo=bool(echo)
+            )
 
         # Cache per (url, schema): translate maps are engine-level options.
         key = (url, schema)

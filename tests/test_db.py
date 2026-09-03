@@ -1,4 +1,5 @@
 import pytest
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kavalai.db import (
@@ -8,7 +9,10 @@ from kavalai.db import (
     Task,
     ChatMessage,
     ModelCallStat,
+    db_manager,
     ensure_async_scheme,
+    is_sqlite_uri,
+    sqlite_path_from_uri,
 )
 from kavalai.crud import insert, delete, get_one
 
@@ -166,8 +170,10 @@ def test_ensure_async_scheme():
         == "postgresql+asyncpg://user:pass@host:5432/db"
     )
 
-    # Test with non-postgresql scheme
-    assert ensure_async_scheme("sqlite:///:memory:") == "sqlite:///:memory:"
+    # SQLite gets its async driver too; an unknown scheme is left alone
+    assert ensure_async_scheme("sqlite:///:memory:") == "sqlite+aiosqlite:///:memory:"
+    assert ensure_async_scheme("sqlite+aiosqlite:///x.db") == "sqlite+aiosqlite:///x.db"
+    assert ensure_async_scheme("mysql://u:p@h/db") == "mysql://u:p@h/db"
 
     # Test with invalid URI
     assert ensure_async_scheme("not_a_uri") == "not_a_uri"
@@ -216,3 +222,29 @@ async def test_delete_missing_row_reports_false(agents_db: AsyncSession):
     from uuid import uuid4
 
     assert await delete(agents_db, Agent, uuid4()) is False
+
+
+def test_sqlite_uri_helpers():
+    assert is_sqlite_uri("sqlite:///x.db")
+    assert is_sqlite_uri("sqlite+aiosqlite:///x.db")
+    assert not is_sqlite_uri("postgresql://u:p@h/db")
+    assert not is_sqlite_uri("")
+    assert sqlite_path_from_uri("sqlite:////tmp/agents.db") == "/tmp/agents.db"
+    assert sqlite_path_from_uri("sqlite:///rel.db") == "rel.db"
+    assert sqlite_path_from_uri("sqlite://") == ":memory:"
+
+
+@pytest.mark.asyncio
+async def test_get_sessionmaker_serves_sqlite_uris(tmp_path):
+    """A ``sqlite://`` URI lands on the SQLite engine: schema ignored, the
+    same shared engine as ``get_sqlite_sessionmaker`` and foreign keys on."""
+    db_path = tmp_path / "agents.db"
+    session_maker = db_manager.get_sessionmaker(
+        uri=f"sqlite:///{db_path}", schema="ignored"
+    )
+    assert (
+        session_maker.kw["bind"]
+        is db_manager.get_sqlite_sessionmaker(db_path=str(db_path)).kw["bind"]
+    )
+    async with session_maker() as session:
+        assert (await session.execute(text("PRAGMA foreign_keys"))).scalar() == 1
