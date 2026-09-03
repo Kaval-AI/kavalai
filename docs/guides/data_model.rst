@@ -282,39 +282,56 @@ service rather than by the migrations. This separation is deliberate: an index
 has a different lifecycle from a run log, is frequently rebuilt, and may live
 in an entirely different database.
 
-PostgreSQL
-----------
+One storage model, two databases
+--------------------------------
 
-:class:`~kavalai.rag.PostgresRagService` creates the ``vector`` extension on
-first use and then maintains:
+Both RAG services share the storage model defined in
+:mod:`kavalai.rag.collections`, and maintain it themselves:
 
 * ``rag_collections`` — the registry. One row per collection, holding its
   ``name``, the ``table_name`` its vectors live in, the embedding ``model``,
   the ``embedding_size`` and a ``schema_version``. It exists because the
   dimension of a vector column is fixed at creation, so a collection's model
   must be recorded alongside it; indexing the same collection with a different
-  model is rejected rather than silently corrupting the index.
+  dimension is rejected rather than silently corrupting the index.
 * **one table per collection**, named deterministically from the collection
   name (a readable slug plus a short hash to keep distinct names distinct).
   Each row holds ``id``, ``source_id``, ``content``, an ``embedding`` of the
-  registered dimension, JSONB ``metadata`` and timestamps. Three indexes are
-  created with it: on ``source_id``, a GIN index on ``metadata`` for filtered
-  retrieval, and an HNSW index on ``embedding`` under cosine distance for the
-  similarity search itself.
+  registered dimension, ``metadata`` and two timestamps.
 
 One table per collection rather than one shared table means each collection has
-its own typed vector column and its own HNSW index, so an index scan never
-crosses collections and a collection can be dropped by dropping a table.
+its own typed vector column and its own index, so a scan never crosses
+collections and a collection is dropped by dropping a table. The registry is
+also what the backoffice RAG explorer reads, so it shows the same view of an
+index whichever database holds it. Only the column types differ:
 
-SQLite
-------
+.. list-table::
+   :header-rows: 1
+   :widths: 22 39 39
 
-:class:`~kavalai.rag.SqliteRagService` keeps everything in one table —
-``rag_index`` by default — inside a single file, with ``collection_name`` as a
-column and the embedding stored as a ``BLOB`` searched through the
-``sqlite-vector`` extension. The file is self-contained and portable, which is
-what allows an index to be built on a server and shipped to a browser; see
-:doc:`../tutorials/run_in_browser`.
+   * - Column
+     - :class:`~kavalai.rag.PostgresRagService`
+     - :class:`~kavalai.rag.SqliteRagService`
+   * - ``id``
+     - ``UUID``
+     - ``TEXT`` (the UUID's canonical form)
+   * - ``embedding``
+     - ``vector(N)`` from ``pgvector``, with an HNSW index under cosine
+       distance
+     - ``BLOB`` of 32-bit floats, scanned by the ``sqlite-vector`` extension
+       under cosine distance
+   * - ``metadata``
+     - ``JSONB``, with a GIN index
+     - ``TEXT`` holding JSON
+   * - timestamps
+     - ``TIMESTAMPTZ``
+     - ``TEXT`` in ISO 8601
+
+The PostgreSQL service creates the ``vector`` extension on first use. The
+SQLite service keeps registry and collections in one ordinary file, which
+needs no server and can be copied wherever it is needed; the file written by
+``kavalai`` 1.0, with a single ``rag_index`` table, is refused with a message
+asking for the index to be rebuilt.
 
 ``source_id`` and ``rag_metadata`` behave identically in both backends, so a
 retrieval written against one runs unchanged against the other. See

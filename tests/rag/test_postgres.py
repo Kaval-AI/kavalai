@@ -114,7 +114,7 @@ async def test_rag_service_with_normalizer():
     normalizer = Normalizer(l2=True)
 
     # We need to mock LLMClient's compute_embeddings in PostgresRagService
-    with patch("kavalai.rag.postgres.make_embedding_client") as mock_llm_client_cls:
+    with patch("kavalai.rag.collections.make_embedding_client") as mock_llm_client_cls:
         mock_llm_client = mock_llm_client_cls.return_value
         mock_stats = MagicMock(spec=ModelCallStat)
         mock_llm_client.compute_embeddings = AsyncMock(
@@ -182,7 +182,7 @@ async def test_rag_service_without_normalizer():
 
     model = "openai/text-embedding-3-small"
 
-    with patch("kavalai.rag.postgres.make_embedding_client") as mock_llm_client_cls:
+    with patch("kavalai.rag.collections.make_embedding_client") as mock_llm_client_cls:
         mock_llm_client = mock_llm_client_cls.return_value
         mock_stats = MagicMock(spec=ModelCallStat)
         mock_llm_client.compute_embeddings = AsyncMock(

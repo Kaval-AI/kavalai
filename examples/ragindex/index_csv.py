@@ -48,7 +48,7 @@ from typing import Iterator, Optional
 
 from loguru import logger
 
-from kavalai.rag import PostgresRagService, SqliteRagService
+from kavalai.rag import SqliteRagService, rag_service_from_uri
 from kavalai.rag.base import BaseRagService
 from kavalai.settings import apply_normalizer_from_env
 
@@ -228,9 +228,9 @@ def make_rag_service(index: str, model: str, schema: Optional[str]) -> BaseRagSe
     if index == "postgres":
         uri = os.environ["KAVALAI_DB_URI"]
         schema = schema or os.environ.get("KAVALAI_DB_SCHEMA", "public")
-        return PostgresRagService.from_uri(uri, model, schema=schema)
+        return rag_service_from_uri(uri, model, schema=schema)
     if "://" in index:
-        return PostgresRagService.from_uri(index, model, schema=schema)
+        return rag_service_from_uri(index, model, schema=schema)
     return SqliteRagService(index, model)
 
 

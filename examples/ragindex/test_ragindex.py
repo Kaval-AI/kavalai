@@ -214,7 +214,7 @@ def test_make_rag_service_resolves_the_postgres_target(
     ``--schema`` beats it, and a URI is taken as given."""
     captured = {}
 
-    def fake_from_uri(uri, model, schema=None):
+    def fake_from_uri(uri, model=None, schema=None, normalizer=None):
         captured.update(uri=uri, schema=schema)
         return "service"
 

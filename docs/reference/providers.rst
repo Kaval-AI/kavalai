@@ -119,7 +119,14 @@ A RAG service is registered under a plain name — there is no
    * - ``sqlite``
      - :class:`~kavalai.rag.sqllite.SqliteRagService`
      - A single file through `sqlite-vector
-       <https://github.com/sqliteai/sqlite-vector>`_, readable in the browser
+       <https://github.com/sqliteai/sqlite-vector>`_, with the same registry
+       and one table per collection
+
+Both keep the storage model described in :doc:`../guides/data_model`, so an
+index can be browsed in the backoffice whichever database holds it.
+:func:`~kavalai.rag.rag_service_from_uri` picks the service from a database
+URI — ``postgresql://`` or ``sqlite:///path`` — which is what the
+``ragindex`` example and the backoffice do.
 
 Both are registered bare, with nothing bound, so ``make_rag_service("sqlite")``
 still needs whatever the backend requires. What a workflow actually names is a
@@ -329,7 +336,10 @@ lazily:
 
 Because the client is built on first use, a name the registry cannot resolve
 raises on the first ``index`` or ``query`` call rather than at construction —
-so validate the string early if the service is built at start-up. Four
+so validate the string early if the service is built at start-up. The model
+may also be omitted: a service built with ``model=None`` can list, count,
+export and drop collections, and refuses to index or query, which is how the
+backoffice opens an index it did not build. Four
 practical points then matter more than a model's benchmark score:
 
 **Index and query with the same model.** Vectors from two different models are

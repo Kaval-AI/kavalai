@@ -33,7 +33,7 @@ def make_fake_embedding_client(vectors=VECTORS):
 def service_factory(tmp_path):
     """Create SqliteRagService instances with a mocked embedding client."""
     created = []
-    with patch("kavalai.rag.sqllite.make_embedding_client") as mock_make_client:
+    with patch("kavalai.rag.collections.make_embedding_client") as mock_make_client:
         mock_make_client.side_effect = lambda model: make_fake_embedding_client()
 
         def factory(filename=None, model=MODEL, **kwargs):
@@ -111,31 +111,81 @@ def test_auto_create_false_missing_table(service_factory, tmp_path):
     conn.commit()
     conn.close()
 
-    with pytest.raises(ValueError, match="does not exist"):
+    with pytest.raises(ValueError, match="'rag_collections' does not exist"):
         service_factory(filename, auto_create=False)
 
 
-def test_invalid_table_name(service_factory):
-    with pytest.raises(ValueError, match="Invalid table name"):
-        service_factory(table_name="rag; DROP TABLE users")
+def test_legacy_single_table_layout_is_refused(service_factory, tmp_path):
+    """A file built by kavalai 1.0 (one ``rag_index`` table) is not read.
+
+    Refusing with a message beats opening it as an empty index: the registry
+    would be created next to the old table and every query would come back
+    empty with no hint why.
+    """
+    filename = str(tmp_path / "old.db")
+    conn = sqlite3.connect(filename)
+    conn.execute("CREATE TABLE rag_index (id TEXT PRIMARY KEY, collection_name TEXT)")
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(ValueError, match="kavalai 1.0.*Rebuild the index"):
+        service_factory(filename)
 
 
 @pytest.mark.asyncio
-async def test_custom_table_name(service_factory, tmp_path):
-    filename = str(tmp_path / "custom.db")
-    service = service_factory(filename, table_name="my_index")
+async def test_one_table_per_collection_in_the_registry(service_factory, tmp_path):
+    """The Postgres shape: a ``rag_collections`` row and a table per collection."""
+    filename = str(tmp_path / "shape.db")
+    service = service_factory(filename)
     await service.index(text="apple", collection_name="fruits")
+    await service.index(text="banana", collection_name="more fruits")
 
     conn = sqlite3.connect(filename)
     tables = {
         row[0]
         for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
     }
+    registry = conn.execute(
+        "SELECT name, table_name, model, embedding_size FROM rag_collections "
+        "ORDER BY name"
+    ).fetchall()
     conn.close()
-    assert "my_index" in tables
 
-    results = await service.query("apple", top_k=1)
-    assert results[0].content == "apple"
+    assert "rag_collections" in tables
+    assert {
+        SqliteRagService.table_name_for_collection(n) for n in ("fruits", "more fruits")
+    } <= tables
+    assert registry == [
+        ("fruits", SqliteRagService.table_name_for_collection("fruits"), MODEL, 3),
+        (
+            "more fruits",
+            SqliteRagService.table_name_for_collection("more fruits"),
+            MODEL,
+            3,
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_collections_have_their_own_dimension(service_factory):
+    """Each collection registers its own ``vector_init`` dimension."""
+    service = service_factory()
+    await index_fruits(service)
+
+    service.embedding_client = make_fake_embedding_client(
+        {"weird": [0.1, 0.2, 0.3, 0.4], "odd": [0.4, 0.3, 0.2, 0.1]}
+    )
+    await service.index_batch(
+        texts=["weird", "odd"], metadata_list=[{}, {}], collection_name="four"
+    )
+
+    assert [
+        r.content for r in await service.query("weird", collection_name="four")
+    ] == [
+        "weird",
+        "odd",
+    ]
+    assert [c["embedding_size"] for c in await service.list_collections()] == [4, 3]
 
 
 @pytest.mark.asyncio
@@ -179,8 +229,10 @@ async def test_dimension_mismatch(service_factory):
     # scan would silently skip them otherwise.
     four_dim = make_fake_embedding_client({"weird": [0.1, 0.2, 0.3, 0.4]})
     service.embedding_client = four_dim
-    with pytest.raises(ValueError, match="dimension 4 does not match"):
-        await service.index_batch(texts=["weird"], metadata_list=[{}])
+    with pytest.raises(ValueError, match="3-dimensional embeddings; got 4"):
+        await service.index_batch(
+            texts=["weird"], metadata_list=[{}], collection_name="fruits"
+        )
 
 
 @pytest.mark.asyncio
@@ -210,18 +262,19 @@ async def test_query_filters(service_factory):
 
 
 @pytest.mark.asyncio
-async def test_query_model_filter(service_factory, tmp_path):
+async def test_results_carry_the_collection_model(service_factory, tmp_path):
+    """The model is a property of the collection, recorded when it is created."""
     filename = str(tmp_path / "models.db")
     service_a = service_factory(filename, model="fake/model-a")
-    await service_a.index(text="apple", source_id="sid_a")
+    await service_a.index(text="apple", source_id="sid_a", collection_name="c")
 
-    service_b = service_factory(filename, model="fake/model-b")
-    results_b = await service_b.query("apple", top_k=10)
-    assert results_b == []
+    browsing = service_factory(filename, model=None)
+    assert [c["model"] for c in await browsing.list_collections()] == ["fake/model-a"]
+    with pytest.raises(ValueError, match="without an embedding model"):
+        await browsing.query("apple", collection_name="c")
 
-    results_a = await service_a.query("apple", top_k=10)
-    assert len(results_a) == 1
-    assert results_a[0].model == "fake/model-a"
+    results = await service_a.query("apple", top_k=10, collection_name="c")
+    assert [r.model for r in results] == ["fake/model-a"]
 
 
 @pytest.mark.asyncio
@@ -273,10 +326,10 @@ async def test_delete(service_factory):
     service = service_factory()
     items = await index_fruits(service)
 
-    await service.delete(uuid.UUID(items[0]["id"]))
+    await service.delete(items[0]["id"])
 
     results = await service.query("apple", top_k=10, collection_name="fruits")
-    assert items[0]["id"] not in {str(r.id) for r in results}
+    assert items[0]["id"] not in {r.id for r in results}
     assert len(results) == 3
 
 

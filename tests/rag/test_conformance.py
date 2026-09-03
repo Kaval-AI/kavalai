@@ -338,3 +338,102 @@ def test_unresolvable_embedding_provider_does_not_break_construction(tmp_path):
     service.embedding_client = fake_embedding_client()
 
     assert service.embedding_client is not None
+
+
+# The registry-backed shape both SQL backends share: browse methods that work
+# without an embedding model, and one table per collection.
+
+
+async def test_list_collections_reports_model_dimension_and_count(
+    populated, collection
+):
+    entry = next(
+        c for c in await populated.list_collections() if c["name"] == collection
+    )
+
+    assert entry["model"] == "fake/embedding-model"
+    assert entry["embedding_size"] == 4
+    assert entry["count"] == len(CORPUS)
+    assert entry["schema_version"] >= 1
+
+
+async def test_get_stats_aggregates_the_registry(populated, collection):
+    stats = await populated.get_stats()
+
+    assert collection in stats["collections"]
+    assert stats["total_collections"] == len(stats["collections"])
+    assert stats["total_entries"] >= len(CORPUS)
+
+
+async def test_create_and_drop_collection(rag_service, collection):
+    await rag_service.create_collection(collection, embedding_size=4)
+    assert collection in {c["name"] for c in await rag_service.list_collections()}
+    assert await rag_service.count_entries(collection) == 0
+
+    with pytest.raises(ValueError, match="4-dimensional"):
+        await rag_service.create_collection(collection, embedding_size=3)
+
+    await rag_service.drop_collection(collection)
+    assert collection not in {c["name"] for c in await rag_service.list_collections()}
+    await rag_service.drop_collection(collection)  # dropping twice is not an error
+
+
+async def test_get_embeddings_by_ids(populated, collection):
+    entries = [entry async for entry in populated.iter_entries(collection)]
+    wanted = [entries[0]["id"], entries[-1]["id"]]
+
+    by_id = await populated.get_embeddings_by_ids(collection, wanted)
+
+    assert set(by_id) == set(wanted)
+    assert by_id[entries[0]["id"]] == pytest.approx(entries[0]["embedding"], abs=1e-6)
+    assert await populated.get_embeddings_by_ids(collection, []) == {}
+    assert await populated.get_embeddings_by_ids("no_such_collection", wanted) == {}
+
+
+async def test_a_service_without_a_model_can_browse_but_not_embed(
+    populated, collection, request, tmp_path
+):
+    """The backoffice opens indexes it did not build, so the model is optional."""
+    if isinstance(populated, SqliteRagService):
+        browsing = SqliteRagService(populated.filename, model=None)
+    else:
+        browsing = PostgresRagService(populated.session_maker, schema=populated.schema)
+
+    assert await browsing.count_entries(collection) == len(CORPUS)
+    assert collection in {c["name"] for c in await browsing.list_collections()}
+    with pytest.raises(ValueError, match="without an embedding model"):
+        await browsing.query("apple", collection_name=collection)
+    with pytest.raises(ValueError, match="without an embedding model"):
+        await browsing.create_collection(f"{collection}_new", embedding_size=4)
+
+
+async def test_no_collection_name_means_default(rag_service):
+    """Both backends read ``None`` as the ``"default"`` collection."""
+    await rag_service.index("apple", collection_name="default", source_id="a")
+    await rag_service.index("banana", collection_name="elsewhere", source_id="b")
+
+    hits = await rag_service.query("apple", top_k=5)
+
+    assert [hit.content for hit in hits] == ["apple"]
+    await rag_service.delete_by_source_id("default", "a")
+    await rag_service.drop_collection("elsewhere")
+
+
+async def test_querying_an_unknown_collection_is_empty(rag_service):
+    assert await rag_service.query("apple", collection_name="never_created") == []
+    assert await rag_service.count_entries("never_created") == 0
+    assert [e async for e in rag_service.iter_entries("never_created")] == []
+
+
+def test_rag_service_from_uri_picks_the_backend(tmp_path):
+    from kavalai.rag import rag_service_from_uri
+
+    sqlite = rag_service_from_uri(f"sqlite:///{tmp_path / 'idx.db'}")
+    assert isinstance(sqlite, SqliteRagService)
+    assert sqlite.model is None
+
+    postgres = rag_service_from_uri(
+        "postgresql://u:p@localhost:1/db", model="fake/embedding-model", schema="s"
+    )
+    assert isinstance(postgres, PostgresRagService)
+    assert postgres.schema == "s" and postgres.model == "fake/embedding-model"

@@ -13,8 +13,14 @@ code or from a CLI.
 
 | | `PostgresRagService` | `SqliteRagService` |
 |---|---|---|
-| Store | Postgres + pgvector, a table per collection with HNSW + GIN indexes | one sqlite-vector file |
-| Use for | production, anything the backoffice RAG explorer should show | local development, tests, a portable file index, the browser/WASM |
+| Store | Postgres + pgvector, a table per collection with HNSW + GIN indexes | one sqlite-vector file, same `rag_collections` registry and a table per collection |
+| Use for | production | local development, tests, a portable file index |
+
+Both share one storage model, so the backoffice RAG explorer shows either. A
+SQLite file written by kavalai 1.0 (single `rag_index` table) is refused —
+rebuild it. `rag_service_from_uri("postgresql://…" | "sqlite:///file.db", model)`
+picks the class from the URI. `model=None` opens an index read-only (list,
+count, export, drop); indexing and querying then raise.
 
 ```python
 from kavalai import PostgresRagService, SqliteRagService
@@ -28,8 +34,7 @@ pg = PostgresRagService(
 local = SqliteRagService(
     filename="handbook.db",          # ":memory:" for an in-memory index
     model="fastembed/BAAI/bge-small-en-v1.5",
-    table_name="rag_index",
-    auto_create=True,
+    auto_create=True,                # False: the file and registry must exist
 )
 ```
 
