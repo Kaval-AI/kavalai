@@ -4,15 +4,18 @@ Deployment
 A Kaval.AI deployment has up to three moving parts, and you may not need all
 three:
 
-* the **agent database** — the Postgres schema your runs, sessions, chat history
-  and statistics are written to;
+* the **agent database** — the Postgres schema (or SQLite file) your runs,
+  sessions, chat history and statistics are written to;
 * the **agent server** — your workflow behind an HTTP endpoint (optional; a
   workflow can equally run inside your own application);
 * the **backoffice** — the management and monitoring UI, with its own separate
   database.
 
 The database is the only part that is genuinely required, and only if you want
-persistence.
+persistence. PostgreSQL is the production choice. Both databases also accept a
+``sqlite:///path`` URI, which suits a single machine — development, a demo, a
+laptop — where the agent server and the backoffice share a filesystem; SQLite
+on a network mount is not safe for a writer.
 
 Local stack with Docker Compose
 -------------------------------
@@ -73,6 +76,16 @@ The two schemas are independent and may live in the same Postgres instance
 (``agents`` and ``backoffice`` by convention) or in different ones entirely. The
 backoffice reaches an agent database through a **project** — see
 :doc:`../ui/index`.
+
+With a SQLite URI the schema variable is ignored (SQLite has no schemas) and
+the same commands create the tables in the named file:
+
+.. code-block:: bash
+
+   KAVALAI_DB_URI=sqlite:///local_data/agents.db \
+       python -m kavalai.migrate_db agents
+   KAVALAI_BO_DB_URI=sqlite:///local_data/backoffice.db \
+       python -m kavalai.migrate_db backoffice
 
 Running the agent server
 ------------------------

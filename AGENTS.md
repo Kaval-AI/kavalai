@@ -34,9 +34,9 @@ Two components:
 | `kavalai/workflow/` | Engine v2: `models.py` (the graph), `engine.py`, `builder.py`, `expressions.py`, `render.py`, `tasklog/` |
 | `kavalai/llm_clients/` | OpenAI, Gemini, Anthropic, Ollama and in-browser clients behind one streaming interface; `registry.py` makes that set extensible |
 | `kavalai/eval/` | Evaluation against a **running** agent server: `base.py` (`AgentEvaluator`, `EvalResult`), `simple_evaluator.py` (literal matchers), `judge_evaluator.py` (a model grades a plain-language criterion), `eval_runner.py` (YAML cases + the `kavalai-eval` console script) |
-| `kavalai/rag/` | `BaseRagService` (three capability tiers), `PostgresRagService` (pgvector), `SqliteRagService` (portable file index) |
+| `kavalai/rag/` | `BaseRagService` (three capability tiers); `CollectionRagService` in `collections.py` is the shared storage model (`rag_collections` registry + a table per collection, `model` optional for browsing) with statement hooks that `PostgresRagService` (pgvector) and `SqliteRagService` (sqlite-vector file) implement; `rag_service_from_uri` picks one by URI scheme |
 | `kavalai/tools/` | Bundled tools: browser, web search, HTTP |
-| `kavalai/migrations/` | Alembic sets: `agents` and `backoffice` |
+| `kavalai/migrations/` | Alembic sets: `agents` and `backoffice`; both apply on Postgres and SQLite (batch mode for ALTERs, `uuid_column()` for UUIDs) |
 | `backoffice/`, `frontend/` | Management API and Angular UI |
 | `tests/` | Pytest suite for the library; mock MCP servers in `tests/helpers/`. An example's tests live beside it under `examples/`, and `testpaths` covers both |
 | `docs/`, `notebooks/` | Sphinx documentation; the five tutorial notebooks are the source of truth |

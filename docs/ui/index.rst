@@ -2,8 +2,8 @@ Using the Backoffice UI
 =======================
 
 The **backoffice** is Kaval.AI's management and monitoring interface — a FastAPI
-service (:mod:`kavalai.backoffice`) backed by PostgreSQL, with an Angular front
-end. While the SDK *runs* your agents, the backoffice is where they are
+service (:mod:`kavalai.backoffice`) backed by PostgreSQL or SQLite, with an
+Angular front end. While the SDK *runs* your agents, the backoffice is where they are
 **configured, inspected and observed**: every session, run, node and model call
 a workflow produces is recorded and browsable here. It is the visual side of
 Kaval.AI's *observable* pillar.
@@ -23,9 +23,10 @@ interface without their runtime data ever meeting.
 Running the backoffice
 ----------------------
 
-Three things must exist before the interface is usable: a PostgreSQL instance
-carrying both schemas, a Google OAuth client for sign-in, and one user row to
-sign in as. They are treated in that order below.
+Three things must exist before the interface is usable: a database carrying
+both schemas, a Google OAuth client for sign-in, and one user row to sign in
+as. They are treated in that order below. PostgreSQL is the production choice;
+SQLite serves a single machine, as described at the end of this section.
 
 Setting up PostgreSQL
 ^^^^^^^^^^^^^^^^^^^^^
@@ -74,6 +75,27 @@ Both are idempotent and both read their connection from the environment —
 share one instance, as they do in the development stack, or live on entirely
 separate servers. Every variable is listed in :doc:`../reference/config`, and
 the production arrangement in :doc:`../deploy/index`.
+
+Using SQLite instead
+^^^^^^^^^^^^^^^^^^^^
+
+Both variables also accept a ``sqlite:///path`` URI, and the schema variables
+are then ignored, since SQLite has no schemas. The same two commands create
+the tables in the named files:
+
+.. code-block:: bash
+
+   KAVALAI_BO_DB_URI=sqlite:///local_data/backoffice.db \
+       python -m kavalai.migrate_db backoffice
+   KAVALAI_DB_URI=sqlite:///local_data/agents.db \
+       python -m kavalai.migrate_db agents
+
+An agent server started with the same ``KAVALAI_DB_URI`` writes its sessions,
+runs and tasks into that file, and a project of type **SQLite** pointing at
+the file shows them. This suits development, a demonstration or a laptop: the
+agent server and the backoffice must share a filesystem, and SQLite on a
+network mount is not safe for a writer, so PostgreSQL remains the choice for a
+deployment with more than one host.
 
 Configuring sign-in
 ^^^^^^^^^^^^^^^^^^^
@@ -161,9 +183,12 @@ Projects
 --------
 
 Everything in the backoffice is scoped to a **project**. A project carries a
-name, a description, the connection details of its agent database — host, port,
-user, password, database and schema — its members, and a cache in which derived
-artefacts such as trained PCA models are kept. The project page is where the
+name, a description, the connection details of its agent database, its members,
+and a cache in which derived artefacts such as trained PCA models are kept. The
+**Database Type** selects how the connection is described: a PostgreSQL project
+names host, port, user, password, database and schema; a SQLite project names
+the database file, which the backoffice must be able to read from its own
+filesystem. The project page is where the
 active project is chosen, new ones are created, and the connection is verified.
 
 .. image:: projectinfopage.png
@@ -281,15 +306,17 @@ RAG explorer
 The **RAG** page is the interface's answer to a question the SDK can only
 answer in a notebook: what is actually in this index, and does it retrieve what
 one would expect? It reads the project's vector collections directly through
-:class:`~kavalai.rag.PostgresRagService`, so it needs no agent, no workflow and
-no running server — only a project whose database holds an index.
+the project's RAG service — :class:`~kavalai.rag.PostgresRagService` or
+:class:`~kavalai.rag.SqliteRagService`, which share one storage model (see
+:doc:`../guides/data_model`) — so it needs no agent, no workflow and no running
+server — only a project whose database holds an index.
 
 .. image:: ragexplorerpage.png
    :alt: RAG explorer with query controls above and a ranked result table below,
          showing similarity, source ID, content, collection and metadata
    :width: 100%
 
-Two counters head the page — the number of collections in the schema and the
+Two counters head the page — the number of collections in the database and the
 total number of indexed entries across them. Beneath them sits the query form,
 whose controls correspond one for one to the arguments of
 :meth:`~kavalai.rag.BaseRagService.query`:

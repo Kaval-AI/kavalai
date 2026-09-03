@@ -4,6 +4,47 @@ Versions
 The main changes in each release of the ``kavalai`` package. Releases are
 tagged ``vX.Y.Z`` in the repository and published to PyPI.
 
+Unreleased
+----------
+
+Added
+^^^^^
+
+* SQLite for the backoffice. ``KAVALAI_BO_DB_URI`` accepts a ``sqlite:///path``
+  URI, the backoffice migration set applies to SQLite, and a project has a
+  ``db_type`` — ``postgresql`` (default) or ``sqlite``, in which case its
+  ``db_name`` is the agent database file. The project form and the projects
+  page show the fields the chosen type needs.
+* ``sqlite:///path`` is accepted wherever a database URI is: ``KAVALAI_DB_URI``
+  for the agent server and migrations, ``DatabaseManager.get_sessionmaker``,
+  ``PostgresRagService.from_uri``'s counterpart
+  :func:`~kavalai.rag.rag_service_from_uri`, which picks the RAG service from
+  the URI scheme.
+* :class:`~kavalai.rag.CollectionRagService` (:mod:`kavalai.rag.collections`):
+  the storage model the two RAG services share — a ``rag_collections``
+  registry and one table per collection — with the browse methods the
+  backoffice needs (``list_collections``, ``get_stats``, ``create_collection``,
+  ``drop_collection``, ``get_embeddings_by_ids``) on both backends. ``model``
+  is optional on both constructors; without one a service browses but does not
+  embed.
+
+Changed
+^^^^^^^
+
+* ``SqliteRagService`` uses the shared storage model: a registry and a table
+  per collection, each with its own embedding dimension, instead of a single
+  ``rag_index`` table with one dimension per file. A file in the old layout is
+  refused with a message asking for the index to be rebuilt; the
+  ``table_name`` constructor argument is gone. ``collection_name=None`` now
+  means ``"default"``, as on Postgres, rather than every collection.
+* The backoffice session list no longer depends on Postgres-only SQL
+  (``DISTINCT ON``, ``jsonb_typeof``): :func:`~kavalai.db.json_typeof` and
+  :func:`~kavalai.db.json_array_length` render per dialect and a window
+  function ranks the messages.
+* Backoffice migration ``0002`` runs in batch mode, and UUID columns in the
+  backoffice set use ``uuid_column()``, so the set applies on SQLite as it
+  does on Postgres.
+
 1.0.3 — 2026-08-28
 ------------------
 
