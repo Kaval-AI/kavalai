@@ -23,13 +23,18 @@ from loguru import logger
 from sqlalchemy import Enum, MetaData
 from sqlalchemy import TEXT, Boolean, ForeignKey, DateTime, Integer
 from sqlalchemy import select, Index
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.pool import NullPool
 
-from kavalai.db import ensure_async_scheme
+from kavalai.db import (
+    db_manager,
+    ensure_async_scheme,
+    is_sqlite_uri,
+    sqlite_path_from_uri,
+    uuid_column,
+)
 
 
 def AsyncBackofficeSession(uri: str | None = None, schema: str | None = None):
@@ -39,10 +44,16 @@ def AsyncBackofficeSession(uri: str | None = None, schema: str | None = None):
     when omitted — the backoffice is an application, so reading its own
     environment at call time is acceptable; library code should always pass
     both explicitly. The schema is applied via ``schema_translate_map``.
+
+    A ``sqlite:///file`` URI is served by the shared SQLite engine of
+    :data:`~kavalai.db.db_manager` (one connection, foreign keys on) and the
+    schema is ignored, since SQLite has none.
     """
     uri = uri or os.environ["KAVALAI_BO_DB_URI"]
     if schema is None:
         schema = os.environ.get("KAVALAI_BO_DB_SCHEMA")
+    if is_sqlite_uri(uri):
+        return db_manager.get_sqlite_sessionmaker(db_path=sqlite_path_from_uri(uri))()
     engine = create_async_engine(
         ensure_async_scheme(uri),
         echo=False,
@@ -67,9 +78,7 @@ class Base(DeclarativeBase):
 class User(Base):
     __tablename__ = "users"
 
-    id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
-    )
+    id: Mapped[UUID] = mapped_column(uuid_column(), primary_key=True, default=uuid4)
     email: Mapped[str] = mapped_column(TEXT, unique=True, nullable=False)
     name: Mapped[str] = mapped_column(TEXT, nullable=False)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -95,9 +104,7 @@ class User(Base):
 class Project(Base):
     __tablename__ = "projects"
 
-    id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
-    )
+    id: Mapped[UUID] = mapped_column(uuid_column(), primary_key=True, default=uuid4)
     name: Mapped[str] = mapped_column(TEXT, nullable=False)
     description: Mapped[str | None] = mapped_column(TEXT)
 
@@ -157,9 +164,7 @@ class ProjectMembership(Base):
 class ProjectCache(Base):
     __tablename__ = "project_cache"
 
-    id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
-    )
+    id: Mapped[UUID] = mapped_column(uuid_column(), primary_key=True, default=uuid4)
     project_id: Mapped[UUID] = mapped_column(
         ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )

@@ -191,8 +191,9 @@ def _parity_diffs(db_uri, schema, target_metadata, include_object=None):
     try:
         with engine.connect() as connection:
             # Make the migrated schema the default so the schema-less
-            # metadata compares against it.
-            connection.execute(text(f'SET search_path TO "{schema}"'))
+            # metadata compares against it (SQLite has no schemas).
+            if schema is not None:
+                connection.execute(text(f'SET search_path TO "{schema}"'))
             context = MigrationContext.configure(
                 connection,
                 opts={
@@ -224,6 +225,30 @@ def test_backoffice_migrations_match_models(db_uri):
     migrate("backoffice", uri=db_uri, schema=schema)
     diffs = _parity_diffs(db_uri, schema, Base.metadata)
     assert diffs == [], f"models and migrations diverged: {diffs}"
+
+
+def test_backoffice_migrations_apply_to_sqlite(tmp_path):
+    """The backoffice set runs on SQLite too, and ends at the ORM models.
+
+    Revision 0002 alters a foreign key, which SQLite can only do by rebuilding
+    the table, so this is the guard that keeps every revision in batch mode.
+    """
+    from kavalai.backoffice.db import Base
+
+    uri = f"sqlite:///{tmp_path / 'backoffice.db'}"
+    migrate("backoffice", uri=uri)
+    migrate("backoffice", uri=uri)  # idempotent
+
+    diffs = _parity_diffs(uri, None, Base.metadata)
+    assert diffs == [], f"models and migrations diverged: {diffs}"
+
+    engine = create_engine(uri)
+    with engine.connect() as connection:
+        ddl = connection.execute(
+            text("SELECT sql FROM sqlite_master WHERE name = 'users'")
+        ).scalar()
+    engine.dispose()
+    assert "ON DELETE SET NULL" in ddl
 
 
 class _FlakyEngine:
