@@ -32,6 +32,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID, JSONB
 from sqlalchemy.engine import make_url
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import (
     DeclarativeBase,
@@ -41,6 +42,7 @@ from sqlalchemy.orm import (
     sessionmaker,
 )
 from sqlalchemy.pool import StaticPool
+from sqlalchemy.sql.functions import GenericFunction
 
 from kavalai import idb
 
@@ -59,6 +61,55 @@ def uuid_column():
 def json_column():
     """JSON column type: ``JSONB`` on Postgres, generic ``JSON`` on SQLite."""
     return JSONB().with_variant(JSON(), "sqlite")
+
+
+class json_typeof(GenericFunction):
+    """Type name of a JSON value: ``array``, ``object``, ``null``, ...
+
+    Renders as ``jsonb_typeof`` on Postgres and ``json_type`` on SQLite, so a
+    query over a :func:`json_column` reads the same against both. Written for
+    the backoffice session list, which counts the tasks whose ``errors`` hold
+    something.
+    """
+
+    type = TEXT()
+    """The SQL type of the result."""
+
+    inherit_cache = True
+    """The compiled form depends on nothing but the arguments, so SQLAlchemy
+    may cache it."""
+
+
+class json_array_length(GenericFunction):
+    """Number of elements in a JSON array: ``jsonb_array_length`` on Postgres,
+    ``json_array_length`` on SQLite."""
+
+    type = Integer()
+    """The SQL type of the result."""
+
+    inherit_cache = True
+    """The compiled form depends on nothing but the arguments, so SQLAlchemy
+    may cache it."""
+
+
+@compiles(json_typeof, "postgresql")
+def _json_typeof_postgresql(element, compiler, **kw):
+    return f"jsonb_typeof({compiler.process(element.clauses, **kw)})"
+
+
+@compiles(json_typeof, "sqlite")
+def _json_typeof_sqlite(element, compiler, **kw):
+    return f"json_type({compiler.process(element.clauses, **kw)})"
+
+
+@compiles(json_array_length, "postgresql")
+def _json_array_length_postgresql(element, compiler, **kw):
+    return f"jsonb_array_length({compiler.process(element.clauses, **kw)})"
+
+
+@compiles(json_array_length, "sqlite")
+def _json_array_length_sqlite(element, compiler, **kw):
+    return f"json_array_length({compiler.process(element.clauses, **kw)})"
 
 
 class VectorType(TypeDecorator):

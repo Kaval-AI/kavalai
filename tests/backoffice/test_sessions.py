@@ -1,15 +1,32 @@
 import pytest
+import pytest_asyncio
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
-from kavalai.db import Agent, Session, Run, Task, ChatMessage
+from kavalai.db import Agent, Session, Run, Task, ChatMessage, db_manager
 from kavalai.backoffice.sessions import get_sessions_summary, get_session_details
 
 
+@pytest_asyncio.fixture(params=["postgres", "sqlite"])
+async def sessions_db(request, agents_db, tmp_path):
+    """The agent database on both backends a project can point at.
+
+    The session queries use JSON functions and a per-session ranking that
+    differ between the dialects, so every test here runs against both.
+    """
+    if request.param == "postgres":
+        yield agents_db
+        return
+    db_path = str(tmp_path / "agents.db")
+    await db_manager.init_sqlite(db_path=db_path)
+    async with db_manager.get_sqlite_sessionmaker(db_path=db_path)() as session:
+        yield session
+
+
 @pytest.mark.asyncio
-async def test_get_session_details(agents_db):
+async def test_get_session_details(sessions_db):
     agent = Agent(id=uuid4(), name="Test Agent")
-    agents_db.add(agent)
-    await agents_db.commit()
+    sessions_db.add(agent)
+    await sessions_db.commit()
 
     now = datetime.now(timezone.utc)
     s1 = Session(id=uuid4(), agent_id=agent.id, created_at=now, updated_at=now)
@@ -41,10 +58,10 @@ async def test_get_session_details(agents_db):
         created_at=now - timedelta(minutes=3),
     )
 
-    agents_db.add_all([s1, r1, m1, t1])
-    await agents_db.commit()
+    sessions_db.add_all([s1, r1, m1, t1])
+    await sessions_db.commit()
 
-    details = await get_session_details(agents_db, s1.id)
+    details = await get_session_details(sessions_db, s1.id)
 
     assert details.session_id == s1.id
     assert len(details.messages) == 1
@@ -59,11 +76,11 @@ async def test_get_session_details(agents_db):
 
 
 @pytest.mark.asyncio
-async def test_get_sessions_summary(agents_db):
+async def test_get_sessions_summary(sessions_db):
     # 1. Setup data
     agent = Agent(id=uuid4(), name="Test Agent")
-    agents_db.add(agent)
-    await agents_db.commit()
+    sessions_db.add(agent)
+    await sessions_db.commit()
 
     now = datetime.now(timezone.utc)
 
@@ -131,11 +148,11 @@ async def test_get_sessions_summary(agents_db):
         errors=[],
     )
 
-    agents_db.add_all([s1, r1, t1, m1, m2, s2, s3, r3, t3, s4, r4, t4])
-    await agents_db.commit()
+    sessions_db.add_all([s1, r1, t1, m1, m2, s2, s3, r3, t3, s4, r4, t4])
+    await sessions_db.commit()
 
     # 2. Call the function
-    result = await get_sessions_summary(agents_db)
+    result = await get_sessions_summary(sessions_db)
     summaries = result["sessions"]
     total_count = result["total_count"]
 
@@ -172,14 +189,14 @@ async def test_get_sessions_summary(agents_db):
 
     # Test filtering by agent_id
     another_agent = Agent(id=uuid4(), name="Another Agent")
-    agents_db.add(another_agent)
-    await agents_db.commit()
+    sessions_db.add(another_agent)
+    await sessions_db.commit()
 
     s3 = Session(id=uuid4(), agent_id=another_agent.id, created_at=now, updated_at=now)
-    agents_db.add(s3)
-    await agents_db.commit()
+    sessions_db.add(s3)
+    await sessions_db.commit()
 
-    result_filtered = await get_sessions_summary(agents_db, agent_id=another_agent.id)
+    result_filtered = await get_sessions_summary(sessions_db, agent_id=another_agent.id)
     summaries_filtered = result_filtered["sessions"]
     assert len(summaries_filtered) == 1
     assert result_filtered["total_count"] == 1
@@ -187,10 +204,10 @@ async def test_get_sessions_summary(agents_db):
 
 
 @pytest.mark.asyncio
-async def test_get_sessions_summary_with_search(agents_db):
+async def test_get_sessions_summary_with_search(sessions_db):
     agent = Agent(id=uuid4(), name="Test Agent")
-    agents_db.add(agent)
-    await agents_db.commit()
+    sessions_db.add(agent)
+    await sessions_db.commit()
 
     now = datetime.now(timezone.utc)
     s1 = Session(id=uuid4(), agent_id=agent.id, created_at=now, updated_at=now)
@@ -213,30 +230,30 @@ async def test_get_sessions_summary_with_search(agents_db):
         created_at=now,
     )
 
-    agents_db.add_all([s1, m1, s2, m2])
-    await agents_db.commit()
+    sessions_db.add_all([s1, m1, s2, m2])
+    await sessions_db.commit()
 
     # Search for "needle"
-    result = await get_sessions_summary(agents_db, search="needle")
+    result = await get_sessions_summary(sessions_db, search="needle")
     assert result["total_count"] == 1
     assert result["sessions"][0].session_id == s1.id
 
     # Search for "MESSAGE" (case insensitive)
-    result = await get_sessions_summary(agents_db, search="MESSAGE")
+    result = await get_sessions_summary(sessions_db, search="MESSAGE")
     assert result["total_count"] == 1
     assert result["sessions"][0].session_id == s2.id
 
     # Search for something non-existent
-    result = await get_sessions_summary(agents_db, search="nonexistent")
+    result = await get_sessions_summary(sessions_db, search="nonexistent")
     assert result["total_count"] == 0
     assert len(result["sessions"]) == 0
 
 
 @pytest.mark.asyncio
-async def test_get_sessions_summary_with_date_range(agents_db):
+async def test_get_sessions_summary_with_date_range(sessions_db):
     agent = Agent(id=uuid4(), name="Test Agent")
-    agents_db.add(agent)
-    await agents_db.commit()
+    sessions_db.add(agent)
+    await sessions_db.commit()
 
     now = datetime.now(timezone.utc).replace(microsecond=0)
 
@@ -251,30 +268,32 @@ async def test_get_sessions_summary_with_date_range(agents_db):
         updated_at=now - timedelta(days=10),
     )
 
-    agents_db.add_all([s1, s2])
-    await agents_db.commit()
+    sessions_db.add_all([s1, s2])
+    await sessions_db.commit()
 
     # Filter for last 7 days
     start_date = now - timedelta(days=7)
-    result = await get_sessions_summary(agents_db, start_date=start_date)
+    result = await get_sessions_summary(sessions_db, start_date=start_date)
     assert result["total_count"] == 1
     assert result["sessions"][0].session_id == s1.id
 
     # Filter for range that includes only s2
     end_date = now - timedelta(days=5)
-    result = await get_sessions_summary(agents_db, end_date=end_date)
+    result = await get_sessions_summary(sessions_db, end_date=end_date)
     assert result["total_count"] == 1
     assert result["sessions"][0].session_id == s2.id
 
     # Filter for both
     result = await get_sessions_summary(
-        agents_db, start_date=now - timedelta(days=15), end_date=now + timedelta(days=1)
+        sessions_db,
+        start_date=now - timedelta(days=15),
+        end_date=now + timedelta(days=1),
     )
     assert result["total_count"] == 2
 
 
 @pytest.mark.asyncio
-async def test_get_sessions_summary_filters_by_external_id(agents_db):
+async def test_get_sessions_summary_filters_by_external_id(sessions_db):
     """The one backoffice change evaluation needs: find *this* conversation.
 
     Evaluation runs tag their sessions ``eval:{suite}:{tag}:{case}:{repeat}``,
@@ -283,8 +302,8 @@ async def test_get_sessions_summary_filters_by_external_id(agents_db):
     conversation that produced it.
     """
     agent = Agent(id=uuid4(), name="Agent")
-    agents_db.add(agent)
-    await agents_db.commit()
+    sessions_db.add(agent)
+    await sessions_db.commit()
 
     now = datetime.now(timezone.utc)
     external_ids = [
@@ -294,7 +313,7 @@ async def test_get_sessions_summary_filters_by_external_id(agents_db):
         "chat-session-9931",
         None,
     ]
-    agents_db.add_all(
+    sessions_db.add_all(
         [
             Session(
                 id=uuid4(),
@@ -306,39 +325,39 @@ async def test_get_sessions_summary_filters_by_external_id(agents_db):
             for external_id in external_ids
         ]
     )
-    await agents_db.commit()
+    await sessions_db.commit()
 
-    everything = await get_sessions_summary(agents_db)
+    everything = await get_sessions_summary(sessions_db)
     assert everything["total_count"] == 5
 
     # A prefix separates one experiment's traffic from everything else.
     experiment = await get_sessions_summary(
-        agents_db, external_id="eval:bakery-acceptance:pr-412:"
+        sessions_db, external_id="eval:bakery-acceptance:pr-412:"
     )
     assert experiment["total_count"] == 2
 
     # And all evaluation traffic from all real traffic.
-    all_evals = await get_sessions_summary(agents_db, external_id="eval:")
+    all_evals = await get_sessions_summary(sessions_db, external_id="eval:")
     assert all_evals["total_count"] == 3
 
     # A full id lands on the single failing conversation.
     exact = await get_sessions_summary(
-        agents_db, external_id="eval:bakery-acceptance:pr-412:vague_quantity:0"
+        sessions_db, external_id="eval:bakery-acceptance:pr-412:vague_quantity:0"
     )
     assert exact["total_count"] == 1
     assert exact["sessions"][0].external_id.endswith("vague_quantity:0")
 
-    assert (await get_sessions_summary(agents_db, external_id="nope"))[
+    assert (await get_sessions_summary(sessions_db, external_id="nope"))[
         "total_count"
     ] == 0
 
 
 @pytest.mark.asyncio
-async def test_session_details_returns_the_trajectory_in_execution_order(agents_db):
+async def test_session_details_returns_the_trajectory_in_execution_order(sessions_db):
     """``seq`` is what carries the structure; ``created_at`` is approximate."""
     agent = Agent(id=uuid4(), name="Agent")
-    agents_db.add(agent)
-    await agents_db.commit()
+    sessions_db.add(agent)
+    await sessions_db.commit()
 
     now = datetime.now(timezone.utc)
     session = Session(id=uuid4(), agent_id=agent.id, created_at=now, updated_at=now)
@@ -352,7 +371,7 @@ async def test_session_details_returns_the_trajectory_in_execution_order(agents_
         ("research", "agent", 1, None, None),
         ("finish", "end", 3, None, None),
     ]
-    agents_db.add_all(
+    sessions_db.add_all(
         [session, run]
         + [
             Task(
@@ -370,9 +389,9 @@ async def test_session_details_returns_the_trajectory_in_execution_order(agents_
             for name, node_type, seq, parent, tool_uri in rows
         ]
     )
-    await agents_db.commit()
+    await sessions_db.commit()
 
-    details = await get_session_details(agents_db, session.id)
+    details = await get_session_details(sessions_db, session.id)
     assert [t.name for t in details.tasks] == ["begin", "research", "crawl", "finish"]
 
     crawl = details.tasks[2]

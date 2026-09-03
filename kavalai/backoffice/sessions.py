@@ -19,7 +19,15 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, select, desc, asc, case
 from sqlalchemy.ext.asyncio import AsyncSession
-from kavalai.db import Session, Run, Task, ChatMessage, Agent
+from kavalai.db import (
+    Agent,
+    ChatMessage,
+    Run,
+    Session,
+    Task,
+    json_array_length,
+    json_typeof,
+)
 from typing import TypedDict, Any
 
 
@@ -190,10 +198,10 @@ async def get_sessions_summary(
         .where(
             case(
                 (
-                    func.jsonb_typeof(Task.errors) == "array",
-                    func.jsonb_array_length(Task.errors) > 0,
+                    json_typeof(Task.errors) == "array",
+                    json_array_length(Task.errors) > 0,
                 ),
-                else_=func.jsonb_typeof(Task.errors) != "null",
+                else_=json_typeof(Task.errors) != "null",
             )
         )
         .group_by(Task.session_id)
@@ -255,17 +263,27 @@ async def _boundary_messages(
 ) -> dict[UUID, str]:
     """The oldest (``asc``) or newest (``desc``) message content per session.
 
-    One ``DISTINCT ON`` query for the whole page instead of one query per
-    session.
+    One query for the whole page instead of one per session. A window
+    function rather than ``DISTINCT ON``, which only Postgres has — SQLAlchemy
+    would silently degrade it to a plain ``DISTINCT`` on SQLite.
     """
     if not session_ids:
         return {}
-    stmt = (
-        select(ChatMessage.session_id, ChatMessage.content)
-        .distinct(ChatMessage.session_id)
+    ranked = (
+        select(
+            ChatMessage.session_id,
+            ChatMessage.content,
+            func.row_number()
+            .over(
+                partition_by=ChatMessage.session_id,
+                order_by=direction(ChatMessage.created_at),
+            )
+            .label("rank"),
+        )
         .where(ChatMessage.session_id.in_(session_ids))
-        .order_by(ChatMessage.session_id, direction(ChatMessage.created_at))
+        .subquery()
     )
+    stmt = select(ranked.c.session_id, ranked.c.content).where(ranked.c.rank == 1)
     return dict((await session.execute(stmt)).all())
 
 
