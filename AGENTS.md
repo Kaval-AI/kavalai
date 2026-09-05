@@ -38,8 +38,9 @@ Two components:
 | `kavalai/tools/` | Bundled tools: browser, web search, HTTP |
 | `kavalai/migrations/` | Alembic sets: `agents` and `backoffice`; both apply on Postgres and SQLite (batch mode for ALTERs, `uuid_column()` for UUIDs) |
 | `backoffice/`, `frontend/` | Management API and Angular UI |
-| `tests/` | Pytest suite for the library; mock MCP servers in `tests/helpers/`. An example's tests live beside it under `examples/`, and `testpaths` covers both |
+| `tests/` | Pytest suite for the library; mock MCP servers in `tests/helpers/`. An example's tests live beside it under `examples/`, a root `tools/` module's in its `tests/` subfolder, and `testpaths` covers all three |
 | `docs/`, `notebooks/` | Sphinx documentation; the five tutorial notebooks are the source of truth |
+| `tools/` | Standalone product tooling outside the wheel; `websitescraper/` scrapes a site into a resumable pages database (`python -m tools.websitescraper.scrape`) |
 | `examples/` | Runnable examples; `green_village/` (RAG chatbot, port 25000), `bakery/` (a YAML workflow with side effects, ports 25100/25101) and `business_info_agent/` (web research: search, crawl, summarise, port 25200) each ship an `eval_cases.yaml`; `support_agent/support_agent.yaml` is the branching-DAG example the docs load |
 
 ## Invariants

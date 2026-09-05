@@ -148,7 +148,7 @@ include = ["kavalai*"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
-testpaths = ["tests", "examples"]
+testpaths = ["tests", "examples", "tools"]
 markers = [
     "integration: talks to a real provider or the internet; deselected by default, run with -m integration",
 ]

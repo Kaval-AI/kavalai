@@ -1,0 +1,106 @@
+# Website scraper
+
+Scrapes a website into a **pages database** — a standalone SQLite file
+holding every page's URL, HTTP status, raw HTML and extracted markdown.
+The pages database is the first half of the site-chatbot pipeline (see
+`chatbotplan.md` at the repository root); a separate indexing step will
+turn it into a RAG collection, which is why content and index live in
+two different files.
+
+## Usage
+
+```bash
+# From the repository root; httpx is the only required dependency.
+python -m tools.websitescraper.scrape https://docs.kaval.ai --max-pages 50
+```
+
+The database defaults to `<host>.pages.db` — the command above writes
+`docs.kaval.ai.pages.db` — and `--pages` names it explicitly. Re-running
+the same command **resumes**: the database is the crawl state, every completed page is
+committed in one transaction together with the links it revealed, and a
+run killed at any moment loses at most the page that was in flight.
+`--refresh` re-queues every known URL for a fresh pass (stored content is
+kept until the page is fetched again).
+
+## Schema
+
+The pages database is a plain SQLite file (open it with any SQLite tool);
+`pages_db.py` creates this on first use:
+
+```sql
+CREATE TABLE IF NOT EXISTS pages (
+    url TEXT PRIMARY KEY,
+    discovered_at TEXT NOT NULL,
+    last_crawled_at TEXT,
+    status_code INTEGER,
+    fetch_mode TEXT,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    fetch_error TEXT,
+    title TEXT,
+    html TEXT,
+    markdown TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_pages_pending
+    ON pages (last_crawled_at, attempts);
+```
+
+| Column | Meaning |
+|--------|---------|
+| `url` | Normalised absolute URL; the primary key is what deduplicates discovery |
+| `discovered_at` | When the URL entered the frontier (ISO-8601 UTC, like all timestamps here) |
+| `last_crawled_at` | NULL while the URL is still pending — this column *is* the work queue |
+| `status_code` | Last HTTP status seen, kept for failures too |
+| `fetch_mode` | `http` or `browser` — which path produced the stored content |
+| `attempts` | Fetch attempts so far; rows at `--max-attempts` are parked |
+| `fetch_error` | Last error message, or the skip reason (`disallowed by robots.txt`); NULL after a success |
+| `title` | Page title |
+| `html` | Raw HTML as fetched (browser path: rendered DOM) |
+| `markdown` | Extracted markdown, the input for the indexing step |
+
+## Fetch strategy
+
+Each page is fetched with a plain HTTP request first; the HTML is reduced
+to markdown by `htmlmd.py` (stdlib only — navigation, footer and sidebar
+text is dropped, their links are kept for discovery). The fetch escalates
+to crawl4ai's headless browser only when the response is not usable
+content: a JS-app shell, too little visible text, or a 403/503 bot
+challenge. Three consecutive escalations memoise the site as JS-rendered
+and later pages skip the doomed HTTP attempt. A server-side-rendered site
+therefore needs no browser stack at all; the browser paths need
+`kavalai[common]` (crawl4ai) installed.
+
+## Options
+
+| Flag | Effect |
+|------|--------|
+| `--pages PATH` | Pages database file (default `<host>.pages.db`) |
+| `--max-pages N` | Stop once N pages hold content, resume included (default 200) |
+| `--delay S` | Seconds between fetches (default 0.5) |
+| `--timeout S` | Per-request timeout (default 30) |
+| `--max-attempts N` | Park a URL after N failed fetches (default 3) |
+| `--user-agent X` | `kavalai` (default), `browser`, `googlebot`, or a verbatim string |
+| `--ignore-robots` | Do not honour the site's robots.txt |
+| `--force-http` / `--force-browser` | Pin the fetch mode |
+| `--refresh` | Re-queue every known URL before crawling |
+| `--screenshot PATH` | Save a PNG of the start page (browser stack required) |
+
+`robots.txt` is honoured by default and matched with the same identity the
+requests carry: `KavalaiBot` for the default agent, `Googlebot` for the
+`googlebot` preset (for sites whose robots.txt allows only Google), `*`
+otherwise. URL discovery seeds from `sitemap.xml` (one level of sitemap
+index) and continues over same-site links; assets and other file
+extensions are skipped.
+
+## Inspecting a pages database
+
+```python
+from tools.websitescraper.pages_db import PagesDatabase
+
+with PagesDatabase("docs.kaval.ai.pages.db") as db:
+    print(db.stats())
+    for row in db.iter_pages():
+        print(row.url, row.status_code, row.fetch_mode, row.title)
+```
+
+Tests live in `tests/` beside the code (`pytest tools/websitescraper`) and need no
+network, no crawl4ai and no embedding model.
