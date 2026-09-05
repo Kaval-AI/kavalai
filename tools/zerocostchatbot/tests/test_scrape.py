@@ -22,9 +22,9 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 
-from tools.websitescraper import scrape
-from tools.websitescraper.pages_db import PagesDatabase
-from tools.websitescraper.scrape import (
+from tools.zerocostchatbot import scrape
+from tools.zerocostchatbot.pages_db import PagesDatabase
+from tools.zerocostchatbot.scrape import (
     BrowserFetcher,
     FetchOutcome,
     HttpFetcher,

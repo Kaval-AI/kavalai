@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-from tools.websitescraper.htmlmd import parse_html
+from tools.zerocostchatbot.htmlmd import parse_html
 
 PAGE = """
 <html>

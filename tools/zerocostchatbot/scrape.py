@@ -17,7 +17,7 @@ Scrape a website into a pages database (see ``pages_db.PagesDatabase``).
 
 Scrape the Kaval.AI docs into ``docs.kaval.ai.pages.db``::
 
-    python -m tools.websitescraper.scrape https://docs.kaval.ai --max-pages 50
+    python -m tools.zerocostchatbot.scrape https://docs.kaval.ai --max-pages 50
 
 Resume is automatic: the pages database is the crawl state, so re-running
 the same command continues where a killed run stopped. ``--refresh``
@@ -45,8 +45,8 @@ from urllib.parse import urljoin, urlparse, urlunparse
 import httpx
 from loguru import logger
 
-from tools.websitescraper.htmlmd import parse_html
-from tools.websitescraper.pages_db import PagesDatabase
+from tools.zerocostchatbot.htmlmd import parse_html
+from tools.zerocostchatbot.pages_db import PagesDatabase
 
 USER_AGENTS = {
     "kavalai": ("KavalaiBot/1.0 (+https://kaval.ai/bot)", "KavalaiBot"),
@@ -593,7 +593,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Scrape a website into a pages database.",
         epilog=(
-            "Example: python -m tools.websitescraper.scrape"
+            "Example: python -m tools.zerocostchatbot.scrape"
             " https://docs.kaval.ai --max-pages 50"
         ),
     )

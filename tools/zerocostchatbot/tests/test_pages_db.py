@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-from tools.websitescraper.pages_db import PagesDatabase, utcnow_iso
+from tools.zerocostchatbot.pages_db import PagesDatabase, utcnow_iso
 
 
 def make_db(tmp_path) -> PagesDatabase:

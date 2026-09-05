@@ -1,17 +1,25 @@
-# Website scraper
+# Zero-cost chatbot toolkit
 
-Scrapes a website into a **pages database** — a standalone SQLite file
-holding every page's URL, HTTP status, raw HTML and extracted markdown.
-The pages database is the first half of the site-chatbot pipeline (see
-`chatbotplan.md` at the repository root); a separate indexing step will
-turn it into a RAG collection, which is why content and index live in
-two different files.
+Turns a website into a ready-to-serve RAG index in two steps, each a
+standalone CLI over a SQLite file (see `chatbotplan.md` at the repository
+root for the product plan):
+
+1. `scrape.py` crawls the site into a **pages database** — URL, HTTP
+   status, raw HTML and extracted markdown per page.
+2. `build_index.py` chunks and embeds those pages into a **RAG index** —
+   a `CollectionRagService` collection, by default in its own SQLite file.
+
+Content and index are separate files on purpose: the pages database is the
+heavy crawl artefact that never leaves your infra, the RAG index is the
+small servable one (a 4.6 MB crawl of docs.kaval.ai yields a 0.7 MB
+index), rebuildable at any time with a different chunker or embedding
+model without re-crawling.
 
 ## Usage
 
 ```bash
 # From the repository root; httpx is the only required dependency.
-python -m tools.websitescraper.scrape https://docs.kaval.ai --max-pages 50
+python -m tools.zerocostchatbot.scrape https://docs.kaval.ai --max-pages 50
 ```
 
 The database defaults to `<host>.pages.db` — the command above writes
@@ -91,10 +99,35 @@ otherwise. URL discovery seeds from `sitemap.xml` (one level of sitemap
 index) and continues over same-site links; assets and other file
 extensions are skipped.
 
+## Building the RAG index
+
+```bash
+python -m tools.zerocostchatbot.build_index docs.kaval.ai.pages.db
+```
+
+Defaults: the index lands beside the input (`docs.kaval.ai.rag.db`), the
+collection is named after the scraped host (`docs.kaval.ai`), and the
+embedding model is local fastembed (`fastembed/BAAI/bge-small-en-v1.5`) —
+no API key, no per-page cost; it needs `kavalai[common]` (or
+`pip install fastembed sqliteai-vector`). `--model` selects any registered
+embedding provider instead, `--index` a different backend (`postgres`
+reads `KAVALAI_DB_URI`/`KAVALAI_DB_SCHEMA`, a `...://...` URI is used
+verbatim, anything else is a SQLite file path — the same contract as
+`examples/ragindex`).
+
+The collection is **dropped and rebuilt** each run, so the index always
+mirrors the pages database. Markdown is chunked at heading boundaries
+(`--max-chars` splits long sections), each chunk prefixed with the page
+title and heading path ("Kaval AI docs › Quickstart › Install"), and
+chunk metadata carries `url`, `title`, `heading` and `crawled_at` — enough
+to cite sources. The result is queryable with
+`examples/ragindex/query_index.py` and browsable in the backoffice RAG
+explorer.
+
 ## Inspecting a pages database
 
 ```python
-from tools.websitescraper.pages_db import PagesDatabase
+from tools.zerocostchatbot.pages_db import PagesDatabase
 
 with PagesDatabase("docs.kaval.ai.pages.db") as db:
     print(db.stats())
@@ -102,5 +135,5 @@ with PagesDatabase("docs.kaval.ai.pages.db") as db:
         print(row.url, row.status_code, row.fetch_mode, row.title)
 ```
 
-Tests live in `tests/` beside the code (`pytest tools/websitescraper`) and need no
+Tests live in `tests/` beside the code (`pytest tools/zerocostchatbot`) and need no
 network, no crawl4ai and no embedding model.
