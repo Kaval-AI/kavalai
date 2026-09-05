@@ -253,7 +253,7 @@ async def test_build_rag_index_of_an_empty_pages_database(tmp_path):
 
 
 def test_make_rag_service_postgres_reads_the_environment(tmp_path, monkeypatch):
-    #` Any URI counts; a SQLite one keeps the test free of a Postgres driver.
+    # ` Any URI counts; a SQLite one keeps the test free of a Postgres driver.
     monkeypatch.setenv("KAVALAI_DB_URI", f"sqlite:///{tmp_path}/env.rag.db")
     service = make_rag_service("postgres", "fake/model", None)
     assert isinstance(service, SqliteRagService)

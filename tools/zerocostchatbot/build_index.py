@@ -53,8 +53,11 @@ from kavalai.rag.base import BaseRagService
 from kavalai.settings import apply_normalizer_from_env
 from tools.zerocostchatbot.pages_db import PagesDatabase
 
-# Small, local and key-free; see the fastembed model list for alternatives.
-DEFAULT_MODEL = "fastembed/BAAI/bge-small-en-v1.5"
+# Small, local and key-free — and the same model family the browser widget
+# embeds queries with (snowflake-arctic-embed-s over WebLLM), so an index
+# built with the default is queryable from a fully client-side demo. See the
+# fastembed model list for alternatives.
+DEFAULT_MODEL = "fastembed/snowflake/snowflake-arctic-embed-s"
 
 # bge-small truncates at 512 tokens, so a much longer chunk would embed only
 # its beginning anyway.

@@ -569,9 +569,8 @@ async def run(
                 if args.screenshot and browser:
                     image = await browser.screenshot(start_url)
                     if image:
-                        with open(args.screenshot, "wb") as handle:
-                            handle.write(image)
-                        logger.info(f"Screenshot saved to {args.screenshot}")
+                        saved = db.save_screenshot(start_url, image)
+                        logger.info(f"Screenshot saved to {saved}")
                 elif args.screenshot:
                     logger.warning("--screenshot needs the browser; skipped")
             finally:
@@ -661,9 +660,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--screenshot",
-        default=None,
-        metavar="PATH",
-        help="Save a PNG of the start page (needs the browser stack)",
+        action="store_true",
+        help=(
+            "Save a PNG of the start page into the files directory"
+            " (needs the browser stack)"
+        ),
     )
     return parser
 

@@ -513,7 +513,7 @@ def parse_run_args(tmp_path, *extra):
 
 @pytest.mark.asyncio
 async def test_run_scrapes_a_server_side_rendered_site(tmp_path):
-    args = parse_run_args(tmp_path, "--screenshot", str(tmp_path / "home.png"))
+    args = parse_run_args(tmp_path, "--screenshot")
     browser = StubBrowser()
     stats = await scrape.run(
         args, transport=site_transport(kaval_site()), browser_fetcher=browser
@@ -527,9 +527,13 @@ async def test_run_scrapes_a_server_side_rendered_site(tmp_path):
     assert rows["https://kaval.ai/private"].fetch_error == "disallowed by robots.txt"
     assert "https://kaval.ai/logo.png" not in rows
 
-    # An SSR site never needed the browser — except for the screenshot.
+    # An SSR site never needed the browser — except for the screenshot,
+    # which lands in the files directory with its path on the page's row.
     assert browser.fetch.calls == []
-    assert (tmp_path / "home.png").read_bytes() == b"png-bytes"
+    with PagesDatabase(str(tmp_path / "kaval.pages.db")) as db:
+        (home,) = [r for r in db.iter_pages() if r.url == "https://kaval.ai/"]
+        with open(db.file_path(home.screenshot_path), "rb") as handle:
+            assert handle.read() == b"png-bytes"
 
 
 @pytest.mark.asyncio
@@ -628,7 +632,6 @@ async def test_run_ignore_robots_with_force_http(tmp_path):
         "--ignore-robots",
         "--force-http",
         "--screenshot",
-        str(tmp_path / "home.png"),
     )
     stats = await scrape.run(args, transport=site_transport(site))
     assert stats["fetched"] == 4
@@ -636,7 +639,7 @@ async def test_run_ignore_robots_with_force_http(tmp_path):
         rows = {row.url: row for row in db.iter_pages()}
     assert rows["https://kaval.ai/private"].title == "Private"
     # --force-http means no browser, so no screenshot was produced.
-    assert not (tmp_path / "home.png").exists()
+    assert all(row.screenshot_path is None for row in rows.values())
 
 
 @pytest.mark.asyncio

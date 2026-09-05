@@ -193,7 +193,8 @@ Two CLI scripts and an intermediate **pages database**, so scraping and
 indexing are separate, composable steps:
 
 ```bash
-# 1. Scrape: crawl the site into a pages database (url + raw HTML + markdown)
+# 1. Scrape: crawl the site into a pages database (url + markdown; raw
+#    HTML and screenshots as files in a sibling <name>.pages.files/ dir)
 #    BUILT — tools/zerocostchatbot/ (scrape.py, pages_db.py, htmlmd.py + tests)
 python -m tools.zerocostchatbot.scrape https://docs.kaval.ai --max-pages 200
 
@@ -204,8 +205,9 @@ python -m tools.zerocostchatbot.build_index docs.kaval.ai.pages.db
 ```
 
 **Two SQLite files, deliberately.** The pages database is the crawl
-artefact — raw HTML dominates its size and it never leaves our infra. The
-RAG index is the servable artefact: small, shippable (including to a
+artefact and never leaves our infra — its bulk (raw HTML, screenshots)
+lives as plain files in a sibling directory, bucket-ready, with only file
+names in the table. The RAG index is the servable artefact: small, shippable (including to a
 browser later), rebuildable from the pages database at any time with a
 different chunker or embedding model, without re-crawling.
 
@@ -223,7 +225,8 @@ which is what makes the scraper kill-safe:
 | `fetch_mode` | `http` or `browser` — how the content was obtained |
 | `attempts` | Fetch attempts so far, capped to avoid poison URLs |
 | `fetch_error` | Last error message, NULL on success |
-| `title`, `html`, `markdown` | The content (NULL until fetched) |
+| `title`, `markdown` | The content (NULL until fetched) |
+| `html_path`, `screenshot_path` | File names in the sibling files directory |
 
 Crawl loop: seed the start URL + sitemap URLs with `INSERT OR IGNORE`,
 then repeatedly pick a pending row, fetch it, and in **one transaction per
@@ -276,8 +279,10 @@ different content.
 #### Indexing (`build_index.py`)
 
 - Heading-based markdown chunking (page title + heading path prefixed to
-  each chunk), embedded with the given model — fastembed by default, so no
-  API key — into a `CollectionRagService` collection.
+  each chunk), embedded with the given model — by default local fastembed
+  `snowflake/snowflake-arctic-embed-s`, no API key, and the same model
+  family the browser widget embeds queries with, keeping the index usable
+  from a fully client-side demo — into a `CollectionRagService` collection.
 - `--index` accepts a SQLite file path, a database URI, or `postgres`
   (from `KAVALAI_DB_URI`/`KAVALAI_DB_SCHEMA`), same as `examples/ragindex`.
 - The collection is **dropped and rebuilt** each run: the pages database is

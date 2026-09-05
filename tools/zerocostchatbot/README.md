@@ -9,11 +9,13 @@ root for the product plan):
 2. `build_index.py` chunks and embeds those pages into a **RAG index** —
    a `CollectionRagService` collection, by default in its own SQLite file.
 
-Content and index are separate files on purpose: the pages database is the
-heavy crawl artefact that never leaves your infra, the RAG index is the
-small servable one (a 4.6 MB crawl of docs.kaval.ai yields a 0.7 MB
-index), rebuildable at any time with a different chunker or embedding
-model without re-crawling.
+Content and index are separate on purpose: the crawl artefacts never
+leave your infra, the RAG index is the small servable file, rebuildable at
+any time with a different chunker or embedding model without re-crawling.
+Bulk artefacts — raw HTML and screenshots — are not in the pages database
+either: they live as plain files in a sibling `<name>.pages.files/`
+directory (ready to move to a bucket later), the table holding only their
+relative file names.
 
 ## Usage
 
@@ -45,7 +47,8 @@ CREATE TABLE IF NOT EXISTS pages (
     attempts INTEGER NOT NULL DEFAULT 0,
     fetch_error TEXT,
     title TEXT,
-    html TEXT,
+    html_path TEXT,
+    screenshot_path TEXT,
     markdown TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_pages_pending
@@ -62,8 +65,14 @@ CREATE INDEX IF NOT EXISTS idx_pages_pending
 | `attempts` | Fetch attempts so far; rows at `--max-attempts` are parked |
 | `fetch_error` | Last error message, or the skip reason (`disallowed by robots.txt`); NULL after a success |
 | `title` | Page title |
-| `html` | Raw HTML as fetched (browser path: rendered DOM) |
+| `html_path` | File name of the raw HTML in the files directory (browser path: rendered DOM) |
+| `screenshot_path` | File name of the page's PNG capture, when `--screenshot` took one |
 | `markdown` | Extracted markdown, the input for the indexing step |
+
+File names are relative to the `<name>.pages.files/` directory next to the
+database and derive from the URL, so a re-crawl overwrites in place. A file
+is written before the row referencing it commits: a crash can orphan a
+file (harmless, overwritten next time), never a dangling row.
 
 ## Fetch strategy
 
@@ -90,7 +99,7 @@ therefore needs no browser stack at all; the browser paths need
 | `--ignore-robots` | Do not honour the site's robots.txt |
 | `--force-http` / `--force-browser` | Pin the fetch mode |
 | `--refresh` | Re-queue every known URL before crawling |
-| `--screenshot PATH` | Save a PNG of the start page (browser stack required) |
+| `--screenshot` | Save a PNG of the start page into the files directory (browser stack required) |
 
 `robots.txt` is honoured by default and matched with the same identity the
 requests carry: `KavalaiBot` for the default agent, `Googlebot` for the
@@ -107,8 +116,10 @@ python -m tools.zerocostchatbot.build_index docs.kaval.ai.pages.db
 
 Defaults: the index lands beside the input (`docs.kaval.ai.rag.db`), the
 collection is named after the scraped host (`docs.kaval.ai`), and the
-embedding model is local fastembed (`fastembed/BAAI/bge-small-en-v1.5`) —
-no API key, no per-page cost; it needs `kavalai[common]` (or
+embedding model is local fastembed (`fastembed/snowflake/
+snowflake-arctic-embed-s`) — no API key, no per-page cost, and the same
+model family the browser widget embeds queries with, so the index stays
+usable from a fully client-side demo; it needs `kavalai[common]` (or
 `pip install fastembed sqliteai-vector`). `--model` selects any registered
 embedding provider instead, `--index` a different backend (`postgres`
 reads `KAVALAI_DB_URI`/`KAVALAI_DB_SCHEMA`, a `...://...` URI is used
