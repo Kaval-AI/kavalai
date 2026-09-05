@@ -32,6 +32,55 @@ run killed at any moment loses at most the page that was in flight.
 `--refresh` re-queues every known URL for a fresh pass (stored content is
 kept until the page is fetched again).
 
+### More examples
+
+Re-scrape a site you crawled before and capture a homepage screenshot on
+the way (the crawl4ai container must be running for the screenshot):
+
+```bash
+python -m tools.zerocostchatbot.scrape https://docs.kaval.ai \
+    --refresh --screenshot
+```
+
+Crawl a site you own as fast as the server allows — no politeness delay,
+eight parallel workers:
+
+```bash
+python -m tools.zerocostchatbot.scrape https://docs.kaval.ai \
+    --delay 0 --concurrency 8 --max-pages 500
+```
+
+A JavaScript-rendered site, skipping the doomed HTTP attempts outright:
+
+```bash
+python -m tools.zerocostchatbot.scrape https://app.example.com --force-browser
+```
+
+A site whose robots.txt allows only Google (see the user-agent notes
+below):
+
+```bash
+python -m tools.zerocostchatbot.scrape https://example.com --user-agent googlebot
+```
+
+Scrape and build the RAG index in sequence, then try a query against it:
+
+```bash
+python -m tools.zerocostchatbot.scrape https://docs.kaval.ai --max-pages 100
+python -m tools.zerocostchatbot.build_index docs.kaval.ai.pages.db
+python -m examples.ragindex.query_index "how do I install kavalai" \
+    --index docs.kaval.ai.rag.db --collection docs.kaval.ai \
+    --model fastembed/snowflake/snowflake-arctic-embed-s
+```
+
+Rebuild the same index into Postgres (read from `KAVALAI_DB_URI`), where
+the backoffice RAG explorer can browse it:
+
+```bash
+dotenv run python -m tools.zerocostchatbot.build_index \
+    docs.kaval.ai.pages.db --index postgres
+```
+
 ## Schema
 
 The pages database is a plain SQLite file (open it with any SQLite tool);
@@ -48,7 +97,6 @@ CREATE TABLE IF NOT EXISTS pages (
     fetch_error TEXT,
     title TEXT,
     html_path TEXT,
-    screenshot_path TEXT,
     markdown TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_pages_pending
@@ -66,11 +114,12 @@ CREATE INDEX IF NOT EXISTS idx_pages_pending
 | `fetch_error` | Last error message, or the skip reason (`disallowed by robots.txt`); NULL after a success |
 | `title` | Page title |
 | `html_path` | File name of the raw HTML in the files directory (browser path: rendered DOM) |
-| `screenshot_path` | File name of the page's PNG capture, when `--screenshot` took one |
 | `markdown` | Extracted markdown, the input for the indexing step |
 
 File names are relative to the `<name>.pages.files/` directory next to the
-database and derive from the URL, so a re-crawl overwrites in place. A file
+database and derive from the URL, so a re-crawl overwrites in place. A
+`--screenshot` capture lands in the same directory as `<url-slug>.png`,
+found by convention rather than by a column. A file
 is written before the row referencing it commits: a crash can orphan a
 file (harmless, overwritten next time), never a dangling row.
 
@@ -79,12 +128,21 @@ file (harmless, overwritten next time), never a dangling row.
 Each page is fetched with a plain HTTP request first; the HTML is reduced
 to markdown by `htmlmd.py` (stdlib only — navigation, footer and sidebar
 text is dropped, their links are kept for discovery). The fetch escalates
-to crawl4ai's headless browser only when the response is not usable
-content: a JS-app shell, too little visible text, or a 403/503 bot
-challenge. Three consecutive escalations memoise the site as JS-rendered
-and later pages skip the doomed HTTP attempt. A server-side-rendered site
-therefore needs no browser stack at all; the browser paths need
-`kavalai[common]` (crawl4ai) installed.
+to a headless browser only when the response is not usable content: a
+JS-app shell, too little visible text, or a 403/503 bot challenge. Three
+consecutive escalations memoise the site as JS-rendered and later pages
+skip the doomed HTTP attempt.
+
+Rendering always happens in the crawl4ai REST container from
+`docker-compose.yml` (`docker compose up crawl4ai`); `--crawl4ai-url`
+points elsewhere when it is not on `http://localhost:11235`. Nothing
+browser-related is installed on this machine, and a server-side-rendered
+site never contacts the container at all. Fetches run on `--concurrency`
+parallel workers over one shared HTTP client — the container's browser
+pool renders in parallel server-side — while `--delay` stays a
+*site-wide* rate cap: parallelism overlaps the waiting (server latency,
+rendering), not the request rate, so raising it never makes the crawl
+less polite.
 
 ## Options
 
@@ -92,14 +150,16 @@ therefore needs no browser stack at all; the browser paths need
 |------|--------|
 | `--pages PATH` | Pages database file (default `<host>.pages.db`) |
 | `--max-pages N` | Stop once N pages hold content, resume included (default 200) |
-| `--delay S` | Seconds between fetches (default 0.5) |
+| `--delay S` | Minimum seconds between request starts, site-wide (default 0.5) |
+| `--concurrency N` | Pages fetched in parallel (default 4) |
 | `--timeout S` | Per-request timeout (default 30) |
 | `--max-attempts N` | Park a URL after N failed fetches (default 3) |
 | `--user-agent X` | `kavalai` (default), `browser`, `googlebot`, or a verbatim string |
 | `--ignore-robots` | Do not honour the site's robots.txt |
+| `--crawl4ai-url URL` | The crawl4ai container rendering pages (default `http://localhost:11235`) |
 | `--force-http` / `--force-browser` | Pin the fetch mode |
 | `--refresh` | Re-queue every known URL before crawling |
-| `--screenshot` | Save a PNG of the start page into the files directory (browser stack required) |
+| `--screenshot` | Save a PNG of the start page into the files directory (needs the container) |
 
 `robots.txt` is honoured by default and matched with the same identity the
 requests carry: `KavalaiBot` for the default agent, `Googlebot` for the

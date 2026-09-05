@@ -14,18 +14,17 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
+import asyncio
 import base64
+import json
+import pathlib
 import sys
-import types
-from unittest.mock import AsyncMock, MagicMock
-
 import httpx
 import pytest
 
 from tools.zerocostchatbot import scrape
-from tools.zerocostchatbot.pages_db import PagesDatabase
+from tools.zerocostchatbot.pages_db import PagesDatabase, url_slug
 from tools.zerocostchatbot.scrape import (
-    BrowserFetcher,
     FetchOutcome,
     HttpFetcher,
     build_parser,
@@ -276,78 +275,6 @@ async def test_http_fetcher_transport_error_does_not_escalate():
     assert "ConnectError" in outcome.error
 
 
-def fake_crawl4ai(monkeypatch, result):
-    """Install a stub crawl4ai module whose crawler returns ``result``."""
-    module = types.ModuleType("crawl4ai")
-    crawler = MagicMock()
-    crawler.arun = AsyncMock(return_value=result)
-    crawler.__aenter__ = AsyncMock(return_value=crawler)
-    crawler.__aexit__ = AsyncMock(return_value=False)
-    module.AsyncWebCrawler = MagicMock(return_value=crawler)
-    module.BrowserConfig = MagicMock()
-    module.CrawlerRunConfig = MagicMock()
-    module.CacheMode = MagicMock()
-    monkeypatch.setitem(sys.modules, "crawl4ai", module)
-    return module, crawler
-
-
-def browser_result(**overrides):
-    markdown = MagicMock()
-    markdown.raw_markdown = "# Rendered"
-    result = MagicMock()
-    result.success = True
-    result.status_code = 200
-    result.markdown = markdown
-    result.cleaned_html = "<h1>Rendered</h1>"
-    result.links = {"internal": [{"href": "https://kaval.ai/a"}], "external": []}
-    result.metadata = {"title": "Rendered"}
-    result.error_message = None
-    result.screenshot = base64.b64encode(b"png-bytes").decode()
-    for key, value in overrides.items():
-        setattr(result, key, value)
-    return result
-
-
-@pytest.mark.asyncio
-async def test_browser_fetcher_maps_the_crawl_result(monkeypatch):
-    _, crawler = fake_crawl4ai(monkeypatch, browser_result())
-    fetcher = BrowserFetcher(user_agent="KavalaiBot/1.0")
-    outcome = await fetcher.fetch("https://kaval.ai/")
-    assert outcome.success
-    assert outcome.markdown == "# Rendered"
-    assert outcome.title == "Rendered"
-    assert outcome.links == ["https://kaval.ai/a"]
-
-    image = await fetcher.screenshot("https://kaval.ai/")
-    assert image == b"png-bytes"
-
-    await fetcher.aclose()
-    crawler.__aexit__.assert_awaited_once()
-    # The browser was started once for both calls.
-    crawler.__aenter__.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_browser_fetcher_failure_and_missing_dependency(monkeypatch):
-    fake_crawl4ai(
-        monkeypatch,
-        browser_result(success=False, error_message="net::ERR", screenshot=None),
-    )
-    fetcher = BrowserFetcher(user_agent="x")
-    outcome = await fetcher.fetch("https://kaval.ai/")
-    assert not outcome.success and outcome.error == "net::ERR"
-    assert await fetcher.screenshot("https://kaval.ai/") is None
-    await fetcher.aclose()
-
-    # A missing crawl4ai fails the fetch with an install hint, not a crash.
-    monkeypatch.setitem(sys.modules, "crawl4ai", None)
-    broken = BrowserFetcher(user_agent="x")
-    outcome = await broken.fetch("https://kaval.ai/")
-    assert not outcome.success and "kavalai[common]" in outcome.error
-    assert await broken.screenshot("https://kaval.ai/") is None
-    await broken.aclose()
-
-
 @pytest.mark.asyncio
 async def test_crawl_site_discovers_links_breadth_first(tmp_path):
     http = fetcher_from(
@@ -469,9 +396,6 @@ class StubBrowser:
         self.screenshots.append(url)
         return b"png-bytes"
 
-    async def aclose(self):
-        raise AssertionError("run() must not close an injected browser")
-
 
 def kaval_site():
     ns = 'xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"'
@@ -528,12 +452,12 @@ async def test_run_scrapes_a_server_side_rendered_site(tmp_path):
     assert "https://kaval.ai/logo.png" not in rows
 
     # An SSR site never needed the browser — except for the screenshot,
-    # which lands in the files directory with its path on the page's row.
+    # which lands in the files directory under the start URL's slug.
     assert browser.fetch.calls == []
     with PagesDatabase(str(tmp_path / "kaval.pages.db")) as db:
-        (home,) = [r for r in db.iter_pages() if r.url == "https://kaval.ai/"]
-        with open(db.file_path(home.screenshot_path), "rb") as handle:
-            assert handle.read() == b"png-bytes"
+        path = db.file_path(f"{url_slug('https://kaval.ai/')}.png")
+    with open(path, "rb") as handle:
+        assert handle.read() == b"png-bytes"
 
 
 @pytest.mark.asyncio
@@ -604,17 +528,6 @@ def test_main_exit_codes(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_browser_fetcher_wraps_unexpected_errors(monkeypatch):
-    _, crawler = fake_crawl4ai(monkeypatch, browser_result())
-    crawler.arun = AsyncMock(side_effect=RuntimeError("browser crashed"))
-    fetcher = BrowserFetcher(user_agent="x")
-    outcome = await fetcher.fetch("https://kaval.ai/")
-    assert not outcome.success and "RuntimeError: browser crashed" in outcome.error
-    assert await fetcher.screenshot("https://kaval.ai/") is None
-    await fetcher.aclose()
-
-
-@pytest.mark.asyncio
 async def test_crawl_site_sleeps_between_fetches(tmp_path):
     http = fetcher_from({"https://kaval.ai/": outcome_ok()})
     with make_db(tmp_path) as db:
@@ -639,13 +552,241 @@ async def test_run_ignore_robots_with_force_http(tmp_path):
         rows = {row.url: row for row in db.iter_pages()}
     assert rows["https://kaval.ai/private"].title == "Private"
     # --force-http means no browser, so no screenshot was produced.
-    assert all(row.screenshot_path is None for row in rows.values())
+    with PagesDatabase(str(tmp_path / "kaval.pages.db")) as db:
+        files_dir = pathlib.Path(db.files_dir)
+    assert not list(files_dir.glob("*.png"))
 
 
 @pytest.mark.asyncio
-async def test_run_constructs_its_own_browser_and_closes_it(tmp_path):
+async def test_run_never_contacts_the_container_for_an_ssr_site(tmp_path):
     args = parse_run_args(tmp_path)
+    # The transport has no /crawl route, so any container call would fail
+    # loudly; an SSR site must not make one.
     stats = await scrape.run(args, transport=site_transport(kaval_site()))
-    # The SSR site never escalated, so the lazily created browser stayed
-    # unstarted and closing it was a no-op.
     assert stats["fetched"] == 3
+
+
+def slow_fetcher(pages, seconds):
+    """A fetch that takes real event-loop time, to force worker overlap."""
+
+    async def fetch(url):
+        fetch.calls.append(url)
+        await asyncio.sleep(seconds)
+        return pages.get(
+            url, FetchOutcome(success=False, status_code=404, error="HTTP 404")
+        )
+
+    fetch.calls = []
+    return fetch
+
+
+@pytest.mark.asyncio
+async def test_crawl_site_workers_fetch_in_parallel(tmp_path):
+    urls = [f"https://kaval.ai/p{i}" for i in range(8)]
+    http = slow_fetcher({url: outcome_ok() for url in urls}, 0.05)
+    with make_db(tmp_path) as db:
+        db.add_urls(urls)
+        started = asyncio.get_running_loop().time()
+        report = await crawl_site(
+            db, "https://kaval.ai/", http, None, delay=0, concurrency=4
+        )
+        elapsed = asyncio.get_running_loop().time() - started
+    assert report.fetched == 8
+    # Sequentially this is 8 × 0.05 s; four workers need about two rounds.
+    assert elapsed < 0.05 * 8 * 0.75
+
+
+@pytest.mark.asyncio
+async def test_crawl_site_idle_workers_wait_for_discovered_links(tmp_path):
+    children = [f"https://kaval.ai/c{i}" for i in range(3)]
+    http = slow_fetcher(
+        {"https://kaval.ai/": outcome_ok(links=children)}
+        | {url: outcome_ok() for url in children},
+        0.02,
+    )
+    with make_db(tmp_path) as db:
+        db.add_urls(["https://kaval.ai/"])
+        # Only one URL is claimable at first; the other three workers must
+        # wait for its commit instead of exiting early.
+        report = await crawl_site(
+            db, "https://kaval.ai/", http, None, delay=0, concurrency=4
+        )
+    assert report.fetched == 4
+
+
+@pytest.mark.asyncio
+async def test_crawl_site_budget_holds_under_concurrency(tmp_path):
+    urls = [f"https://kaval.ai/p{i}" for i in range(10)]
+    http = slow_fetcher({url: outcome_ok() for url in urls}, 0.02)
+    with make_db(tmp_path) as db:
+        db.add_urls(urls)
+        report = await crawl_site(
+            db, "https://kaval.ai/", http, None, delay=0, max_pages=3, concurrency=4
+        )
+        assert report.fetched == 3
+        assert db.fetched_count() == 3
+
+
+@pytest.mark.asyncio
+async def test_request_spacer_caps_the_site_wide_rate():
+    spacer = scrape.RequestSpacer(0.05)
+    started = asyncio.get_running_loop().time()
+    await asyncio.gather(spacer.wait(), spacer.wait(), spacer.wait())
+    elapsed = asyncio.get_running_loop().time() - started
+    # Three starts spaced 0.05 s apart need at least 0.1 s in total.
+    assert elapsed >= 0.1
+    # A zero interval never sleeps.
+    assert await scrape.RequestSpacer(0).wait() is None
+
+
+@pytest.mark.asyncio
+async def test_idle_worker_survives_a_slow_page(tmp_path):
+    # One page takes longer than the idle-wait timeout, so the waiting worker
+    # times out, re-checks, and still picks up the link it eventually commits.
+    http = slow_fetcher(
+        {
+            "https://kaval.ai/": outcome_ok(links=["https://kaval.ai/b"]),
+            "https://kaval.ai/b": outcome_ok(),
+        },
+        0.25,
+    )
+    with make_db(tmp_path) as db:
+        db.add_urls(["https://kaval.ai/"])
+        report = await crawl_site(
+            db, "https://kaval.ai/", http, None, delay=0, concurrency=2
+        )
+    assert report.fetched == 2
+
+
+def remote_result(**overrides):
+    result = {
+        "success": True,
+        "status_code": 200,
+        "cleaned_html": "<h1>Rendered</h1>",
+        "markdown": {"raw_markdown": "# Rendered"},
+        "links": {
+            "internal": [{"href": "https://kaval.ai/a"}],
+            "external": [],
+        },
+        "metadata": {"title": "Rendered"},
+        "error_message": None,
+        "screenshot": base64.b64encode(b"png-bytes").decode(),
+    }
+    result.update(overrides)
+    return result
+
+
+def crawl4ai_transport(result, requests_seen):
+    def handler(request):
+        assert request.url.path == "/crawl"
+        requests_seen.append(json.loads(request.content))
+        return httpx.Response(200, json={"success": True, "results": [result]})
+
+    return httpx.MockTransport(handler)
+
+
+@pytest.mark.asyncio
+async def test_remote_browser_fetcher_maps_the_server_result():
+    seen = []
+    async with httpx.AsyncClient(
+        transport=crawl4ai_transport(remote_result(), seen)
+    ) as client:
+        fetcher = scrape.RemoteBrowserFetcher(
+            "http://localhost:11235/", client, "KavalaiBot/1.0", timeout=20
+        )
+        outcome = await fetcher.fetch("https://kaval.ai/")
+        image = await fetcher.screenshot("https://kaval.ai/")
+
+    assert outcome.success
+    assert outcome.markdown == "# Rendered"
+    assert outcome.title == "Rendered"
+    assert outcome.links == ["https://kaval.ai/a"]
+    assert image == b"png-bytes"
+
+    fetch_payload, shot_payload = seen
+    assert fetch_payload["urls"] == ["https://kaval.ai/"]
+    assert fetch_payload["browser_config"]["params"]["user_agent"] == "KavalaiBot/1.0"
+    run_params = fetch_payload["crawler_config"]["params"]
+    assert run_params["cache_mode"] == "bypass"
+    assert run_params["page_timeout"] == 20000
+    assert "screenshot" not in run_params
+    assert shot_payload["crawler_config"]["params"]["screenshot"] is True
+
+
+@pytest.mark.asyncio
+async def test_remote_browser_fetcher_failures():
+    seen = []
+    failed = remote_result(
+        success=False, error_message="net::ERR_NAME_NOT_RESOLVED", screenshot=None
+    )
+    async with httpx.AsyncClient(transport=crawl4ai_transport(failed, seen)) as client:
+        fetcher = scrape.RemoteBrowserFetcher("http://x", client, "ua")
+        outcome = await fetcher.fetch("https://kaval.ai/")
+        assert not outcome.success
+        assert outcome.error == "net::ERR_NAME_NOT_RESOLVED"
+        assert await fetcher.screenshot("https://kaval.ai/") is None
+
+    def server_error(request):
+        return httpx.Response(500, text="boom")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(server_error)) as client:
+        fetcher = scrape.RemoteBrowserFetcher("http://x", client, "ua")
+        outcome = await fetcher.fetch("https://kaval.ai/")
+        assert not outcome.success and "HTTPStatusError" in outcome.error
+        assert await fetcher.screenshot("https://kaval.ai/") is None
+
+    def empty_body(request):
+        return httpx.Response(200, json={"success": True, "results": []})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(empty_body)) as client:
+        fetcher = scrape.RemoteBrowserFetcher("http://x", client, "ua")
+        outcome = await fetcher.fetch("https://kaval.ai/")
+        assert not outcome.success and "no result" in outcome.error
+
+
+@pytest.mark.asyncio
+async def test_run_uses_the_crawl4ai_container_when_asked(tmp_path):
+    site = kaval_site()
+
+    def handler(request):
+        url = str(request.url)
+        if request.url.path == "/crawl":
+            target = json.loads(request.content)["urls"][0]
+            return httpx.Response(
+                200,
+                json={
+                    "success": True,
+                    "results": [
+                        remote_result(
+                            cleaned_html=rich_page("Remote"),
+                            markdown={"raw_markdown": RICH_TEXT},
+                            links={"internal": [], "external": []},
+                            metadata={"title": f"Remote {target}"},
+                        )
+                    ],
+                },
+            )
+        if url not in site:
+            return httpx.Response(404, text="missing")
+        status, content_type, body = site[url]
+        return httpx.Response(status, headers={"content-type": content_type}, text=body)
+
+    args = parse_run_args(tmp_path, "--force-browser", "--max-pages", "2")
+    stats = await scrape.run(args, transport=httpx.MockTransport(handler))
+    assert stats["fetched"] == 2
+    with PagesDatabase(str(tmp_path / "kaval.pages.db")) as db:
+        assert all(
+            row.fetch_mode == "browser" for row in db.iter_pages() if row.markdown
+        )
+
+
+@pytest.mark.asyncio
+async def test_remote_browser_fetcher_hints_when_the_container_is_down():
+    def refuse(request):
+        raise httpx.ConnectError("connection refused", request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(refuse)) as client:
+        fetcher = scrape.RemoteBrowserFetcher("http://localhost:11235", client, "ua")
+        outcome = await fetcher.fetch("https://kaval.ai/")
+    assert not outcome.success
+    assert "docker compose up crawl4ai" in outcome.error

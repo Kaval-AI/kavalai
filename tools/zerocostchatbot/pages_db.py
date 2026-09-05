@@ -32,7 +32,6 @@ CREATE TABLE IF NOT EXISTS pages (
     fetch_error TEXT,
     title TEXT,
     html_path TEXT,
-    screenshot_path TEXT,
     markdown TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_pages_pending
@@ -56,9 +55,9 @@ def url_slug(url: str) -> str:
 class PageRow:
     """One row of the ``pages`` table.
 
-    ``html_path`` and ``screenshot_path`` are file names relative to the
-    database's files directory — the database plus that directory move
-    together (and can later live in a bucket under the same prefix).
+    ``html_path`` is a file name relative to the database's files directory —
+    the database plus that directory move together (and can later live in a
+    bucket under the same prefix).
     """
 
     url: str
@@ -70,7 +69,6 @@ class PageRow:
     fetch_error: Optional[str]
     title: Optional[str]
     html_path: Optional[str]
-    screenshot_path: Optional[str]
     markdown: Optional[str]
 
 
@@ -233,7 +231,10 @@ class PagesDatabase:
             )
 
     def save_screenshot(self, url: str, image: bytes) -> Optional[str]:
-        """Store a page's screenshot and remember its path on the page's row.
+        """Store a page's screenshot beside its HTML in the files directory.
+
+        The file name derives from the URL (``<url_slug>.png``), so it needs
+        no column of its own and a re-capture overwrites in place.
 
         Returns:
             The absolute path of the written file, None without a files
@@ -241,12 +242,7 @@ class PagesDatabase:
         """
         if not self.files_dir:
             return None
-        name = self._write_file(f"{url_slug(url)}.png", image)
-        with self._conn:
-            self._conn.execute(
-                "UPDATE pages SET screenshot_path = ? WHERE url = ?", (name, url)
-            )
-        return self.file_path(name)
+        return self.file_path(self._write_file(f"{url_slug(url)}.png", image))
 
     def requeue_all(self) -> int:
         """Put every URL back in the frontier, keeping the stored content.
@@ -278,7 +274,7 @@ class PagesDatabase:
         """Every row, fetched or not."""
         cursor = self._conn.execute(
             "SELECT url, discovered_at, last_crawled_at, status_code, fetch_mode,"
-            " attempts, fetch_error, title, html_path, screenshot_path, markdown"
+            " attempts, fetch_error, title, html_path, markdown"
             " FROM pages ORDER BY discovered_at, rowid"
         )
         for row in cursor:

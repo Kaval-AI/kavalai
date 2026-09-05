@@ -186,13 +186,10 @@ def test_html_file_is_overwritten_on_recrawl_and_absent_when_empty(tmp_path):
         assert db.load_html(rows["https://b/"]) is None
 
 
-def test_save_screenshot_records_the_path(tmp_path):
+def test_save_screenshot_lands_beside_the_html(tmp_path):
     with make_db(tmp_path) as db:
-        db.add_urls(["https://a/"])
         saved = db.save_screenshot("https://a/", b"png-bytes")
-        (row,) = db.iter_pages()
-        assert row.screenshot_path == f"{url_slug('https://a/')}.png"
-        assert saved == db.file_path(row.screenshot_path)
+        assert saved == db.file_path(f"{url_slug('https://a/')}.png")
         with open(saved, "rb") as handle:
             assert handle.read() == b"png-bytes"
 

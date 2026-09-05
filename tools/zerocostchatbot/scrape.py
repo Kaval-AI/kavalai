@@ -24,12 +24,14 @@ the same command continues where a killed run stopped. ``--refresh``
 re-queues every known URL for a fresh crawl.
 
 Each page is fetched with a plain HTTP request first and escalated to a
-headless browser (crawl4ai) only when the response is not usable content —
-a JS-app shell, a bot challenge, or too little visible text. After a few
+headless browser only when the response is not usable content — a JS-app
+shell, a bot challenge, or too little visible text. After a few
 consecutive escalations the site is treated as JS-rendered and later pages
-go straight to the browser. ``--force-http`` / ``--force-browser`` override
-the heuristic; a server-side-rendered site is scraped with the base install
-alone, no browser stack needed.
+go straight to the browser. Rendering runs in the crawl4ai REST container
+from ``docker-compose.yml`` (``--crawl4ai-url``, default
+``http://localhost:11235``) — nothing browser-related is installed here,
+and a server-side-rendered site never contacts the container at all.
+``--force-http`` / ``--force-browser`` override the heuristic.
 """
 
 import argparse
@@ -125,6 +127,8 @@ ESCALATION_MEMO = 3
 
 DEFAULT_MAX_PAGES = 200
 DEFAULT_DELAY = 0.5
+DEFAULT_CONCURRENCY = 4
+DEFAULT_CRAWL4AI_URL = "http://localhost:11235"
 DEFAULT_TIMEOUT = 30.0
 DEFAULT_MAX_ATTEMPTS = 3
 SITEMAP_FILE_LIMIT = 10
@@ -324,95 +328,104 @@ class HttpFetcher:
         )
 
 
-class BrowserFetcher:
-    """The rendering path: crawl4ai's headless browser, started on first use.
+class RemoteBrowserFetcher:
+    """The rendering path via a crawl4ai REST container instead of a local browser.
 
-    crawl4ai is imported lazily, so a crawl that never escalates works without
-    it installed; when it is missing, every browser fetch fails with an
-    install hint instead of raising.
+    Points at the ``crawl4ai`` service from ``docker-compose.yml`` (port
+    11235). The container owns the browser pool, so this machine needs no
+    Playwright install, and parallel workers render in parallel server-side.
     """
 
-    def __init__(self, user_agent: str, timeout: float = DEFAULT_TIMEOUT):
+    def __init__(
+        self,
+        base_url: str,
+        client: httpx.AsyncClient,
+        user_agent: str,
+        timeout: float = DEFAULT_TIMEOUT,
+    ):
+        self.base_url = base_url.rstrip("/")
+        self.client = client
         self.user_agent = user_agent
         self.timeout = timeout
-        self._crawler = None
 
-    async def _ensure_crawler(self):
-        if self._crawler is None:
-            from crawl4ai import AsyncWebCrawler, BrowserConfig
-
-            self._crawler = AsyncWebCrawler(
-                config=BrowserConfig(headless=True, user_agent=self.user_agent)
-            )
-            await self._crawler.__aenter__()
-        return self._crawler
-
-    async def _run(self, url: str, **config_kwargs):
-        from crawl4ai import CacheMode, CrawlerRunConfig
-
-        crawler = await self._ensure_crawler()
-        config = CrawlerRunConfig(
-            cache_mode=CacheMode.BYPASS,
-            page_timeout=int(self.timeout * 1000),
-            **config_kwargs,
+    async def _crawl(self, url: str, **run_params) -> dict:
+        payload = {
+            "urls": [url],
+            "browser_config": {
+                "type": "BrowserConfig",
+                "params": {"headless": True, "user_agent": self.user_agent},
+            },
+            "crawler_config": {
+                "type": "CrawlerRunConfig",
+                "params": {
+                    "cache_mode": "bypass",
+                    "page_timeout": int(self.timeout * 1000),
+                    **run_params,
+                },
+            },
+        }
+        response = await self.client.post(
+            f"{self.base_url}/crawl",
+            json=payload,
+            # The server holds the request while the page renders, so give it
+            # headroom beyond the page timeout itself.
+            timeout=self.timeout + 30,
         )
-        return await crawler.arun(url=url, config=config)
+        response.raise_for_status()
+        body = response.json()
+        results = body.get("results") or []
+        if not body.get("success") or not results:
+            raise ValueError(f"crawl4ai server returned no result for {url}")
+        return results[0]
 
     async def fetch(self, url: str) -> FetchOutcome:
         try:
-            result = await self._run(url)
-        except ImportError:
+            result = await self._crawl(url)
+        except httpx.ConnectError as error:
             return FetchOutcome(
                 success=False,
-                error="crawl4ai is not installed (pip install kavalai[common])",
+                error=(
+                    f"cannot reach crawl4ai at {self.base_url} ({error}) — is"
+                    " the container running? (docker compose up crawl4ai)"
+                ),
             )
-        except Exception as error:
+        except (httpx.HTTPError, ValueError) as error:
             return FetchOutcome(success=False, error=f"{type(error).__name__}: {error}")
-
-        if not result.success:
+        if not result.get("success"):
             return FetchOutcome(
                 success=False,
-                status_code=result.status_code,
-                error=result.error_message or "browser fetch failed",
+                status_code=result.get("status_code"),
+                error=result.get("error_message") or "browser fetch failed",
             )
-
-        markdown = result.markdown
-        if markdown is not None:
-            markdown = getattr(markdown, "raw_markdown", str(markdown))
-        html = result.cleaned_html or ""
+        markdown = result.get("markdown")
+        if isinstance(markdown, dict):
+            markdown = markdown.get("raw_markdown")
+        html = result.get("cleaned_html") or ""
         links = [
             item.get("href") if isinstance(item, dict) else item
-            for group in (result.links or {}).values()
+            for group in (result.get("links") or {}).values()
             for item in group
         ]
-        title = (result.metadata or {}).get("title")
         return FetchOutcome(
             success=True,
-            status_code=result.status_code,
-            title=title,
+            status_code=result.get("status_code"),
+            title=(result.get("metadata") or {}).get("title"),
             html=html,
             markdown=markdown or parse_html(html, url).markdown,
             links=[link for link in links if link],
         )
 
     async def screenshot(self, url: str) -> Optional[bytes]:
-        """A PNG capture of the page, None when the browser cannot provide one."""
+        """A PNG capture of the page, None when the server cannot provide one."""
         try:
-            result = await self._run(url, screenshot=True)
-        except ImportError:
-            logger.error("Screenshot needs crawl4ai (pip install kavalai[common])")
-            return None
-        except Exception as error:
+            result = await self._crawl(url, screenshot=True)
+        except (httpx.HTTPError, ValueError) as error:
             logger.error(f"Screenshot of {url} failed: {error}")
             return None
-        if not result.success or not result.screenshot:
+        image = result.get("screenshot")
+        if not result.get("success") or not image:
             return None
-        return base64.b64decode(result.screenshot)
-
-    async def aclose(self) -> None:
-        if self._crawler is not None:
-            await self._crawler.__aexit__(None, None, None)
-            self._crawler = None
+        return base64.b64decode(image)
 
 
 @dataclass
@@ -425,6 +438,31 @@ class CrawlReport:
     escalated: int = 0
 
 
+class RequestSpacer:
+    """Site-wide spacing between fetch starts, shared by every worker.
+
+    Keeps ``--delay`` meaning what it meant when the crawl was sequential —
+    at most one request per ``interval`` seconds against the site — no matter
+    how many workers run. Concurrency then overlaps the *waiting* (server
+    latency, page rendering), not the request rate.
+    """
+
+    def __init__(self, interval: float):
+        self.interval = interval
+        self._lock = asyncio.Lock()
+        self._next_start = 0.0
+
+    async def wait(self) -> None:
+        if self.interval <= 0:
+            return
+        async with self._lock:
+            now = asyncio.get_running_loop().time()
+            pause = max(0.0, self._next_start - now)
+            self._next_start = max(now, self._next_start) + self.interval
+        if pause:
+            await asyncio.sleep(pause)
+
+
 async def crawl_site(
     db: PagesDatabase,
     start_url: str,
@@ -435,13 +473,19 @@ async def crawl_site(
     max_pages: int = DEFAULT_MAX_PAGES,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     delay: float = DEFAULT_DELAY,
+    concurrency: int = DEFAULT_CONCURRENCY,
 ) -> CrawlReport:
     """Crawl pending URLs until the page budget or the frontier is exhausted.
 
     ``http_fetch`` is tried first and ``browser_fetch`` is the escalation;
     passing one of them as None forces the other mode. Every completed page is
-    committed together with its discovered links before the next URL is
-    picked, so the crawl can be killed and resumed at any point.
+    committed together with its discovered links before its worker picks the
+    next URL, so the crawl can be killed and resumed at any point.
+
+    ``concurrency`` workers fetch in parallel; the request *rate* stays
+    capped by ``delay`` site-wide (see :class:`RequestSpacer`), and a worker
+    with nothing to claim waits for the others — their commits may enqueue
+    new links or free budget — before giving up.
 
     ``max_pages`` caps the pages *holding content in the database*, not the
     pages fetched by this run — a resumed crawl keeps the original budget.
@@ -449,27 +493,28 @@ async def crawl_site(
     host = site_host(start_url)
     report = CrawlReport()
     tried: set[str] = set()
+    in_flight: set[str] = set()
+    spacer = RequestSpacer(delay)
+    page_done = asyncio.Event()
     consecutive_escalations = 0
 
-    while db.fetched_count() < max_pages:
-        url = db.next_pending(skip=tried, max_attempts=max_attempts)
-        if url is None:
-            break
-        tried.add(url)
-
+    async def process(url: str) -> None:
+        nonlocal consecutive_escalations
         if not allowed(url):
             db.record_skipped(url, "disallowed by robots.txt")
             report.disallowed += 1
-            continue
+            return
 
         site_is_js = consecutive_escalations >= ESCALATION_MEMO
         outcome: Optional[FetchOutcome] = None
         mode = "browser"
         if http_fetch is not None and not site_is_js:
+            await spacer.wait()
             outcome = await http_fetch(url)
             mode = "http"
         if browser_fetch is not None and (outcome is None or outcome.needs_browser):
             escalating = outcome is not None
+            await spacer.wait()
             browser_outcome = await browser_fetch(url)
             if escalating:
                 report.escalated += 1
@@ -503,8 +548,31 @@ async def crawl_site(
             report.failed += 1
             logger.warning(f"Failed {url}: {error}")
 
-        if delay > 0:
-            await asyncio.sleep(delay)
+    async def worker() -> None:
+        while True:
+            url = None
+            if db.fetched_count() + len(in_flight) < max_pages:
+                url = db.next_pending(skip=tried | in_flight, max_attempts=max_attempts)
+            if url is None:
+                if not in_flight:
+                    return
+                page_done.clear()
+                try:
+                    await asyncio.wait_for(page_done.wait(), timeout=0.2)
+                except TimeoutError:
+                    pass
+                continue
+            # No await between claiming and marking, so two workers cannot
+            # pick the same URL.
+            tried.add(url)
+            in_flight.add(url)
+            try:
+                await process(url)
+            finally:
+                in_flight.discard(url)
+                page_done.set()
+
+    await asyncio.gather(*(worker() for _ in range(max(1, concurrency))))
     return report
 
 
@@ -512,7 +580,7 @@ async def run(
     args: argparse.Namespace,
     *,
     transport: Optional[httpx.AsyncBaseTransport] = None,
-    browser_fetcher: Optional[BrowserFetcher] = None,
+    browser_fetcher: Optional[RemoteBrowserFetcher] = None,
 ) -> dict:
     """Scrape as the CLI arguments describe; returns the final database stats.
 
@@ -552,30 +620,29 @@ async def run(
 
             browser = browser_fetcher
             if browser is None and not args.force_http:
-                browser = BrowserFetcher(user_agent=user_agent, timeout=args.timeout)
+                browser = RemoteBrowserFetcher(
+                    args.crawl4ai_url, client, user_agent, timeout=args.timeout
+                )
             http_fetcher = HttpFetcher(client) if not args.force_browser else None
 
-            try:
-                report = await crawl_site(
-                    db,
-                    start_url,
-                    http_fetcher.fetch if http_fetcher else None,
-                    browser.fetch if browser else None,
-                    allowed=allowed,
-                    max_pages=args.max_pages,
-                    max_attempts=args.max_attempts,
-                    delay=args.delay,
-                )
-                if args.screenshot and browser:
-                    image = await browser.screenshot(start_url)
-                    if image:
-                        saved = db.save_screenshot(start_url, image)
-                        logger.info(f"Screenshot saved to {saved}")
-                elif args.screenshot:
-                    logger.warning("--screenshot needs the browser; skipped")
-            finally:
-                if browser is not None and browser is not browser_fetcher:
-                    await browser.aclose()
+            report = await crawl_site(
+                db,
+                start_url,
+                http_fetcher.fetch if http_fetcher else None,
+                browser.fetch if browser else None,
+                allowed=allowed,
+                max_pages=args.max_pages,
+                max_attempts=args.max_attempts,
+                delay=args.delay,
+                concurrency=args.concurrency,
+            )
+            if args.screenshot and browser:
+                image = await browser.screenshot(start_url)
+                if image:
+                    saved = db.save_screenshot(start_url, image)
+                    logger.info(f"Screenshot saved to {saved}")
+            elif args.screenshot:
+                logger.warning("--screenshot needs the browser; skipped")
 
         stats = db.stats()
     logger.info(
@@ -624,6 +691,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"Per-request timeout in seconds (default: {DEFAULT_TIMEOUT})",
     )
     parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=DEFAULT_CONCURRENCY,
+        help=(
+            "Pages fetched in parallel; the request rate stays capped by"
+            f" --delay site-wide (default: {DEFAULT_CONCURRENCY})"
+        ),
+    )
+    parser.add_argument(
         "--max-attempts",
         type=int,
         default=DEFAULT_MAX_ATTEMPTS,
@@ -641,6 +717,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--ignore-robots",
         action="store_true",
         help="Do not honour the site's robots.txt",
+    )
+    parser.add_argument(
+        "--crawl4ai-url",
+        default=DEFAULT_CRAWL4AI_URL,
+        metavar="URL",
+        help=(
+            "Base URL of the crawl4ai REST container that renders pages"
+            f" (default: {DEFAULT_CRAWL4AI_URL}, the docker-compose service)"
+        ),
     )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(

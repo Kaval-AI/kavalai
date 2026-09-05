@@ -226,11 +226,14 @@ which is what makes the scraper kill-safe:
 | `attempts` | Fetch attempts so far, capped to avoid poison URLs |
 | `fetch_error` | Last error message, NULL on success |
 | `title`, `markdown` | The content (NULL until fetched) |
-| `html_path`, `screenshot_path` | File names in the sibling files directory |
+| `html_path` | File name in the sibling files directory (screenshots live there too, by naming convention) |
 
 Crawl loop: seed the start URL + sitemap URLs with `INSERT OR IGNORE`,
-then repeatedly pick a pending row, fetch it, and in **one transaction per
-page** write the result and `INSERT OR IGNORE` the newly discovered links.
+then let a small pool of parallel workers each pick a pending row, fetch
+it, and in **one transaction per page** write the result and
+`INSERT OR IGNORE` the newly discovered links; the fetch *rate* stays
+capped site-wide by the politeness delay, parallelism only overlapping the
+waiting.
 Killed at any moment, the database is consistent and a restart resumes
 from the pending rows — at worst one page is fetched twice. A completed
 run (`--refresh` re-queues pages older than a given age) is how re-crawls
@@ -251,7 +254,9 @@ Most business sites are server-side rendered, and a plain `httpx` GET is
    have escalated, the site is treated as JS-rendered and later pages go
    straight to the browser (and the reverse keeps HTTP-only sites away
    from Playwright entirely). `--force-http` / `--force-browser`
-   override the heuristic.
+   override the heuristic. The browser side always runs in the
+   docker-compose `crawl4ai` REST container (`--crawl4ai-url`, default
+   `http://localhost:11235`) — no Playwright on the scraping machine.
 
 This also keeps the dependency story clean: an SSR site can be scraped
 with the base install alone; crawl4ai/Playwright is only exercised when a
