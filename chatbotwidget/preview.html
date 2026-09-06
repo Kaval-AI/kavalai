@@ -1,0 +1,102 @@
+<!doctype html>
+<!--
+Copyright 2026 OÜ KAVAL AI (registry code 17393877)
+Licensed under the Apache License, Version 2.0.
+
+Standalone preview of the chat widget with a scripted connector, so the look
+and behaviour can be checked without any backend:
+
+    python -m http.server   # from the repo root
+    open http://localhost:8000/chatbotwidget/preview.html
+
+Swap `mockConnector` for `KavalChatbot.agentConnector({url: ...})` to talk to
+a real agent server.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Kaval.AI chatbot widget preview</title>
+  <link rel="stylesheet" href="kaval-chatbot.css" />
+  <style>
+    body { margin: 0; font-family: system-ui, sans-serif; background: #fff; color: #273e47; }
+    main { max-width: 720px; margin: 0 auto; padding: 48px 24px 480px; }
+    .inline-host { height: 480px; max-width: 420px; margin-top: 16px; }
+    h1 { font-size: 1.4rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Kaval.AI chatbot widget preview</h1>
+    <p>
+      The floating widget sits bottom-right (kaval.ai theme). Below, the same
+      widget mounted inline with a different theme. Both talk to a scripted
+      connector that streams a canned reply.
+    </p>
+    <h2>Inline mode</h2>
+    <div class="inline-host" id="inline-chat"></div>
+  </main>
+
+  <script src="kaval-chatbot.js"></script>
+  <script>
+    /* Streams a markdown-rich reply so streaming, markdown and choices can be
+       inspected; sending "fail" exercises the error path. */
+    function mockConnector() {
+      const reply = [
+        "**Kaval.AI** turns a YAML file into an agent. For example:",
+        "",
+        "```python",
+        "from kavalai.workflow import WorkflowEngine",
+        'engine = WorkflowEngine.from_yaml_path("support.yaml")',
+        "```",
+        "",
+        "Key pieces:",
+        "- *Workflows* — the graph your agent follows",
+        "- *RAG* — grounding answers in your content",
+        "- Docs: https://docs.kaval.ai/.",
+      ].join("\n");
+      return {
+        send: async (text, onPartial) => {
+          if (text === "fail") {
+            throw new Error("scripted failure");
+          }
+          for (let i = 1; i <= reply.length; i += 7) {
+            onPartial(reply.slice(0, i));
+            await new Promise((r) => setTimeout(r, 15));
+          }
+          return { text: reply, choices: ["What is a workflow?", "Show me RAG"] };
+        },
+        reset: () => {},
+      };
+    }
+
+    KavalChatbot.mount({
+      connector: mockConnector(),
+      mode: "floating",
+      title: "Kaval.AI",
+      greeting: "Hello! Click here for help.",
+      emptyMessage: "Hi! Ask us anything about Kaval.AI.",
+      suggestions: ["What is Kaval.AI?", "fail"],
+    });
+
+    KavalChatbot.mount({
+      connector: mockConnector(),
+      mode: "inline",
+      target: "#inline-chat",
+      title: "Acme support",
+      emptyMessage: "Ask about Acme's products.",
+      suggestions: ["Pricing?", "Opening hours?"],
+      theme: {
+        accent: "#2f5ac1",
+        accentContent: "#ffffff",
+        surface: "#ffffff",
+        surfaceAlt: "#eef1f8",
+        border: "#d5dbeb",
+        text: "#1c2a4a",
+        linkHover: "#2f5ac1",
+        radius: "1rem",
+      },
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,212 @@
+<!doctype html>
+<!--
+Copyright 2026 OÜ KAVAL AI (registry code 17393877)
+Licensed under the Apache License, Version 2.0.
+
+Browse a scraped site offline, Wayback-style: loads a pages database
+(scrape.py's SQLite file) in the browser with sql.js and shows the archived
+pages in an iframe, navigation limited to what the crawl captured.
+
+    python -m http.server            # from the repo root
+    open http://localhost:8000/tools/zerocostchatbot/archive.html?db=/docs.kaval.ai.pages.db
+
+Without ?db= the page offers a file picker, which also works from file://.
+Styles and images load from the live site (a <base> tag); site scripts are
+stripped unless "Run page scripts" is ticked.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Kaval.AI site archive</title>
+  <style>
+    :root { --bar: #273e47; --accent: #acc12f; --muted: #8a9aa3; --panel: #f4f4f6; }
+    html, body { height: 100%; margin: 0; font-family: system-ui, sans-serif; font-size: 14px; color: #1f2d34; }
+    body { display: grid; grid-template-rows: auto 1fr; grid-template-columns: 300px 1fr; }
+    header { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; padding: 8px 12px; background: var(--bar); color: #fff; }
+    header .brand { font-weight: 700; color: var(--accent); white-space: nowrap; }
+    header button, header label { background: transparent; color: #fff; border: 1px solid rgba(255,255,255,0.35); border-radius: 4px; padding: 5px 9px; cursor: pointer; font: inherit; }
+    header button:disabled { opacity: 0.35; cursor: default; }
+    header input[type=text] { flex: 1; min-width: 0; padding: 6px 10px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.35); background: rgba(255,255,255,0.1); color: #fff; font: inherit; }
+    header .meta { color: var(--muted); white-space: nowrap; font-size: 12px; }
+    header a { color: var(--accent); }
+    aside { border-right: 1px solid #d6d6da; background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+    aside input { margin: 8px; padding: 6px 8px; border: 1px solid #d6d6da; border-radius: 4px; font: inherit; }
+    aside ul { list-style: none; margin: 0; padding: 0 0 8px; overflow-y: auto; }
+    aside li { padding: 6px 12px; cursor: pointer; border-left: 3px solid transparent; }
+    aside li:hover { background: #e8e8ec; }
+    aside li.current { border-left-color: var(--accent); background: #e5e5e8; }
+    aside li .t { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    aside li .u { display: block; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    main { position: relative; min-height: 0; }
+    iframe { width: 100%; height: 100%; border: none; background: #fff; }
+    .notice { position: absolute; left: 50%; top: 24px; transform: translateX(-50%); background: var(--bar); color: #fff; padding: 10px 16px; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); max-width: 80%; }
+    .notice a { color: var(--accent); }
+    .picker { grid-column: 1 / -1; display: grid; place-items: center; height: 100%; }
+    .picker div { text-align: center; }
+    .picker input { display: block; margin: 12px auto; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <header>
+    <span class="brand">Kaval.AI archive</span>
+    <button id="back" title="Back" disabled>&#8592;</button>
+    <button id="forward" title="Forward" disabled>&#8594;</button>
+    <input type="text" id="address" placeholder="Archived URL" />
+    <span class="meta" id="meta"></span>
+    <label><input type="checkbox" id="scripts" /> Run page scripts</label>
+    <a id="live" href="#" target="_blank" rel="noopener" hidden>open live &#8599;</a>
+  </header>
+
+  <aside id="sidebar" hidden>
+    <input type="search" id="filter" placeholder="Filter pages…" />
+    <ul id="pages"></ul>
+  </aside>
+
+  <main id="viewer" hidden>
+    <iframe id="frame" sandbox="allow-same-origin allow-scripts allow-popups allow-forms" title="Archived page"></iframe>
+    <div class="notice" id="notice" hidden></div>
+  </main>
+
+  <div class="picker" id="picker">
+    <div>
+      <p>Open a pages database produced by <code>scrape.py</code>.</p>
+      <input type="file" id="file" accept=".db,.sqlite" />
+      <p><small>Or add <code>?db=/path/to/site.pages.db</code> to the URL.</small></p>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.12.0/sql-wasm.js"></script>
+  <script src="archive.js"></script>
+  <script>
+    (function () {
+      var SQL_CDN = "https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.12.0/";
+      var $ = function (id) { return document.getElementById(id); };
+      var index = null;
+      var current = null;
+      var back = [];
+      var forward = [];
+
+      function el(tag, className, text) {
+        var node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text !== undefined) node.textContent = text;
+        return node;
+      }
+
+      function notice(html) {
+        var box = $("notice");
+        box.replaceChildren();
+        if (!html) { box.hidden = true; return; }
+        html.forEach(function (part) { box.appendChild(part); });
+        box.hidden = false;
+        clearTimeout(notice.timer);
+        notice.timer = setTimeout(function () { box.hidden = true; }, 6000);
+      }
+
+      function renderList(filter) {
+        var list = $("pages");
+        list.replaceChildren();
+        var needle = (filter || "").toLowerCase();
+        index.pages.forEach(function (page) {
+          var label = (page.title || "") + " " + page.url;
+          if (needle && label.toLowerCase().indexOf(needle) === -1) return;
+          var item = el("li");
+          item.dataset.url = page.url;
+          if (current && page.url === current.url) item.classList.add("current");
+          item.appendChild(el("span", "t", page.title || page.url));
+          item.appendChild(el("span", "u", page.url));
+          item.addEventListener("click", function () { go(page.url); });
+          list.appendChild(item);
+        });
+      }
+
+      function show(page) {
+        current = page;
+        var archived = index.pages.map(function (p) { return p.url; });
+        $("frame").srcdoc = KavalArchive.prepareArchivedHtml(
+          index.html(page.url), page.url, archived, { runScripts: $("scripts").checked }
+        );
+        $("address").value = page.url;
+        $("meta").textContent =
+          (page.status_code || "") + " · " + (page.fetch_mode || "") +
+          " · " + (page.last_crawled_at || "").slice(0, 16).replace("T", " ");
+        $("live").href = page.url;
+        $("live").hidden = false;
+        $("back").disabled = back.length === 0;
+        $("forward").disabled = forward.length === 0;
+        renderList($("filter").value);
+        var item = document.querySelector('#pages li[data-url="' + CSS.escape(page.url) + '"]');
+        if (item) item.scrollIntoView({ block: "nearest" });
+      }
+
+      /* Navigate to an archived page, pushing the current one on the back
+         stack; an unarchived target only shows where the archive ends. */
+      function go(href, base) {
+        var page = index.find(href, base);
+        if (!page) {
+          var link = el("a", null, href);
+          link.href = href;
+          notice([document.createTextNode("Not in the archive: "), link]);
+          return;
+        }
+        if (current && current.url !== page.url) {
+          back.push(current);
+          forward = [];
+        }
+        show(page);
+      }
+
+      function open(bytes) {
+        initSqlJs({ locateFile: function (f) { return SQL_CDN + f; } }).then(function (SQL) {
+          index = new KavalArchive.ArchiveIndex(new SQL.Database(new Uint8Array(bytes)));
+          if (!index.pages.length) {
+            alert("This database holds no fetched pages.");
+            return;
+          }
+          $("picker").hidden = true;
+          $("sidebar").hidden = false;
+          $("viewer").hidden = false;
+          renderList("");
+          show(index.pages[0]);
+        });
+      }
+
+      $("file").addEventListener("change", function (event) {
+        var file = event.target.files[0];
+        if (file) file.arrayBuffer().then(open);
+      });
+      $("filter").addEventListener("input", function () { renderList($("filter").value); });
+      $("address").addEventListener("keydown", function (event) {
+        if (event.key === "Enter") go($("address").value, current && current.url);
+      });
+      $("scripts").addEventListener("change", function () { if (current) show(current); });
+      $("back").addEventListener("click", function () {
+        if (!back.length) return;
+        forward.push(current);
+        show(back.pop());
+      });
+      $("forward").addEventListener("click", function () {
+        if (!forward.length) return;
+        back.push(current);
+        show(forward.pop());
+      });
+      window.addEventListener("message", function (event) {
+        var data = event.data || {};
+        if (data.type === "kaval-archive-navigate") go(data.href, current && current.url);
+      });
+
+      var param = new URLSearchParams(location.search).get("db");
+      if (param) {
+        fetch(param).then(function (r) {
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return r.arrayBuffer();
+        }).then(open).catch(function (error) {
+          alert("Could not load " + param + ": " + error.message);
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

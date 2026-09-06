@@ -16,7 +16,7 @@ limitations under the License.
 
 import pytest
 
-from tools.zerocostchatbot.pages_db import PagesDatabase, url_slug, utcnow_iso
+from tools.zerocostchatbot.pages_db import PagesDatabase, utcnow_iso
 
 
 def make_db(tmp_path) -> PagesDatabase:
@@ -59,9 +59,7 @@ def test_record_success_stores_content_and_links_atomically(tmp_path):
         rows = {row.url: row for row in db.iter_pages()}
         assert rows["https://a/"].markdown == "hi"
         assert rows["https://a/"].fetch_mode == "http"
-        # The raw HTML lives on disk; the table holds only the file name.
-        assert rows["https://a/"].html_path == f"{url_slug('https://a/')}.html"
-        assert db.load_html(rows["https://a/"]) == "<p>hi</p>"
+        assert rows["https://a/"].html == "<p>hi</p>"
         assert rows["https://a/"].attempts == 1
         assert rows["https://a/"].last_crawled_at is not None
         # The discovered link entered the frontier; the crawled page did not
@@ -153,25 +151,18 @@ def test_requeued_pages_count_toward_the_budget_again(tmp_path):
         assert db.stats()["fetched"] == 0
 
 
-def test_html_file_is_overwritten_on_recrawl_and_absent_when_empty(tmp_path):
+def test_html_is_overwritten_on_recrawl_and_absent_when_empty(tmp_path):
     with make_db(tmp_path) as db:
         db.add_urls(["https://a/", "https://b/"])
-        db.record_success(
-            "https://a/",
-            status_code=200,
-            fetch_mode="http",
-            title="A",
-            html="<p>v1</p>",
-            markdown="v1",
-        )
-        db.record_success(
-            "https://a/",
-            status_code=200,
-            fetch_mode="http",
-            title="A",
-            html="<p>v2</p>",
-            markdown="v2",
-        )
+        for html, markdown in (("<p>v1</p>", "v1"), ("<p>v2</p>", "v2")):
+            db.record_success(
+                "https://a/",
+                status_code=200,
+                fetch_mode="http",
+                title="A",
+                html=html,
+                markdown=markdown,
+            )
         db.record_success(
             "https://b/",
             status_code=200,
@@ -181,41 +172,28 @@ def test_html_file_is_overwritten_on_recrawl_and_absent_when_empty(tmp_path):
             markdown="only markdown",
         )
         rows = {row.url: row for row in db.iter_pages()}
-        assert db.load_html(rows["https://a/"]) == "<p>v2</p>"
-        assert rows["https://b/"].html_path is None
-        assert db.load_html(rows["https://b/"]) is None
+        assert rows["https://a/"].html == "<p>v2</p>"
+        assert rows["https://b/"].html is None
 
 
-def test_save_screenshot_lands_beside_the_html(tmp_path):
+def test_save_screenshot_stores_the_png_on_the_row(tmp_path):
     with make_db(tmp_path) as db:
-        saved = db.save_screenshot("https://a/", b"png-bytes")
-        assert saved == db.file_path(f"{url_slug('https://a/')}.png")
-        with open(saved, "rb") as handle:
-            assert handle.read() == b"png-bytes"
+        db.add_urls(["https://a/", "https://b/"])
+        db.save_screenshot("https://a/", b"png-bytes")
+        rows = {row.url: row for row in db.iter_pages()}
+        assert rows["https://a/"].screenshot == b"png-bytes"
+        assert rows["https://b/"].screenshot is None
+        # A re-capture overwrites.
+        db.save_screenshot("https://a/", b"png-v2")
+        rows = {row.url: row for row in db.iter_pages()}
+        assert rows["https://a/"].screenshot == b"png-v2"
 
 
-def test_in_memory_database_stores_no_files():
-    db = PagesDatabase(":memory:")
-    db.add_urls(["https://a/"])
-    db.record_success(
-        "https://a/",
-        status_code=200,
-        fetch_mode="http",
-        title="A",
-        html="<p>hi</p>",
-        markdown="hi",
-    )
-    assert db.save_screenshot("https://a/", b"png") is None
-    (row,) = db.iter_pages()
-    assert row.html_path is None and db.file_path(row.html_path) is None
-    db.close()
-
-
-def test_legacy_databases_with_inline_html_are_refused(tmp_path):
+def test_legacy_databases_with_html_files_are_refused(tmp_path):
     import sqlite3
 
     path = str(tmp_path / "old.pages.db")
     with sqlite3.connect(path) as conn:
-        conn.execute("CREATE TABLE pages (url TEXT PRIMARY KEY, html TEXT)")
+        conn.execute("CREATE TABLE pages (url TEXT PRIMARY KEY, html_path TEXT)")
     with pytest.raises(ValueError, match="re-scrape"):
         PagesDatabase(path)

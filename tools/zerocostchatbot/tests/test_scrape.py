@@ -17,13 +17,12 @@ limitations under the License.
 import asyncio
 import base64
 import json
-import pathlib
 import sys
 import httpx
 import pytest
 
 from tools.zerocostchatbot import scrape
-from tools.zerocostchatbot.pages_db import PagesDatabase, url_slug
+from tools.zerocostchatbot.pages_db import PagesDatabase
 from tools.zerocostchatbot.scrape import (
     FetchOutcome,
     HttpFetcher,
@@ -452,12 +451,10 @@ async def test_run_scrapes_a_server_side_rendered_site(tmp_path):
     assert "https://kaval.ai/logo.png" not in rows
 
     # An SSR site never needed the browser — except for the screenshot,
-    # which lands in the files directory under the start URL's slug.
+    # which is stored on the start page's row.
     assert browser.fetch.calls == []
-    with PagesDatabase(str(tmp_path / "kaval.pages.db")) as db:
-        path = db.file_path(f"{url_slug('https://kaval.ai/')}.png")
-    with open(path, "rb") as handle:
-        assert handle.read() == b"png-bytes"
+    assert rows["https://kaval.ai/"].screenshot == b"png-bytes"
+    assert rows["https://kaval.ai/a"].screenshot is None
 
 
 @pytest.mark.asyncio
@@ -552,9 +549,7 @@ async def test_run_ignore_robots_with_force_http(tmp_path):
         rows = {row.url: row for row in db.iter_pages()}
     assert rows["https://kaval.ai/private"].title == "Private"
     # --force-http means no browser, so no screenshot was produced.
-    with PagesDatabase(str(tmp_path / "kaval.pages.db")) as db:
-        files_dir = pathlib.Path(db.files_dir)
-    assert not list(files_dir.glob("*.png"))
+    assert all(row.screenshot is None for row in rows.values())
 
 
 @pytest.mark.asyncio

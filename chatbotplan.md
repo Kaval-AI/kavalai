@@ -193,8 +193,8 @@ Two CLI scripts and an intermediate **pages database**, so scraping and
 indexing are separate, composable steps:
 
 ```bash
-# 1. Scrape: crawl the site into a pages database (url + markdown; raw
-#    HTML and screenshots as files in a sibling <name>.pages.files/ dir)
+# 1. Scrape: crawl the site into a pages database (url + raw HTML +
+#    markdown + the start page's screenshot, all in one SQLite file)
 #    BUILT — tools/zerocostchatbot/ (scrape.py, pages_db.py, htmlmd.py + tests)
 python -m tools.zerocostchatbot.scrape https://docs.kaval.ai --max-pages 200
 
@@ -205,9 +205,9 @@ python -m tools.zerocostchatbot.build_index docs.kaval.ai.pages.db
 ```
 
 **Two SQLite files, deliberately.** The pages database is the crawl
-artefact and never leaves our infra — its bulk (raw HTML, screenshots)
-lives as plain files in a sibling directory, bucket-ready, with only file
-names in the table. The RAG index is the servable artefact: small, shippable (including to a
+artefact — one self-contained file with the raw HTML, the markdown and
+the start page's screenshot — and never leaves our infra. The RAG index is
+the servable artefact: small, shippable (including to a
 browser later), rebuildable from the pages database at any time with a
 different chunker or embedding model, without re-crawling.
 
@@ -226,7 +226,7 @@ which is what makes the scraper kill-safe:
 | `attempts` | Fetch attempts so far, capped to avoid poison URLs |
 | `fetch_error` | Last error message, NULL on success |
 | `title`, `markdown` | The content (NULL until fetched) |
-| `html_path` | File name in the sibling files directory (screenshots live there too, by naming convention) |
+| `html`, `screenshot` | Raw HTML per page; the start page's PNG capture as a BLOB |
 
 Crawl loop: seed the start URL + sitemap URLs with `INSERT OR IGNORE`,
 then let a small pool of parallel workers each pick a pending row, fetch
@@ -316,11 +316,23 @@ is throwaway. In rough order of value:
 
 1. **Support-bot workflow template** (`rag_query` → agent → cited answer)
    + agent-server, per-collection — the hosted product core.
-2. **Embed snippet / iframe** (`KavalChat` loader with a bot id), plus
-   per-bot token, domain allowlist, message caps.
-3. **Demo page** (homepage screenshot + live widget) for the outreach
-   funnel, generated from iteration-1 artefacts on demand — no pre-crawl
-   of the full prospect list required; a site is crawled when wanted.
+2. **Embed snippet / iframe**, plus per-bot token, domain allowlist,
+   message caps. STARTED — `chatbotwidget/` holds the production widget
+   (a framework-free port of the kaval.ai website chatbot: floating or
+   inline, `--kcb-*` theming, markdown without `innerHTML`, an
+   agent-server SSE connector, and any `send` callback — the WebLLM
+   bridge included — behind the same connector shape). `webwidget/`
+   remains the developer playground.
+3. **Demo page** for the outreach funnel — BUILT:
+   `tools/zerocostchatbot/make_demo.py` compiles a static, bucket-servable
+   folder from the iteration-1 artefacts (screenshot or stored-HTML
+   backdrop + the `chatbotwidget/` widget). Without a backend it answers
+   client-side from the site's chunks with source links; `--endpoint`
+   swaps in a running agent server. Generated on demand — no pre-crawl of
+   the full prospect list required.
+   `tools/zerocostchatbot/archive.html` browses a pages database
+   Wayback-style (sql.js in the browser, navigation limited to crawled
+   pages) — a candidate replacement for the screenshot backdrop.
 4. **WebLLM landing-page demo**, WordPress plugin, self-hosted compose
    bundle — channels, as in the deployment section above.
 

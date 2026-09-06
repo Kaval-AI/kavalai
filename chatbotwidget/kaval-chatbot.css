@@ -1,0 +1,603 @@
+/*
+Copyright 2026 OÜ KAVAL AI (registry code 17393877)
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+Kaval.AI chat widget styles, ported from the kaval.ai website chatbot.
+Every color, font and radius is a --kcb-* token, overridable from the host
+page or through the `theme` option of KavalChatbot.mount(). The defaults are
+the kaval.ai palette.
+*/
+
+.kcb-chatbot {
+  --kcb-accent: #acc12f;
+  --kcb-accent-content: #273e47;
+  --kcb-surface: #f4f4f6;
+  --kcb-surface-alt: #e5e5e8;
+  --kcb-border: #d6d6da;
+  --kcb-text: #273e47;
+  --kcb-link-hover: #809537;
+  --kcb-radius: 0.5rem;
+  --kcb-radius-small: 0.25rem;
+  --kcb-font: system-ui, sans-serif;
+  --kcb-font-header: var(--kcb-font);
+  --kcb-font-mono: ui-monospace, monospace;
+  --kcb-shadow: rgba(39, 62, 71, 0.35);
+  --kcb-z: 1100;
+  /* Height of the page's fixed header, if any: a maximized window stops
+     under it so the navigation stays reachable. */
+  --kcb-top-offset: 0px;
+
+  font-family: var(--kcb-font);
+  font-size: 16px;
+  line-height: 1.4;
+  color: var(--kcb-text);
+}
+
+.kcb-chatbot *,
+.kcb-chatbot *::before,
+.kcb-chatbot *::after {
+  box-sizing: border-box;
+}
+
+.kcb-chatbot button {
+  font: inherit;
+  border: none;
+  cursor: pointer;
+  background: none;
+  color: inherit;
+}
+
+/* Floating mode: bubble bottom-right; opens a panel above it on desktop and
+   a full-screen overlay on mobile. */
+.kcb-floating {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: var(--kcb-z);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+/* Inline mode: the window simply fills its host element. */
+.kcb-inline .kcb-window {
+  width: 100%;
+  height: 100%;
+  min-height: 20rem;
+}
+
+.kcb-icon {
+  width: 1em;
+  height: 1em;
+  display: block;
+}
+
+.kcb-bubble {
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--kcb-accent);
+  color: var(--kcb-accent-content);
+  box-shadow: 0 4px 12px var(--kcb-shadow);
+}
+
+/* The float bubble rolls a full turn on toggle while the logo and the X
+   crossfade — both children are always rendered, stacked on each other. */
+.kcb-bubble-float {
+  position: relative;
+  transition: transform 0.35s ease;
+}
+
+.kcb-open .kcb-bubble-float {
+  transform: rotate(360deg);
+}
+
+.kcb-bubble-logo,
+.kcb-bubble-glyph {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.35s ease, transform 0.35s ease;
+}
+
+.kcb-bubble-logo {
+  border: 2px solid var(--kcb-accent);
+  object-fit: cover;
+}
+
+.kcb-close-icon {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transform: scale(0.4);
+  transition: opacity 0.35s ease, transform 0.35s ease;
+}
+
+.kcb-open .kcb-bubble-float .kcb-bubble-logo,
+.kcb-open .kcb-bubble-float .kcb-bubble-glyph {
+  opacity: 0;
+  transform: scale(0.4);
+}
+
+.kcb-open .kcb-close-icon {
+  opacity: 1;
+  transform: scale(1);
+}
+
+/* The header copy of the bubble only exists on mobile. */
+.kcb-bubble-inline {
+  display: none;
+}
+
+/* Speech bubble inviting the first click, parked above the float bubble. The
+   delay lets the page settle before it slides in. */
+.kcb-greeting {
+  position: absolute;
+  right: 0;
+  bottom: 68px; /* the 56px bubble plus a gap */
+  width: max-content;
+  max-width: min(240px, calc(100vw - 48px));
+  padding: 8px 12px;
+  text-align: left;
+  font-size: 0.85rem;
+  font-weight: 500;
+  line-height: 1.3;
+  border-radius: var(--kcb-radius);
+  background-color: var(--kcb-accent);
+  color: var(--kcb-accent-content);
+  box-shadow: 0 4px 12px var(--kcb-shadow);
+  animation: kcb-greeting-in 0.35s ease-out 1s both;
+}
+
+/* The tail: a rotated square tucked under the lower edge. */
+.kcb-greeting::after {
+  content: "";
+  position: absolute;
+  right: 22px;
+  bottom: -5px;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  background-color: inherit;
+  transform: rotate(45deg);
+}
+
+@keyframes kcb-greeting-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
+/* Default size; inline width/height styles take over once the user resizes. */
+.kcb-window {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--kcb-surface);
+  color: var(--kcb-text);
+  border-radius: var(--kcb-radius);
+  box-shadow: 0 8px 24px var(--kcb-shadow);
+  overflow: hidden;
+  transform-origin: bottom right;
+}
+
+.kcb-window-opening {
+  animation: kcb-window-open 0.25s ease-out;
+}
+
+@keyframes kcb-window-open {
+  from {
+    opacity: 0;
+    transform: scale(0.85) translateY(12px);
+  }
+}
+
+.kcb-window-close {
+  animation: kcb-window-close 0.25s ease-in forwards;
+}
+
+@keyframes kcb-window-close {
+  to {
+    opacity: 0;
+    transform: scale(0.85) translateY(12px);
+  }
+}
+
+.kcb-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background-color: var(--kcb-accent);
+  color: var(--kcb-accent-content);
+}
+
+.kcb-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--kcb-font-header);
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.kcb-title-logo {
+  height: 26px;
+  border-radius: 50%;
+}
+
+.kcb-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.kcb-icon-btn {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: transparent;
+  font-size: 15px;
+  border-radius: var(--kcb-radius-small);
+}
+
+.kcb-icon-btn:hover {
+  background-color: rgba(0, 0, 0, 0.12);
+}
+
+/* Invisible drag strips on the growable edges (floating desktop only). */
+.kcb-resize {
+  position: absolute;
+  z-index: 1;
+  touch-action: none;
+}
+
+.kcb-inline .kcb-resize {
+  display: none;
+}
+
+.kcb-inline .kcb-maximize {
+  display: none;
+}
+
+.kcb-resize-left {
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: ew-resize;
+}
+
+.kcb-resize-top {
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 6px;
+  cursor: ns-resize;
+}
+
+.kcb-resize-corner {
+  top: 0;
+  left: 0;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+}
+
+.kcb-history {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.kcb-empty {
+  margin: auto;
+  text-align: center;
+  opacity: 0.6;
+  font-size: 0.95rem;
+}
+
+.kcb-message {
+  max-width: 92%;
+  padding: 8px 12px;
+  border-radius: var(--kcb-radius);
+  background-color: var(--kcb-surface-alt);
+  align-self: flex-start;
+  overflow-wrap: break-word;
+  /* Agent replies are markdown blocks that bring their own spacing and, for
+     code, their own horizontal scroller — which needs a shrinkable parent.
+     Only the raw-text user bubbles set `white-space: pre-wrap`. */
+  min-width: 0;
+}
+
+.kcb-message.kcb-from-user {
+  max-width: 85%;
+  background-color: var(--kcb-accent);
+  color: var(--kcb-accent-content);
+  align-self: flex-end;
+  white-space: pre-wrap;
+}
+
+/* Stand-in for the reply while the agent thinks: three dots lifting in turn. */
+.kcb-typing {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 13px 12px;
+}
+
+.kcb-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: var(--kcb-text);
+  animation: kcb-dot-bounce 1.2s ease-in-out infinite;
+}
+
+.kcb-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.kcb-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes kcb-dot-bounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  30% {
+    transform: translateY(-4px);
+    opacity: 0.85;
+  }
+}
+
+/* --- Markdown rendering inside agent replies --------------------------- */
+
+.kcb-md-paragraph,
+.kcb-md-heading {
+  margin: 0 0 0.5em;
+  white-space: pre-wrap;
+}
+
+.kcb-md-heading {
+  font-family: var(--kcb-font-header);
+  font-weight: 600;
+  margin-top: 0.6em;
+}
+
+.kcb-md-heading[data-level="1"] {
+  font-size: 1.15em;
+}
+
+.kcb-md-heading[data-level="2"] {
+  font-size: 1.08em;
+}
+
+.kcb-md-list {
+  margin: 0 0 0.5em;
+  padding-left: 1.3em;
+}
+
+.kcb-md-list li {
+  margin: 0.15em 0;
+  white-space: pre-wrap;
+}
+
+.kcb-md-rule {
+  border: none;
+  border-top: 1px solid var(--kcb-border);
+  margin: 0.6em 0;
+}
+
+.kcb-message > *:first-child {
+  margin-top: 0;
+}
+
+.kcb-message > *:last-child {
+  margin-bottom: 0;
+}
+
+.kcb-md-link {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+}
+
+.kcb-md-link:hover {
+  color: var(--kcb-link-hover);
+}
+
+.kcb-md-strong {
+  font-weight: 700;
+}
+
+.kcb-md-em {
+  font-style: italic;
+}
+
+.kcb-inline-code {
+  font-family: var(--kcb-font-mono);
+  font-size: 0.85em;
+  padding: 1px 4px;
+  border-radius: var(--kcb-radius-small);
+  background-color: rgba(0, 0, 0, 0.08);
+  overflow-wrap: anywhere;
+}
+
+/* Dark slab so code reads as code against the light bubble. It scrolls
+   sideways rather than wrapping, so indentation survives. */
+.kcb-code {
+  margin: 0 0 0.5em;
+  padding: 8px 10px;
+  border-radius: var(--kcb-radius-small);
+  background-color: var(--kcb-text);
+  color: var(--kcb-surface);
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.kcb-code code {
+  font-family: var(--kcb-font-mono);
+  font-size: 0.82em;
+  line-height: 1.45;
+  white-space: pre;
+}
+
+/* Suggested-option badges between the history and the input. */
+.kcb-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 12px 8px;
+}
+
+.kcb-choices:empty {
+  display: none;
+}
+
+.kcb-choice {
+  background: transparent;
+  color: var(--kcb-text);
+  border: 1px solid var(--kcb-accent);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 0.8rem;
+}
+
+.kcb-choice:hover:enabled {
+  background-color: var(--kcb-accent);
+  color: var(--kcb-accent-content);
+}
+
+.kcb-input-row {
+  display: flex;
+  gap: 8px;
+  padding: 16px 12px;
+  border-top: 1px solid var(--kcb-border);
+  margin: 0;
+}
+
+.kcb-input-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 14px 12px;
+  font: inherit;
+  color: inherit;
+  background-color: var(--kcb-surface);
+  border: 1px solid var(--kcb-border);
+  border-radius: var(--kcb-radius-small);
+}
+
+.kcb-input-row input:focus {
+  outline: 2px solid var(--kcb-accent);
+  outline-offset: -1px;
+  border-color: transparent;
+}
+
+.kcb-send {
+  padding: 8px 20px;
+  background-color: var(--kcb-accent);
+  color: var(--kcb-accent-content);
+  border-radius: var(--kcb-radius-small);
+  font-weight: 600;
+}
+
+.kcb-send:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kcb-dot {
+    animation: none;
+    opacity: 0.5;
+  }
+
+  .kcb-greeting {
+    animation: none;
+  }
+
+  .kcb-window-opening,
+  .kcb-window-close,
+  .kcb-bubble-float,
+  .kcb-bubble-logo,
+  .kcb-bubble-glyph,
+  .kcb-close-icon {
+    animation-duration: 0.01s !important;
+    transition-duration: 0.01s !important;
+  }
+}
+
+@media (max-width: 768px) {
+  /* Open chat covers the whole screen; the close moves into the header. */
+  .kcb-floating.kcb-open {
+    inset: 0;
+    align-items: stretch;
+    gap: 0;
+  }
+
+  /* !important beats the inline desktop resize dimensions. */
+  .kcb-floating.kcb-open .kcb-window {
+    width: 100% !important;
+    height: 100% !important;
+    border-radius: 0;
+  }
+
+  .kcb-floating.kcb-open .kcb-bubble-float {
+    display: none;
+  }
+
+  .kcb-resize {
+    display: none;
+  }
+
+  /* The window already fills the screen, so there is nothing to maximize. */
+  .kcb-floating .kcb-maximize {
+    display: none;
+  }
+
+  .kcb-floating .kcb-bubble-inline {
+    display: flex;
+    width: 40px;
+    height: 40px;
+    font-size: 18px;
+    box-shadow: none;
+  }
+}

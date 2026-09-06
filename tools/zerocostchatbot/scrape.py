@@ -639,8 +639,8 @@ async def run(
             if args.screenshot and browser:
                 image = await browser.screenshot(start_url)
                 if image:
-                    saved = db.save_screenshot(start_url, image)
-                    logger.info(f"Screenshot saved to {saved}")
+                    db.save_screenshot(start_url, image)
+                    logger.info(f"Screenshot of {start_url} stored in {pages_path}")
             elif args.screenshot:
                 logger.warning("--screenshot needs the browser; skipped")
 

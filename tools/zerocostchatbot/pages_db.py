@@ -14,8 +14,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-import hashlib
-import os
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -31,14 +29,13 @@ CREATE TABLE IF NOT EXISTS pages (
     attempts INTEGER NOT NULL DEFAULT 0,
     fetch_error TEXT,
     title TEXT,
-    html_path TEXT,
-    markdown TEXT
+    html TEXT,
+    markdown TEXT,
+    screenshot BLOB
 );
 CREATE INDEX IF NOT EXISTS idx_pages_pending
     ON pages (last_crawled_at, attempts);
 """
-
-FILES_SUFFIX = ".files"
 
 
 def utcnow_iso() -> str:
@@ -46,18 +43,12 @@ def utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def url_slug(url: str) -> str:
-    """A stable filename stem for a URL, so a re-crawl overwrites in place."""
-    return hashlib.sha256(url.encode()).hexdigest()[:16]
-
-
 @dataclass
 class PageRow:
     """One row of the ``pages`` table.
 
-    ``html_path`` is a file name relative to the database's files directory —
-    the database plus that directory move together (and can later live in a
-    bucket under the same prefix).
+    ``screenshot`` is the PNG capture ``--screenshot`` took of the start
+    page, None on every other row.
     """
 
     url: str
@@ -68,8 +59,9 @@ class PageRow:
     attempts: int
     fetch_error: Optional[str]
     title: Optional[str]
-    html_path: Optional[str]
+    html: Optional[str]
     markdown: Optional[str]
+    screenshot: Optional[bytes]
 
 
 class PagesDatabase:
@@ -81,11 +73,9 @@ class PagesDatabase:
     can resume from. At worst, one page whose transaction had not committed is
     fetched again.
 
-    Bulk artefacts (raw HTML, screenshots) live as files in a sibling
-    directory (``<db>.files`` next to ``<db>.db``), the table holding only
-    their relative paths. A file is written *before* the row that references
-    it commits, so a crash can orphan a file — which the re-crawl overwrites,
-    file names being derived from the URL — but never a row.
+    Everything the crawl produces — raw HTML, markdown, the start page's
+    screenshot — lives in this one file, so a site's crawl is a single
+    artefact to copy, back up or hand to the next step.
     """
 
     def __init__(self, path: str):
@@ -94,17 +84,15 @@ class PagesDatabase:
         self._reject_legacy_schema()
         self._conn.executescript(SCHEMA)
         self._conn.commit()
-        stem = path[: -len(".db")] if path.endswith(".db") else path
-        self.files_dir = None if path == ":memory:" else stem + FILES_SUFFIX
 
     def _reject_legacy_schema(self) -> None:
-        """Refuse a database from before HTML moved out of the table."""
+        """Refuse a database from the interim layout that kept HTML in files."""
         columns = {
             row["name"] for row in self._conn.execute("PRAGMA table_info(pages)")
         }
-        if "html" in columns:
+        if "html_path" in columns:
             raise ValueError(
-                "This pages database stores raw HTML in the table (an old "
+                "This pages database keeps its HTML in a files directory (an old "
                 "layout); delete it and re-scrape."
             )
 
@@ -116,27 +104,6 @@ class PagesDatabase:
 
     def __exit__(self, *exc_info) -> None:
         self.close()
-
-    def _write_file(self, name: str, data: bytes) -> str:
-        """Write one artefact into the files directory, returning its name."""
-        os.makedirs(self.files_dir, exist_ok=True)
-        with open(os.path.join(self.files_dir, name), "wb") as handle:
-            handle.write(data)
-        return name
-
-    def file_path(self, name: Optional[str]) -> Optional[str]:
-        """The absolute path of a stored artefact, None when there is none."""
-        if not name or not self.files_dir:
-            return None
-        return os.path.join(self.files_dir, name)
-
-    def load_html(self, row: PageRow) -> Optional[str]:
-        """The raw HTML stored for a page, None when there is none."""
-        path = self.file_path(row.html_path)
-        if path is None or not os.path.exists(path):
-            return None
-        with open(path, encoding="utf-8") as handle:
-            return handle.read()
 
     def add_urls(self, urls: Iterable[str], discovered_at: Optional[str] = None) -> int:
         """Add URLs to the frontier, ignoring the ones already known.
@@ -187,21 +154,14 @@ class PagesDatabase:
         links: Iterable[str] = (),
         crawled_at: Optional[str] = None,
     ) -> None:
-        """Store a fetched page and enqueue its links, atomically.
-
-        The HTML goes to the files directory first; only its name enters the
-        table, in the same transaction as everything else.
-        """
+        """Store a fetched page and enqueue its links, atomically."""
         crawled_at = crawled_at or utcnow_iso()
-        html_path = None
-        if html and self.files_dir:
-            html_path = self._write_file(f"{url_slug(url)}.html", html.encode())
         with self._conn:
             self._conn.execute(
                 "UPDATE pages SET last_crawled_at = ?, status_code = ?,"
                 " fetch_mode = ?, attempts = attempts + 1, fetch_error = NULL,"
-                " title = ?, html_path = ?, markdown = ? WHERE url = ?",
-                (crawled_at, status_code, fetch_mode, title, html_path, markdown, url),
+                " title = ?, html = ?, markdown = ? WHERE url = ?",
+                (crawled_at, status_code, fetch_mode, title, html, markdown, url),
             )
             self._conn.executemany(
                 "INSERT OR IGNORE INTO pages (url, discovered_at) VALUES (?, ?)",
@@ -230,19 +190,12 @@ class PagesDatabase:
                 (utcnow_iso(), reason, url),
             )
 
-    def save_screenshot(self, url: str, image: bytes) -> Optional[str]:
-        """Store a page's screenshot beside its HTML in the files directory.
-
-        The file name derives from the URL (``<url_slug>.png``), so it needs
-        no column of its own and a re-capture overwrites in place.
-
-        Returns:
-            The absolute path of the written file, None without a files
-            directory.
-        """
-        if not self.files_dir:
-            return None
-        return self.file_path(self._write_file(f"{url_slug(url)}.png", image))
+    def save_screenshot(self, url: str, image: bytes) -> None:
+        """Store a page's PNG capture on its row (a re-capture overwrites)."""
+        with self._conn:
+            self._conn.execute(
+                "UPDATE pages SET screenshot = ? WHERE url = ?", (image, url)
+            )
 
     def requeue_all(self) -> int:
         """Put every URL back in the frontier, keeping the stored content.
@@ -274,7 +227,7 @@ class PagesDatabase:
         """Every row, fetched or not."""
         cursor = self._conn.execute(
             "SELECT url, discovered_at, last_crawled_at, status_code, fetch_mode,"
-            " attempts, fetch_error, title, html_path, markdown"
+            " attempts, fetch_error, title, html, markdown, screenshot"
             " FROM pages ORDER BY discovered_at, rowid"
         )
         for row in cursor:

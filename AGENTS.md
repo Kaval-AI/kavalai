@@ -40,7 +40,8 @@ Two components:
 | `backoffice/`, `frontend/` | Management API and Angular UI |
 | `tests/` | Pytest suite for the library; mock MCP servers in `tests/helpers/`. An example's tests live beside it under `examples/`, a root `tools/` module's in its `tests/` subfolder, and `testpaths` covers all three |
 | `docs/`, `notebooks/` | Sphinx documentation; the five tutorial notebooks are the source of truth |
-| `tools/` | Standalone product tooling outside the wheel; `zerocostchatbot/` scrapes a site into a resumable pages database (`python -m tools.zerocostchatbot.scrape`) and builds a RAG index from it (`python -m tools.zerocostchatbot.build_index`, fastembed by default) |
+| `tools/` | Standalone product tooling outside the wheel; `zerocostchatbot/` scrapes a site into a resumable pages database (`python -m tools.zerocostchatbot.scrape`) and builds a RAG index from it (`python -m tools.zerocostchatbot.build_index`, fastembed by default) and compiles a static demo (`python -m tools.zerocostchatbot.make_demo`); `archive.html` browses a pages database in the browser |
+| `chatbotwidget/` | Production chat widget (framework-free port of the kaval.ai website chatbot); floating/inline, `--kcb-*` theming, agent-server SSE connector; tests via `node --test chatbotwidget/tests/kaval-chatbot.test.js` |
 | `examples/` | Runnable examples; `green_village/` (RAG chatbot, port 25000), `bakery/` (a YAML workflow with side effects, ports 25100/25101) and `business_info_agent/` (web research: search, crawl, summarise, port 25200) each ship an `eval_cases.yaml`; `support_agent/support_agent.yaml` is the branching-DAG example the docs load |
 
 ## Invariants

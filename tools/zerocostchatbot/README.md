@@ -9,13 +9,12 @@ root for the product plan):
 2. `build_index.py` chunks and embeds those pages into a **RAG index** —
    a `CollectionRagService` collection, by default in its own SQLite file.
 
-Content and index are separate on purpose: the crawl artefacts never
-leave your infra, the RAG index is the small servable file, rebuildable at
-any time with a different chunker or embedding model without re-crawling.
-Bulk artefacts — raw HTML and screenshots — are not in the pages database
-either: they live as plain files in a sibling `<name>.pages.files/`
-directory (ready to move to a bucket later), the table holding only their
-relative file names.
+Content and index are separate on purpose: the pages database is the
+crawl artefact — one self-contained file holding everything the scrape
+produced (raw HTML, markdown, the start page's screenshot) that never
+leaves your infra — and the RAG index is the small servable file,
+rebuildable at any time with a different chunker or embedding model
+without re-crawling.
 
 ## Usage
 
@@ -96,8 +95,9 @@ CREATE TABLE IF NOT EXISTS pages (
     attempts INTEGER NOT NULL DEFAULT 0,
     fetch_error TEXT,
     title TEXT,
-    html_path TEXT,
-    markdown TEXT
+    html TEXT,
+    markdown TEXT,
+    screenshot BLOB
 );
 CREATE INDEX IF NOT EXISTS idx_pages_pending
     ON pages (last_crawled_at, attempts);
@@ -113,15 +113,9 @@ CREATE INDEX IF NOT EXISTS idx_pages_pending
 | `attempts` | Fetch attempts so far; rows at `--max-attempts` are parked |
 | `fetch_error` | Last error message, or the skip reason (`disallowed by robots.txt`); NULL after a success |
 | `title` | Page title |
-| `html_path` | File name of the raw HTML in the files directory (browser path: rendered DOM) |
+| `html` | Raw HTML as fetched (browser path: rendered DOM) |
 | `markdown` | Extracted markdown, the input for the indexing step |
-
-File names are relative to the `<name>.pages.files/` directory next to the
-database and derive from the URL, so a re-crawl overwrites in place. A
-`--screenshot` capture lands in the same directory as `<url-slug>.png`,
-found by convention rather than by a column. A file
-is written before the row referencing it commits: a crash can orphan a
-file (harmless, overwritten next time), never a dangling row.
+| `screenshot` | PNG capture of the start page when `--screenshot` took one; NULL elsewhere |
 
 ## Fetch strategy
 
@@ -159,7 +153,7 @@ less polite.
 | `--crawl4ai-url URL` | The crawl4ai container rendering pages (default `http://localhost:11235`) |
 | `--force-http` / `--force-browser` | Pin the fetch mode |
 | `--refresh` | Re-queue every known URL before crawling |
-| `--screenshot` | Save a PNG of the start page into the files directory (needs the container) |
+| `--screenshot` | Store a PNG of the start page on its row (needs the container) |
 
 `robots.txt` is honoured by default and matched with the same identity the
 requests carry: `KavalaiBot` for the default agent, `Googlebot` for the
@@ -194,6 +188,45 @@ chunk metadata carries `url`, `title`, `heading` and `crawled_at` — enough
 to cite sources. The result is queryable with
 `examples/ragindex/query_index.py` and browsable in the backoffice RAG
 explorer.
+
+## Compiling a client demo
+
+```bash
+python -m tools.zerocostchatbot.make_demo docs.kaval.ai.pages.db
+python -m http.server -d docs.kaval.ai.demo
+```
+
+The output folder is self-contained static files (bucket-servable): the
+homepage screenshot — or the stored HTML anchored to the live site — as the
+backdrop, with the production chat widget (`chatbotwidget/`) floating over
+it and a "demo by Kaval.AI" badge. By default the chat answers client-side
+from the site's own chunks (the RAG index beside the pages database, else
+re-chunked markdown) with a lexical ranker and source links — no backend,
+no keys. `--endpoint URL` points the widget at a running agent server for
+the full LLM-backed bot instead; `--suggestion` adds question chips,
+`--title` names the window.
+
+## Browsing the archive
+
+`archive.html` is a Wayback-style viewer for a pages database: it loads the
+SQLite file in the browser (sql.js, from cdnjs) and shows the archived pages
+in an iframe, with navigation limited to what the crawl captured.
+
+```bash
+python -m http.server            # from the repo root
+# open http://localhost:8000/tools/zerocostchatbot/archive.html?db=/docs.kaval.ai.pages.db
+```
+
+Without `?db=` the page offers a file picker (which also works from
+`file://`). The sidebar lists every fetched page with a filter; the address
+bar, back/forward and the links inside the pages navigate the archive —
+links whose target was not crawled are shown dotted and, when clicked,
+report "Not in the archive" instead of leaving. Styles and images load from
+the live site through an injected `<base>` tag; the site's own scripts are
+stripped unless **Run page scripts** is ticked, so a snapshot cannot phone
+home or navigate on its own. The DOM-free logic (URL matching, page
+preparation) lives in `archive.js`, tested with
+`node --test tools/zerocostchatbot/tests/archive.test.js`.
 
 ## Inspecting a pages database
 
