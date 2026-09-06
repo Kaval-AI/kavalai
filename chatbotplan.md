@@ -334,8 +334,8 @@ is throwaway. In rough order of value:
    demo: browses the pages database Wayback-style (sql.js in the browser,
    navigation limited to crawled pages) with the widget answering from the
    RAG index via WebLLM — embedding + chat model in-browser, progress in
-   the widget header, lexical fallback without WebGPU — under a DEMO
-   banner, with skin and model pickers.
+   the widget header, lexical fallback without WebGPU — with skin and
+   model pickers.
 4. **WebLLM landing-page demo**, WordPress plugin, self-hosted compose
    bundle — channels, as in the deployment section above.
 

@@ -24,13 +24,11 @@ file pickers, which also work from file://.
   <title>DEMO chatbot</title>
   <link rel="stylesheet" href="../../chatbotwidget/kaval-chatbot.css" />
   <style>
-    :root { --bar: #273e47; --accent: #acc12f; --muted: #8a9aa3; --panel: #f4f4f6; --demo: #e5484d; }
+    :root { --bar: #273e47; --accent: #acc12f; --muted: #8a9aa3; --panel: #f4f4f6; }
     html, body { height: 100%; margin: 0; font-family: system-ui, sans-serif; font-size: 14px; color: #1f2d34; }
-    body { display: grid; grid-template-rows: auto auto 1fr; grid-template-columns: 300px 1fr; }
+    body { display: grid; grid-template-rows: auto 1fr; grid-template-columns: 300px 1fr; }
     body.nav-hidden { grid-template-columns: 0 1fr; }
     body.nav-hidden aside { display: none; }
-    .demo-banner { grid-column: 1 / -1; background: var(--demo); color: #fff; text-align: center; font-weight: 700; letter-spacing: 0.35em; padding: 4px 12px; font-size: 13px; }
-    .demo-banner small { font-weight: 400; letter-spacing: normal; opacity: 0.9; margin-left: 1em; }
     header { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; padding: 8px 12px; background: var(--bar); color: #fff; flex-wrap: wrap; }
     header .brand { font-weight: 700; color: var(--accent); white-space: nowrap; }
     header button, header label, header select { background: transparent; color: #fff; border: 1px solid rgba(255,255,255,0.35); border-radius: 4px; padding: 5px 9px; cursor: pointer; font: inherit; }
@@ -59,7 +57,6 @@ file pickers, which also work from file://.
   </style>
 </head>
 <body>
-  <div class="demo-banner">DEMO <small id="banner-note">chatbot preview — nothing is installed on the real site</small></div>
   <header>
     <button id="nav-toggle" title="Show or hide the page index" aria-pressed="true">&#9776;</button>
     <span class="brand">DEMO chatbot</span>
@@ -356,9 +353,6 @@ file pickers, which also work from file://.
       function openRag(bytes) {
         return sql().then(function (SQL) {
           rag = new KavalArchive.RagIndex(new SQL.Database(new Uint8Array(bytes)), params.get("collection"));
-          $("banner-note").textContent =
-            "chatbot preview — answers come from " + rag.chunks.length +
-            " indexed passages; nothing is installed on the real site";
           mountChatbot();
         });
       }
@@ -376,7 +370,7 @@ file pickers, which also work from file://.
         if (!file) return;
         file.arrayBuffer().then(openPages).then(function (ok) {
           if (ok && pendingRag) return openRag(pendingRag);
-          if (ok) $("banner-note").textContent = "chatbot preview — no RAG index loaded, so no chatbot";
+          if (ok) notice([document.createTextNode("No RAG index loaded, so no chatbot.")]);
         });
       });
       $("rag-file").addEventListener("change", function (event) {
@@ -413,7 +407,7 @@ file pickers, which also work from file://.
         fetchBytes(dbParam).then(openPages).then(function (ok) {
           if (!ok) return;
           return fetchBytes(ragParam).then(openRag, function () {
-            $("banner-note").textContent = "chatbot preview — no RAG index at " + ragParam + ", so no chatbot";
+            notice([document.createTextNode("No RAG index at " + ragParam + ", so no chatbot.")]);
           });
         }).catch(function (error) {
           alert("Could not load " + dbParam + ": " + error.message);

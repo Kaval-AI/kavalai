@@ -220,8 +220,8 @@ python -m http.server            # from the repo root
 `?db=` names the pages database (sql.js loads the SQLite file in the
 browser); the RAG index is taken from `?rag=`, defaulting to the
 `.rag.db` beside it. Without `?db=` the page offers file pickers for both,
-which also work from `file://`. A red **DEMO** banner frames the page so
-nobody mistakes it for the live site.
+which also work from `file://`. The header reads "DEMO chatbot" so the
+page is not mistaken for the live site.
 
 **Browsing.** The collapsible sidebar (☰) lists every fetched page with a
 filter; the address bar, back/forward and the links inside the pages
