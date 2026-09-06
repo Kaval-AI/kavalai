@@ -21,7 +21,7 @@ VECTORS = {
 
 
 def make_fake_embedding_client(vectors=VECTORS):
-    async def compute_embeddings(texts, normalizer=None):
+    async def compute_embeddings(texts, normalize=False, normalizer=None, **kwargs):
         return [vectors[t] for t in texts], MagicMock(total_tokens=len(texts))
 
     client = MagicMock()
@@ -315,7 +315,7 @@ async def test_query_batch(service_factory):
 
     # Embeddings for the whole batch are computed in one call
     service.embedding_client.compute_embeddings.assert_awaited_with(
-        texts=["apple", "banana"], normalizer=None
+        texts=["apple", "banana"], normalize=False, normalizer=None
     )
 
     assert await service.query_batch(texts=[]) == []

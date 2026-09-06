@@ -19,6 +19,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from kavalai.llm_clients.common import create_model_call_stat
+from kavalai.normalizer import Normalizer
 from kavalai.rag import PostgresRagService, RagServiceResult, SqliteRagService
 
 # Four-dimensional unit-ish vectors. Cosine distance is what every backend
@@ -54,9 +55,16 @@ GUARANTEED_INDEX_KEYS = {
 
 
 def fake_embedding_client():
-    """An embedding client with fixed vectors, so rankings are predictable."""
+    """An embedding client with fixed vectors, so rankings are predictable.
 
-    async def compute_embeddings(texts, *args, **kwargs):
+    It honours ``normalize``/``normalizer`` the way the real clients do, so
+    the contract that a service's normalizer reaches the embedding side can
+    be checked without a provider.
+    """
+
+    async def compute_embeddings(
+        texts, *args, normalize=False, normalizer=None, **kwargs
+    ):
         # A real ModelCallStat, not a mock: PostgresRagService persists what it
         # is handed, so a mock here would fail inside SQLAlchemy rather than in
         # the assertion, and the contract does include reporting usage.
@@ -67,7 +75,10 @@ def fake_embedding_client():
             batch_size=len(texts),
             total_tokens=len(texts),
         )
-        return [VECTORS[t] for t in texts], stats
+        embeddings = [VECTORS[t] for t in texts]
+        if normalize and normalizer is not None:
+            embeddings = normalizer.transform(embeddings)
+        return embeddings, stats
 
     client = MagicMock()
     client.compute_embeddings = AsyncMock(side_effect=compute_embeddings)
@@ -437,3 +448,42 @@ def test_rag_service_from_uri_picks_the_backend(tmp_path):
     )
     assert isinstance(postgres, PostgresRagService)
     assert postgres.schema == "s" and postgres.model == "fake/embedding-model"
+
+
+class RecordingNormalizer(Normalizer):
+    """A normalizer that only records what it was asked to transform."""
+
+    def __init__(self):
+        super().__init__()
+        self.calls = 0
+
+    def transform(self, embeddings):
+        self.calls += 1
+        return [list(vector) for vector in embeddings]
+
+
+async def test_a_service_normalizer_reaches_both_indexing_and_querying(
+    rag_service, collection
+):
+    """A normalizer given to a service is applied — it used to be handed to
+    the client without ``normalize=True``, which every client treats as
+    "do nothing"."""
+    normalizer = RecordingNormalizer()
+    rag_service.normalizer = normalizer
+
+    await rag_service.index_batch(
+        texts=["apple", "banana"],
+        metadata_list=[{}, {}],
+        source_ids=["a", "b"],
+        collection_name=collection,
+    )
+    assert normalizer.calls == 1
+
+    await rag_service.query("apple", collection_name=collection, top_k=1)
+    assert normalizer.calls == 2
+
+
+async def test_without_a_normalizer_nothing_is_normalized(rag_service, collection):
+    await rag_service.index("apple", {}, collection_name=collection, source_id="a")
+    _, kwargs = rag_service.embedding_client.compute_embeddings.call_args
+    assert kwargs["normalize"] is False and kwargs["normalizer"] is None

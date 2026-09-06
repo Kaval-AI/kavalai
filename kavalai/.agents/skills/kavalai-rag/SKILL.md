@@ -179,8 +179,8 @@ python -m kavalai.tools.index_csv data.csv \
 alongside. `--mode lines` indexes each line of the field as its own entry.
 `--replace` deletes matching `(collection_name, source_id)` rows first — use it
 for a re-index, omit it and you will duplicate. `--index` names where to index
-into: `postgres` (from `KAVALAI_DB_URI` / `KAVALAI_DB_SCHEMA`), a database URI
-or a SQLite file path.
+into: a database URI (a Postgres one is where the backoffice RAG explorer
+looks) or a SQLite file path.
 
 ## Embeddings
 

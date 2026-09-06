@@ -31,11 +31,9 @@ Install") so short chunks stay retrievable on their own. Chunk metadata
 carries ``url``, ``title``, ``heading`` and ``crawled_at`` — enough to cite
 the source page in an answer.
 
-``--index`` decides the backend, exactly as in ``examples/ragindex``:
-``postgres`` reads ``KAVALAI_DB_URI`` / ``KAVALAI_DB_SCHEMA`` from the
-environment, anything containing ``://`` is used as a database URI, and
-anything else is a SQLite file path. The default embedding model is local
-fastembed — no API key, no per-page cost.
+``--index`` names where the index lives: a database URI, or a SQLite file
+path — by default the ``<site>.rag.db`` beside the pages database. The
+default embedding model is local fastembed — no API key, no per-page cost.
 """
 
 import argparse
@@ -48,7 +46,7 @@ from urllib.parse import urlparse
 
 from loguru import logger
 
-from kavalai.rag import SqliteRagService, rag_service_from_uri
+from kavalai.rag import rag_service_from_uri
 from kavalai.rag.base import BaseRagService
 from kavalai.settings import apply_normalizer_from_env
 from tools.zerocostchatbot.pages_db import PagesDatabase, PageRow
@@ -220,26 +218,19 @@ async def build_rag_index(
     return report
 
 
-def make_rag_service(index: str, model: str, schema: Optional[str]) -> BaseRagService:
-    """The RAG backend named by ``--index`` — same contract as ``examples/ragindex``.
-
-    Raises:
-        KeyError: If ``postgres`` was asked for without ``KAVALAI_DB_URI``.
-    """
-    if index == "postgres":
-        uri = os.environ["KAVALAI_DB_URI"]
-        schema = schema or os.environ.get("KAVALAI_DB_SCHEMA", "public")
-        return rag_service_from_uri(uri, model, schema=schema)
-    if "://" in index:
-        return rag_service_from_uri(index, model, schema=schema)
-    return SqliteRagService(index, model)
-
-
 def default_index_path(pages_path: str) -> str:
     """``docs.kaval.ai.pages.db`` → ``docs.kaval.ai.rag.db``."""
     if pages_path.endswith(PAGES_SUFFIX):
         return pages_path[: -len(PAGES_SUFFIX)] + ".rag.db"
     return pages_path + ".rag.db"
+
+
+def make_rag_service(
+    index: str, model: Optional[str], schema: Optional[str]
+) -> BaseRagService:
+    """The RAG backend ``--index`` names: a database URI, or a SQLite file path."""
+    uri = index if "://" in index else f"sqlite:///{index}"
+    return rag_service_from_uri(uri, model, schema=schema)
 
 
 def default_collection(pages: PagesDatabase) -> str:
@@ -292,14 +283,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--index",
         default=None,
         help=(
-            "'postgres' for the database in KAVALAI_DB_URI, a database URI,"
-            " or a SQLite file path (default: <pages>.rag.db beside the input)"
+            "Database URI or SQLite file path of the index"
+            " (default: <site>.rag.db beside the pages database)"
         ),
     )
     parser.add_argument(
         "--schema",
         default=None,
-        help="Postgres schema holding the RAG tables (default: KAVALAI_DB_SCHEMA)",
+        help="Postgres schema holding the RAG tables (default: the backend's)",
     )
     parser.add_argument(
         "--collection",

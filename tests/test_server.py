@@ -521,3 +521,45 @@ def test_load_provider_modules_verifies_registrations(monkeypatch):
             load_provider_modules("")
     finally:
         registry.llm_providers.unregister("broken-at-boot")
+
+
+def test_create_app_from_env_conf_registers_the_default_rag_service(
+    env_configured_agent, monkeypatch, tmp_path
+):
+    """KAVALAI_RAG_MODEL registers ``default`` over KAVALAI_RAG_URI — here a
+    SQLite file, so no database is contacted — without a setup module."""
+    from kavalai.llm_clients.registry import make_rag_service, rag_services
+    from kavalai.rag import SqliteRagService
+
+    monkeypatch.setenv("KAVALAI_RAG_MODEL", "fastembed/model")
+    monkeypatch.setenv("KAVALAI_RAG_URI", f"sqlite:///{tmp_path}/site.rag.db")
+    try:
+        create_app_from_env_conf()
+        service = make_rag_service("default")
+        assert isinstance(service, SqliteRagService)
+        assert service.model == "fastembed/model"
+    finally:
+        rag_services.unregister("default")
+
+
+def test_create_app_from_env_conf_registers_nothing_without_a_rag_model(
+    env_configured_agent, monkeypatch
+):
+    from kavalai.llm_clients.registry import rag_services
+
+    monkeypatch.delenv("KAVALAI_RAG_MODEL", raising=False)
+    create_app_from_env_conf()
+    assert "default" not in rag_services.names()
+
+
+def test_create_app_from_env_conf_requires_the_rag_uri_with_the_model(
+    env_configured_agent, monkeypatch
+):
+    """The index is never assumed to live in the agent database: a model
+    without KAVALAI_RAG_URI is a configuration error, not a fallback."""
+    from environs import EnvError
+
+    monkeypatch.setenv("KAVALAI_RAG_MODEL", "fastembed/model")
+    monkeypatch.delenv("KAVALAI_RAG_URI", raising=False)
+    with pytest.raises(EnvError):
+        create_app_from_env_conf()

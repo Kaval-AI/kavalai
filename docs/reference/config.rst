@@ -113,6 +113,18 @@ Read by ``python -m kavalai.server`` and ``python -m kavalai.migrate_db agents``
    * - ``KAVALAI_DB_SCHEMA``
      - Schema holding the runtime tables. Default ``public``; ``agents`` by
        convention.
+   * - ``KAVALAI_RAG_MODEL``
+     - Embedding model of the ``default`` RAG service. Setting it registers
+       that service at start-up, without a setup module, so a workflow's
+       ``rag_query`` nodes resolve. The normalizer from
+       ``KAVALAI_EMBEDDING_NORMALIZER_YAML``, when set, is attached to it.
+   * - ``KAVALAI_RAG_URI``
+     - Where that index lives, as a database URI (``sqlite:///site.rag.db``
+       or a Postgres URI). Required whenever ``KAVALAI_RAG_MODEL`` is set —
+       the index is not assumed to live in the agent database.
+   * - ``KAVALAI_RAG_SCHEMA``
+     - Schema holding the RAG tables. Optional; the backend's default
+       otherwise.
    * - ``KAVALAI_DB_POOL_SIZE``
      - SQLAlchemy pool size. Default ``0``.
    * - ``KAVALAI_DB_MAX_OVERFLOW``

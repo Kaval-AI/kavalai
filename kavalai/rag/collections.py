@@ -361,8 +361,12 @@ class CollectionRagService(BaseRagService):
     # Indexing
 
     async def _compute_embeddings(self, conn, texts: list[str]) -> list[list[float]]:
+        # Normalisation is opt-in: only a service constructed with a normalizer
+        # normalises, and then on both the index and the query side.
         embeddings, stats = await self.embedding_client.compute_embeddings(
-            texts=texts, normalizer=self.normalizer
+            texts=texts,
+            normalize=self.normalizer is not None,
+            normalizer=self.normalizer,
         )
         await self._record_stats(conn, stats)
         return embeddings

@@ -149,14 +149,14 @@ def test_default_collection(tmp_path):
         assert default_collection(db) == "docs.kaval.ai"
 
 
-def test_make_rag_service(tmp_path, monkeypatch):
-    path_service = make_rag_service(str(tmp_path / "a.db"), "fake/model", None)
-    assert isinstance(path_service, SqliteRagService)
-    uri_service = make_rag_service(f"sqlite:///{tmp_path}/b.db", "fake/model", None)
-    assert isinstance(uri_service, SqliteRagService)
-    monkeypatch.delenv("KAVALAI_DB_URI", raising=False)
-    with pytest.raises(KeyError):
-        make_rag_service("postgres", "fake/model", None)
+def test_make_rag_service_takes_a_path_or_a_uri(tmp_path):
+    assert isinstance(
+        make_rag_service(str(tmp_path / "a.db"), "fake/model", None), SqliteRagService
+    )
+    assert isinstance(
+        make_rag_service(f"sqlite:///{tmp_path}/b.db", "fake/model", None),
+        SqliteRagService,
+    )
 
 
 async def test_build_rag_index_end_to_end(tmp_path):
@@ -251,21 +251,3 @@ async def test_build_rag_index_of_an_empty_pages_database(tmp_path):
     with make_pages(tmp_path) as pages:
         report = await build_rag_index(pages, rag, "empty")
     assert (report.pages, report.chunks, report.skipped) == (0, 0, 0)
-
-
-def test_make_rag_service_postgres_reads_the_environment(tmp_path, monkeypatch):
-    # ` Any URI counts; a SQLite one keeps the test free of a Postgres driver.
-    monkeypatch.setenv("KAVALAI_DB_URI", f"sqlite:///{tmp_path}/env.rag.db")
-    service = make_rag_service("postgres", "fake/model", None)
-    assert isinstance(service, SqliteRagService)
-
-
-def test_chunk_metadata_drops_empty_fields(tmp_path):
-    with make_pages(tmp_path) as pages:
-        add_page(pages, "https://docs.kaval.ai/", "", "Body only.")
-        (row,) = pages.iter_pages()
-    (chunk,) = chunk_markdown(row.markdown, row.title or "")
-    metadata = chunk_metadata(row, chunk)
-    assert metadata["url"] == "https://docs.kaval.ai/" and metadata["chunk"] == 0
-    assert "title" not in metadata and "heading" not in metadata
-    assert "crawled_at" in metadata

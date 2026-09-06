@@ -152,7 +152,7 @@ async def test_rag_service_with_normalizer():
         )
 
         mock_llm_client.compute_embeddings.assert_called_with(
-            texts=["test"], normalizer=normalizer
+            texts=["test"], normalize=True, normalizer=normalizer
         )
 
         # 2. Test query
@@ -160,7 +160,7 @@ async def test_rag_service_with_normalizer():
         await service.query("test query")
 
         mock_llm_client.compute_embeddings.assert_called_with(
-            texts=["test query"], normalizer=normalizer
+            texts=["test query"], normalize=True, normalizer=normalizer
         )
 
         # 3. Test compute_similarity_matrix
@@ -170,7 +170,7 @@ async def test_rag_service_with_normalizer():
         )
 
         mock_llm_client.compute_embeddings.assert_called_with(
-            texts=["t1"], normalizer=normalizer
+            texts=["t1"], normalize=True, normalizer=normalizer
         )
 
 
@@ -211,7 +211,7 @@ async def test_rag_service_without_normalizer():
         await service.query("test query")
 
         mock_llm_client.compute_embeddings.assert_called_with(
-            texts=["test query"], normalizer=None
+            texts=["test query"], normalize=False, normalizer=None
         )
 
 

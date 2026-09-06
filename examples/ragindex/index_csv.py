@@ -31,9 +31,9 @@ already there are never embedded, which is the expensive part::
         local_data/song_lyrics.csv --index postgres \
         --collection lyrics_sample --limit 4000 --skip-existing
 
-``--index`` decides the backend: ``postgres`` reads ``KAVALAI_DB_URI`` and
-``KAVALAI_DB_SCHEMA`` from the environment, anything containing ``://`` is
-used as a database URI verbatim, and anything else is a SQLite file path.
+``--index`` names where the index lives: a database URI (a Postgres one is
+where the backoffice RAG explorer looks), or a SQLite file path; the default
+is ``songs.db``.
 ``KAVALAI_EMBEDDING_NORMALIZER_YAML``, when set, names the normalizer the
 embeddings go through — the same one the agent server would use.
 """
@@ -41,14 +41,13 @@ embeddings go through — the same one the agent server would use.
 import argparse
 import asyncio
 import csv
-import os
 import sys
 from dataclasses import dataclass
 from typing import Iterator, Optional
 
 from loguru import logger
 
-from kavalai.rag import SqliteRagService, rag_service_from_uri
+from kavalai.rag import rag_service_from_uri
 from kavalai.rag.base import BaseRagService
 from kavalai.settings import apply_normalizer_from_env
 
@@ -216,22 +215,9 @@ def read_rows(
 
 
 def make_rag_service(index: str, model: str, schema: Optional[str]) -> BaseRagService:
-    """Build the RAG backend named by ``--index``.
-
-    ``postgres`` takes the connection from ``KAVALAI_DB_URI`` /
-    ``KAVALAI_DB_SCHEMA`` (the same variables the agent server reads), a URI
-    is used as given, and anything else is a SQLite file.
-
-    Raises:
-        KeyError: If ``postgres`` was asked for without ``KAVALAI_DB_URI``.
-    """
-    if index == "postgres":
-        uri = os.environ["KAVALAI_DB_URI"]
-        schema = schema or os.environ.get("KAVALAI_DB_SCHEMA", "public")
-        return rag_service_from_uri(uri, model, schema=schema)
-    if "://" in index:
-        return rag_service_from_uri(index, model, schema=schema)
-    return SqliteRagService(index, model)
+    """The RAG backend ``--index`` names: a database URI, or a SQLite file path."""
+    uri = index if "://" in index else f"sqlite:///{index}"
+    return rag_service_from_uri(uri, model, schema=schema)
 
 
 async def existing_source_ids(rag: BaseRagService, collection_name: str) -> set[str]:
@@ -331,15 +317,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--index",
         default="songs.db",
-        help=(
-            "'postgres' for the database in KAVALAI_DB_URI, a database URI, "
-            "or a SQLite file path (default: songs.db)"
-        ),
+        help="Database URI or SQLite file path of the index (default: songs.db)",
     )
     parser.add_argument(
         "--schema",
         default=None,
-        help="Postgres schema holding the RAG tables (default: KAVALAI_DB_SCHEMA)",
+        help="Postgres schema holding the RAG tables (default: the backend's)",
     )
     parser.add_argument(
         "--collection",

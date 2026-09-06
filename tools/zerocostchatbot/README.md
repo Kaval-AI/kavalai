@@ -72,12 +72,12 @@ python -m examples.ragindex.query_index "how do I install kavalai" \
     --model fastembed/snowflake/snowflake-arctic-embed-s
 ```
 
-Rebuild the same index into Postgres (read from `KAVALAI_DB_URI`), where
-the backoffice RAG explorer can browse it:
+Rebuild the same index into Postgres, where the backoffice RAG explorer can
+browse it:
 
 ```bash
-dotenv run python -m tools.zerocostchatbot.build_index \
-    docs.kaval.ai.pages.db --index postgres
+python -m tools.zerocostchatbot.build_index docs.kaval.ai.pages.db \
+    --index postgresql://kavalai:kavalai@localhost:5432/kavalai --schema agents
 ```
 
 ## Schema
@@ -175,10 +175,8 @@ snowflake-arctic-embed-s`) — no API key, no per-page cost, and the same
 model family the browser widget embeds queries with, so the index stays
 usable from a fully client-side demo; it needs `kavalai[common]` (or
 `pip install fastembed sqliteai-vector`). `--model` selects any registered
-embedding provider instead, `--index` a different backend (`postgres`
-reads `KAVALAI_DB_URI`/`KAVALAI_DB_SCHEMA`, a `...://...` URI is used
-verbatim, anything else is a SQLite file path — the same contract as
-`examples/ragindex`).
+embedding provider instead, `--index` a different location as a database
+URI or SQLite path — the same contract as `examples/ragindex`.
 
 The collection is **dropped and rebuilt** each run, so the index always
 mirrors the pages database. Markdown is chunked at heading boundaries

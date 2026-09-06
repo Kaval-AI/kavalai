@@ -105,13 +105,13 @@ def read_site(pages_path: str) -> SitePages:
         )
 
 
-async def chunks_from_index(index_path: str, collection: Optional[str]) -> list[dict]:
+async def chunks_from_index(index: str, collection: Optional[str]) -> list[dict]:
     """The chunks a built RAG index holds, as chunks.json entries.
 
-    ``index_path`` takes what ``build_index --index`` takes (a file, a URI,
-    ``postgres``); reading needs no embedding model.
+    ``index`` is what ``build_index --index`` takes — a database URI or a
+    SQLite file path; reading needs no embedding model.
     """
-    rag = make_rag_service(index_path, None, None)
+    rag = make_rag_service(index, None, None)
     if not rag.supports("iter_entries"):
         raise ValueError(f"{type(rag).__name__} cannot list its entries")
     collections = await rag.list_collections()
@@ -119,11 +119,11 @@ async def chunks_from_index(index_path: str, collection: Optional[str]) -> list[
     if collection is None:
         if len(names) != 1:
             raise ValueError(
-                f"{index_path} holds collections {names}; pick one with --collection"
+                f"{index} holds collections {names}; pick one with --collection"
             )
         collection = names[0]
     elif collection not in names:
-        raise ValueError(f"{index_path} has no collection {collection!r} (has {names})")
+        raise ValueError(f"{index} has no collection {collection!r} (has {names})")
 
     chunks = []
     async for entry in rag.iter_entries(collection):
@@ -356,11 +356,12 @@ async def compile_demo(
     chunk_count = 0
     if not endpoint:
         index_path = index_path or default_index_path(pages_path)
-        if os.path.exists(index_path):
-            chunks = await chunks_from_index(index_path, collection)
-        else:
+        missing_file = "://" not in index_path and not os.path.exists(index_path)
+        if missing_file:
             logger.info(f"No RAG index at {index_path}; chunking the stored markdown")
             chunks = chunks_from_pages(site)
+        else:
+            chunks = await chunks_from_index(index_path, collection)
         chunks = chunks[:max_chunks]
         chunk_count = len(chunks)
         if not chunk_count:
@@ -409,9 +410,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--index",
         default=None,
         help=(
-            "RAG index whose chunks feed the client-side retrieval preview"
-            " (default: the <pages>.rag.db beside the input, else re-chunked"
-            " markdown); a database URI or 'postgres' works too"
+            "RAG index whose chunks feed the client-side retrieval preview, as"
+            " a database URI or SQLite path (default: the <site>.rag.db beside"
+            " the input; a missing file falls back to re-chunked markdown)"
         ),
     )
     parser.add_argument(

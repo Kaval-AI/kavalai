@@ -38,7 +38,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from kavalai.agent_service import AgentService
 from kavalai.db import db_manager
+from kavalai.rag import rag_service_from_uri
 from kavalai.settings import apply_normalizer_from_env, llm_parameters_from_env
+from kavalai.llm_clients.registry import register_rag_service
 from kavalai.workflow import WorkflowEngine
 from kavalai.workflow.models import WorkflowException, WorkflowStreamEvent
 from kavalai.workflow.tasklog.postgres import PostgresTaskLogger
@@ -494,6 +496,10 @@ def create_app_from_env_conf(
       call, passed to the engine as ``default_llm_parameters`` (optional).
     - KAVALAI_EMBEDDING_NORMALIZER_YAML: Normalizer installed as the default
       before the workflow loads (optional).
+    - KAVALAI_RAG_MODEL: Embedding model of the ``default`` RAG service. Setting
+      it registers that service without a setup module, over the index at
+      KAVALAI_RAG_URI (required alongside it) in KAVALAI_RAG_SCHEMA (optional),
+      with the normalizer above.
 
     Args:
         workflow_path: Path to the workflow YAML file.
@@ -573,6 +579,27 @@ def create_app_from_env_conf(
     normalizer = apply_normalizer_from_env()
     if normalizer is not None:
         logger.info("Default embedding normalizer loaded from the environment.")
+
+    # One index needs no setup module: KAVALAI_RAG_MODEL registers ``default``
+    # over KAVALAI_RAG_URI. Both are stated explicitly — the RAG index is not
+    # assumed to live in the agent database.
+    rag_model = env.str("KAVALAI_RAG_MODEL", "") or None
+    if rag_model:
+        rag_uri = env.str("KAVALAI_RAG_URI")
+        rag_schema = env.str("KAVALAI_RAG_SCHEMA", "") or None
+        register_rag_service(
+            "default",
+            rag_service_from_uri,
+            replace=True,
+            uri=rag_uri,
+            model=rag_model,
+            schema=rag_schema,
+            normalizer=normalizer,
+        )
+        logger.info(
+            f"Default RAG service: {mask_db_uri(rag_uri)}"
+            f" (schema {rag_schema or 'default'}, model {rag_model})"
+        )
 
     default_llm_model = env.str("KAVALAI_DEFAULT_LLM_MODEL", "") or None
     default_llm_parameters = llm_parameters_from_env()

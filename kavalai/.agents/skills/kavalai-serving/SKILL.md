@@ -18,6 +18,9 @@ export KAVALAI_AGENT_WORKFLOW_PATH=support_agent.yaml
 export KAVALAI_AGENT_SETUP_MODULE=myapp/agent_setup.py   # registers python:// tools, RAG services
 export KAVALAI_DB_URI=postgresql://user:pass@localhost:5432/kavalai
 export KAVALAI_DB_SCHEMA=agents
+# One RAG index needs no setup module: these two register the `default` service.
+export KAVALAI_RAG_URI=sqlite:///site.rag.db
+export KAVALAI_RAG_MODEL=fastembed/BAAI/bge-small-en-v1.5
 export OPENAI_API_KEY=sk-...
 
 python -m kavalai.server

@@ -34,7 +34,9 @@ def make_seeded_rag_service(session_maker, schema, embeddings_by_text):
         session_maker=session_maker, model="test/embedding", schema=schema
     )
 
-    async def fake_compute_embeddings(texts, normalizer=None):
+    async def fake_compute_embeddings(
+        texts, normalize=False, normalizer=None, **kwargs
+    ):
         stats = ModelCallStat(call_type="embedding", model="test/embedding")
         return [embeddings_by_text[t] for t in texts], stats
 
