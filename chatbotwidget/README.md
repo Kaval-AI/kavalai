@@ -77,7 +77,10 @@ KavalChatbot.mount({
 | `suggestions` | Choice chips offered before the first message |
 | `theme` | `--kcb-*` tokens, camelCased: `{accent, accentContent, surface, surfaceAlt, border, text, linkHover, radius, radiusSmall, font, fontHeader, fontMono, shadow, z, topOffset}` |
 
-`mount` returns `{root, open, close, toggle, send, reset, destroy}`.
+`mount` returns `{root, open, close, toggle, send, reset, destroy, setStatus,
+setTheme}`: `setStatus(text)` shows a short line under the title (model
+loading progress, "Ready", a fallback notice; empty hides it) and
+`setTheme(theme)` swaps the skin wholesale at runtime.
 
 Theming also works from CSS alone — every color, font and radius is a
 `--kcb-*` custom property on `.kcb-chatbot`, defaulting to the kaval.ai

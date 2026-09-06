@@ -109,3 +109,108 @@ test("prepareArchivedHtml can keep site scripts and handles headless fragments",
   assert.ok(fragment.startsWith('<base href="https://a.io/">'));
   assert.ok(fragment.endsWith("<p>x</p>"));
 });
+
+/* ---- RAG index ------------------------------------------------------- */
+
+function f32(values) {
+  return new Uint8Array(new Float32Array(values).buffer);
+}
+
+const CHUNKS = [
+  ["Acme › Pricing\n\nAnvils cost ten dollars each, shipping included.", f32([1, 0, 0]), { url: "https://acme.com/pricing", title: "Pricing", heading: "Pricing" }],
+  ["Acme › About\n\nAcme makes fine anvils for discerning coyotes.", f32([0, 1, 0]), { url: "https://acme.com/", title: "Acme", heading: "About" }],
+  ["Acme › Contact\n\nWrite to us about anvils and delivery times.", f32([0.7, 0.7, 0]), { url: "https://acme.com/contact", title: "Contact", heading: "" }],
+  ["no vector row", null, null],
+];
+
+function fakeRagDb(collections) {
+  return {
+    exec(sql) {
+      if (sql.includes("FROM rag_collections")) {
+        return collections.length
+          ? [{ columns: ["name", "table_name", "model", "embedding_size"], values: collections }]
+          : [];
+      }
+      assert.ok(sql.includes("FROM rag_c_acme"), "reads the table the registry names");
+      return [
+        {
+          columns: ["content", "embedding", "metadata"],
+          values: CHUNKS.map(([text, vector, meta]) => [text, vector, meta && JSON.stringify(meta)]),
+        },
+      ];
+    },
+  };
+}
+
+const ONE = [["acme.com", "rag_c_acme_1234", "fastembed/snowflake/snowflake-arctic-embed-s", 3]];
+
+test("decodeF32 and cosine", () => {
+  assert.deepEqual(Array.from(A.decodeF32(f32([1.5, -2]))), [1.5, -2]);
+  // An unaligned view still decodes: sql.js may hand back offsets inside a page.
+  const padded = new Uint8Array(1 + 8);
+  padded.set(f32([3, 4]), 1);
+  assert.deepEqual(Array.from(A.decodeF32(padded.subarray(1))), [3, 4]);
+  assert.equal(A.cosine([1, 0], [0, 1]), 0);
+  assert.equal(A.cosine([0, 0], [1, 1]), 0);
+  assert.ok(Math.abs(A.cosine([1, 1], [2, 2]) - 1) < 1e-9);
+});
+
+test("queryText adds the arctic prefix only for arctic models", () => {
+  assert.ok(A.queryText("fastembed/snowflake/snowflake-arctic-embed-s", "hi").startsWith("Represent this sentence"));
+  assert.equal(A.queryText("fastembed/BAAI/bge-small-en-v1.5", "hi"), "hi");
+});
+
+test("RagIndex loads the single collection and ranks by cosine", () => {
+  const rag = new A.RagIndex(fakeRagDb(ONE));
+  assert.equal(rag.name, "acme.com");
+  assert.equal(rag.embeddingSize, 3);
+  assert.equal(rag.chunks.length, 4);
+  assert.deepEqual(rag.chunks[3].metadata, {});
+  assert.equal(rag.chunks[3].vector, null);
+
+  const hits = rag.topK([1, 0.1, 0], 2);
+  assert.deepEqual(hits.map((h) => h.chunk.metadata.url), ["https://acme.com/pricing", "https://acme.com/contact"]);
+  assert.ok(hits[0].score > hits[1].score);
+});
+
+test("RagIndex lexical ranking finds passages by their words", () => {
+  const rag = new A.RagIndex(fakeRagDb(ONE));
+  const hits = rag.lexicalTopK("how much do anvils cost?", 2);
+  assert.equal(hits[0].chunk.metadata.url, "https://acme.com/pricing");
+  assert.deepEqual(rag.lexicalTopK("zzzz", 3), []);
+});
+
+test("RagIndex refuses ambiguity and missing collections", () => {
+  const two = ONE.concat([["other", "rag_c_acme_9", "m", 3]]);
+  assert.throws(() => new A.RagIndex(fakeRagDb(two)), /Pick one of the collections: acme.com, other/);
+  assert.equal(new A.RagIndex(fakeRagDb(two), "acme.com").name, "acme.com");
+  assert.throws(() => new A.RagIndex(fakeRagDb(two), "nope"), /Pick one/);
+  assert.throws(() => new A.RagIndex(fakeRagDb([])), /no collections/);
+});
+
+test("buildMessages grounds the model in the passages and keeps history", () => {
+  const rag = new A.RagIndex(fakeRagDb(ONE));
+  const hits = rag.topK([1, 0, 0], 1);
+  const history = [{ role: "user", content: "earlier" }, { role: "assistant", content: "reply" }];
+  const messages = A.buildMessages("How much?", hits, history, "acme.com");
+  assert.equal(messages.length, 4);
+  assert.equal(messages[0].role, "system");
+  assert.ok(messages[0].content.includes("acme.com"));
+  assert.ok(messages[0].content.includes("[1] Pricing › Pricing\nAcme › Pricing"));
+  assert.deepEqual(messages.slice(1, 3), history);
+  assert.deepEqual(messages[3], { role: "user", content: "How much?" });
+});
+
+test("sourcesMarkdown and passagesMarkdown link each page once", () => {
+  const rag = new A.RagIndex(fakeRagDb(ONE));
+  const hits = rag.topK([0.7, 0.7, 0], 3);
+  const sources = A.sourcesMarkdown(hits);
+  assert.ok(sources.startsWith("\n\n**Sources**\n- ["));
+  assert.equal((sources.match(/acme\.com/g) || []).length, 3);
+  assert.equal(A.sourcesMarkdown([]), "");
+
+  const passages = A.passagesMarkdown(hits.slice(0, 1));
+  assert.ok(passages.includes("**Contact** — Write to us about anvils"));
+  assert.ok(passages.includes("[Read more](https://acme.com/contact)"));
+  assert.ok(A.passagesMarkdown([]).startsWith("I could not find"));
+});

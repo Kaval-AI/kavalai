@@ -644,7 +644,8 @@ potentially truncated and renders as the block it is becoming.
        target     element or selector; body for floating, required for inline
        title, logo, greeting, emptyMessage, placeholder, suggestions
        theme      {accent, surface, radius, ...} → --kcb-* custom properties
-     Returns {root, open, close, toggle, send, reset, destroy}. */
+     Returns {root, open, close, toggle, send, reset, destroy, setStatus,
+     setTheme}. */
   function mount(options) {
     options = options || {};
     const connector =
@@ -711,7 +712,12 @@ potentially truncated and renders as the block it is becoming.
       logo.alt = "";
       titleEl.appendChild(logo);
     }
-    titleEl.appendChild(el("span", null, texts.title));
+    const titleText = el("div", "kcb-title-text");
+    titleText.appendChild(el("span", "kcb-title-label", texts.title));
+    const statusEl = el("span", "kcb-status");
+    statusEl.hidden = true;
+    titleText.appendChild(statusEl);
+    titleEl.appendChild(titleText);
     const actions = el("span", "kcb-header-actions");
     const maximizeBtn = el("button", "kcb-icon-btn kcb-maximize");
     maximizeBtn.type = "button";
@@ -1095,6 +1101,24 @@ potentially truncated and renders as the block it is becoming.
       rootEl.remove();
     }
 
+    /* A short line under the title — model loading progress, "Ready",
+       a fallback notice; empty text hides it. */
+    function setStatus(text) {
+      statusEl.textContent = text || "";
+      statusEl.hidden = !text;
+    }
+
+    /* Replace the theme wholesale: tokens the new theme does not name fall
+       back to the stylesheet defaults instead of lingering from the old one. */
+    function setTheme(theme) {
+      for (const name of Array.from(rootEl.style)) {
+        if (name.startsWith("--kcb-")) {
+          rootEl.style.removeProperty(name);
+        }
+      }
+      applyTheme(rootEl, theme);
+    }
+
     return {
       root: rootEl,
       open: open,
@@ -1103,6 +1127,8 @@ potentially truncated and renders as the block it is becoming.
       send: send,
       reset: reset,
       destroy: destroy,
+      setStatus: setStatus,
+      setTheme: setTheme,
     };
   }
 

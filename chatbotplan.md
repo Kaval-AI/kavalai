@@ -330,9 +330,12 @@ is throwaway. In rough order of value:
    client-side from the site's chunks with source links; `--endpoint`
    swaps in a running agent server. Generated on demand — no pre-crawl of
    the full prospect list required.
-   `tools/zerocostchatbot/archive.html` browses a pages database
-   Wayback-style (sql.js in the browser, navigation limited to crawled
-   pages) — a candidate replacement for the screenshot backdrop.
+   `tools/zerocostchatbot/archive.html` is the richer, fully client-side
+   demo: browses the pages database Wayback-style (sql.js in the browser,
+   navigation limited to crawled pages) with the widget answering from the
+   RAG index via WebLLM — embedding + chat model in-browser, progress in
+   the widget header, lexical fallback without WebGPU — under a DEMO
+   banner, with skin and model pickers.
 4. **WebLLM landing-page demo**, WordPress plugin, self-hosted compose
    bundle — channels, as in the deployment section above.
 

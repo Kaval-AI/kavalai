@@ -206,26 +206,45 @@ no keys. `--endpoint URL` points the widget at a running agent server for
 the full LLM-backed bot instead; `--suggestion` adds question chips,
 `--title` names the window.
 
-## Browsing the archive
+## The demo page: browsing the archive with the chatbot
 
-`archive.html` is a Wayback-style viewer for a pages database: it loads the
-SQLite file in the browser (sql.js, from cdnjs) and shows the archived pages
-in an iframe, with navigation limited to what the crawl captured.
+`archive.html` is the client-facing demo — a Wayback-style viewer of the
+scraped site with the chat widget answering from its RAG index, entirely
+in the browser:
 
 ```bash
 python -m http.server            # from the repo root
 # open http://localhost:8000/tools/zerocostchatbot/archive.html?db=/docs.kaval.ai.pages.db
 ```
 
-Without `?db=` the page offers a file picker (which also works from
-`file://`). The sidebar lists every fetched page with a filter; the address
-bar, back/forward and the links inside the pages navigate the archive —
-links whose target was not crawled are shown dotted and, when clicked,
-report "Not in the archive" instead of leaving. Styles and images load from
-the live site through an injected `<base>` tag; the site's own scripts are
-stripped unless **Run page scripts** is ticked, so a snapshot cannot phone
-home or navigate on its own. The DOM-free logic (URL matching, page
-preparation) lives in `archive.js`, tested with
+`?db=` names the pages database (sql.js loads the SQLite file in the
+browser); the RAG index is taken from `?rag=`, defaulting to the
+`.rag.db` beside it. Without `?db=` the page offers file pickers for both,
+which also work from `file://`. A red **DEMO** banner frames the page so
+nobody mistakes it for the live site.
+
+**Browsing.** The collapsible sidebar (☰) lists every fetched page with a
+filter; the address bar, back/forward and the links inside the pages
+navigate the archive — links whose target was not crawled are shown dotted
+and, when clicked, report "Not in the archive" instead of leaving. Styles
+and images load from the live site through an injected `<base>` tag; the
+site's own scripts are stripped unless **Run page scripts** is ticked, so
+a snapshot cannot phone home or navigate on its own.
+
+**Chatting.** When a RAG index loads, the production widget
+(`chatbotwidget/`) opens over the page. In a WebGPU browser it runs
+WebLLM: the embedding model matching `build_index.py`'s default
+(snowflake-arctic-embed-s) and a chat model (`?model=`, or the header
+picker; Qwen2.5-1.5B by default) load together, with download progress
+shown in the widget's header, and each question is embedded, matched
+against the index by cosine and answered from the passages with a source
+list. Without WebGPU — or if the model fails to load — the widget quotes
+the best-matching passages instead (a lexical ranking), so the demo still
+answers. The header's skin picker switches the widget between a few
+themes at runtime.
+
+The DOM-free logic (URL matching, page preparation, the RAG index and
+ranking, prompt building) lives in `archive.js`, tested with
 `node --test tools/zerocostchatbot/tests/archive.test.js`.
 
 ## Inspecting a pages database

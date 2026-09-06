@@ -176,10 +176,193 @@ supplies the sql.js database and the UI; tests run this file under node.
     return injected + out;
   }
 
+  /* ------------------------------------------------------------------ *
+   * RAG index (the .rag.db beside the pages database)                   *
+   * ------------------------------------------------------------------ */
+
+  /* Embeddings are stored as little-endian FLOAT32 blobs (SqliteRagService's
+     `vector_as_f32`); sql.js hands them back as Uint8Array views that may
+     not be 4-byte aligned, hence the copy. */
+  function decodeF32(blob) {
+    const bytes = blob instanceof Uint8Array ? blob : new Uint8Array(blob);
+    const copy = bytes.slice();
+    return new Float32Array(copy.buffer, 0, Math.floor(copy.byteLength / 4));
+  }
+
+  function cosine(a, b) {
+    let dot = 0;
+    let na = 0;
+    let nb = 0;
+    const n = Math.min(a.length, b.length);
+    for (let i = 0; i < n; i++) {
+      dot += a[i] * b[i];
+      na += a[i] * a[i];
+      nb += b[i] * b[i];
+    }
+    return na && nb ? dot / Math.sqrt(na * nb) : 0;
+  }
+
+  function tokenize(text) {
+    return (text || "").toLowerCase().match(/[a-z0-9]{2,}/g) || [];
+  }
+
+  /* Snowflake's arctic-embed models are trained with a query-side prefix;
+     documents were embedded bare, queries should not be. */
+  const ARCTIC_QUERY_PREFIX =
+    "Represent this sentence for searching relevant passages: ";
+
+  function queryText(model, text) {
+    return /arctic/i.test(model || "") ? ARCTIC_QUERY_PREFIX + text : text;
+  }
+
+  /* One collection of a RAG index, loaded in full — a site's chunks and
+     384-float vectors are a few megabytes, and a linear cosine scan over
+     them is instant next to a model call. */
+  class RagIndex {
+    constructor(db, collectionName) {
+      const registry = rows(
+        db.exec("SELECT name, table_name, model, embedding_size FROM rag_collections")
+      );
+      const names = registry.map((r) => r.name);
+      let info = null;
+      if (collectionName) {
+        info = registry.find((r) => r.name === collectionName) || null;
+      } else if (registry.length === 1) {
+        info = registry[0];
+      }
+      if (!info) {
+        throw new Error(
+          registry.length
+            ? "Pick one of the collections: " + names.join(", ")
+            : "The RAG index holds no collections"
+        );
+      }
+      this.name = info.name;
+      this.model = info.model;
+      this.embeddingSize = info.embedding_size;
+      this.chunks = rows(
+        db.exec("SELECT content, embedding, metadata FROM " + info.table_name)
+      ).map((row) => ({
+        text: row.content || "",
+        vector: row.embedding ? decodeF32(row.embedding) : null,
+        metadata: parseJson(row.metadata),
+      }));
+
+      this._docs = this.chunks.map((chunk) => tokenize(chunk.text));
+      this._df = {};
+      for (const terms of this._docs) {
+        for (const term of new Set(terms)) {
+          this._df[term] = (this._df[term] || 0) + 1;
+        }
+      }
+    }
+
+    /* The k chunks closest to a query vector, best first. */
+    topK(queryVector, k) {
+      return this.chunks
+        .filter((chunk) => chunk.vector)
+        .map((chunk) => ({ chunk: chunk, score: cosine(queryVector, chunk.vector) }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, k);
+    }
+
+    /* A BM25-flavoured lexical ranking, for browsers without WebGPU (no
+       query embedding possible) and as the fallback when a model fails. */
+    lexicalTopK(text, k) {
+      const queryTerms = tokenize(text);
+      const total = this.chunks.length;
+      const hits = [];
+      this.chunks.forEach((chunk, i) => {
+        const terms = this._docs[i];
+        const counts = {};
+        for (const term of terms) {
+          counts[term] = (counts[term] || 0) + 1;
+        }
+        let score = 0;
+        for (const term of queryTerms) {
+          const tf = counts[term] || 0;
+          if (!tf) continue;
+          const idf = Math.log(1 + total / (this._df[term] || 1));
+          score += (idf * tf) / (tf + 1.2 * (0.25 + (0.75 * (terms.length || 1)) / 120));
+        }
+        if (score > 0) hits.push({ chunk: chunk, score: score });
+      });
+      return hits.sort((a, b) => b.score - a.score).slice(0, k);
+    }
+  }
+
+  function parseJson(text) {
+    if (!text) return {};
+    try {
+      return JSON.parse(text) || {};
+    } catch (_error) {
+      return {};
+    }
+  }
+
+  /* The chat request for a grounded answer: the retrieved passages as the
+     model's only source, the recent turns for follow-up questions. */
+  function buildMessages(question, hits, history, siteName) {
+    const passages = hits
+      .map((hit, i) => {
+        const m = hit.chunk.metadata;
+        const label = [m.title, m.heading].filter(Boolean).join(" › ") || m.url || "";
+        return "[" + (i + 1) + "] " + label + "\n" + hit.chunk.text;
+      })
+      .join("\n\n");
+    const system =
+      "You are the assistant for the website " + (siteName || "") + ". Answer the" +
+      " visitor's question using only the passages below. Be concise and" +
+      " concrete; if the passages do not contain the answer, say so and" +
+      " suggest where on the site to look. Do not invent facts.\n\nPassages:\n\n" +
+      passages;
+    return [{ role: "system", content: system }]
+      .concat(history || [])
+      .concat([{ role: "user", content: question }]);
+  }
+
+  /* A markdown sources list for the answer, one link per page, in rank order. */
+  function sourcesMarkdown(hits) {
+    const seen = new Set();
+    const lines = [];
+    for (const hit of hits) {
+      const m = hit.chunk.metadata;
+      if (!m.url || seen.has(m.url)) continue;
+      seen.add(m.url);
+      lines.push("- [" + (m.title || m.url) + "](" + m.url + ")");
+    }
+    return lines.length ? "\n\n**Sources**\n" + lines.join("\n") : "";
+  }
+
+  /* Passages quoted directly, for the lexical fallback: no model, still
+     the site's own words with links. */
+  function passagesMarkdown(hits) {
+    if (!hits.length) {
+      return "I could not find anything about that on this site.";
+    }
+    const lines = ["Here is what this site says about that:", ""];
+    for (const hit of hits) {
+      const m = hit.chunk.metadata;
+      const body = hit.chunk.text.split("\n\n").slice(1).join(" ").replace(/\s+/g, " ").trim() || hit.chunk.text;
+      const snippet = body.length > 320 ? body.slice(0, 320) + "…" : body;
+      lines.push("**" + (m.heading || m.title || m.url || "") + "** — " + snippet);
+      if (m.url) lines.push("[Read more](" + m.url + ")");
+      lines.push("");
+    }
+    return lines.join("\n").trim();
+  }
+
   return {
     normalizeUrl: normalizeUrl,
     candidateUrls: candidateUrls,
     ArchiveIndex: ArchiveIndex,
     prepareArchivedHtml: prepareArchivedHtml,
+    RagIndex: RagIndex,
+    decodeF32: decodeF32,
+    cosine: cosine,
+    queryText: queryText,
+    buildMessages: buildMessages,
+    sourcesMarkdown: sourcesMarkdown,
+    passagesMarkdown: passagesMarkdown,
   };
 });

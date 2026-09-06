@@ -252,6 +252,24 @@ the kaval.ai palette.
   border-radius: 50%;
 }
 
+.kcb-title-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.2;
+}
+
+.kcb-status {
+  font-family: var(--kcb-font);
+  font-size: 0.72rem;
+  font-weight: 400;
+  opacity: 0.8;
+  max-width: 220px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .kcb-header-actions {
   display: flex;
   align-items: center;
