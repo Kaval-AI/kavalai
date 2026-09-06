@@ -16,6 +16,13 @@ can run.
 ?db= names the pages database; ?rag= the RAG index (default: the .rag.db
 beside it); ?model= a WebLLM chat model id. Without ?db= the page offers
 file pickers, which also work from file://.
+
+make_demo.py compiles this page into a client's demo folder: it copies the
+databases beside it and defines window.KavalArchiveDefaults (db, rag,
+collection, model, endpoint, title, suggestions) before archive.js loads,
+so the folder opens straight into the site. A URL parameter still wins over
+a default. With `endpoint` set the widget talks to a running agent server
+instead of loading a model in the browser.
 -->
 <html lang="en">
 <head>
@@ -117,6 +124,10 @@ file pickers, which also work from file://.
 
       var $ = function (id) { return document.getElementById(id); };
       var params = new URLSearchParams(location.search);
+      var defaults = window.KavalArchiveDefaults || {};
+      function setting(name) {
+        return params.get(name) || defaults[name] || null;
+      }
       var index = null;
       var rag = null;
       var widget = null;
@@ -296,32 +307,34 @@ file pickers, which also work from file://.
         CHAT_MODELS.forEach(function (pair) {
           modelSelect.appendChild(new Option(pair[1], pair[0]));
         });
-        var requested = params.get("model");
+        var requested = setting("model");
         if (requested && !CHAT_MODELS.some(function (p) { return p[0] === requested; })) {
           modelSelect.appendChild(new Option(requested, requested));
         }
         modelSelect.value = requested || CHAT_MODELS[0][0];
-        modelSelect.hidden = !navigator.gpu;
+        modelSelect.hidden = !navigator.gpu || !!defaults.endpoint;
         modelSelect.addEventListener("change", function () {
           var url = new URL(location.href);
           url.searchParams.set("model", modelSelect.value);
           location.href = url.href;
         });
 
-        var connector = navigator.gpu ? webllmConnector(modelSelect.value) : lexicalConnector();
+        var connector = defaults.endpoint
+          ? KavalChatbot.agentConnector({ url: defaults.endpoint })
+          : navigator.gpu ? webllmConnector(modelSelect.value) : lexicalConnector();
         var host = new URL(index.pages[0].url).hostname;
         widget = KavalChatbot.mount({
           connector: connector,
           mode: "floating",
           target: $("viewer"),
-          title: host,
+          title: defaults.title || host,
           greeting: "Hello! Ask me about this site.",
           emptyMessage: "Hi! Ask me anything about " + host + ".",
-          suggestions: [],
+          suggestions: defaults.suggestions || [],
         });
         if (connector.warmUp) {
           connector.warmUp();
-        } else {
+        } else if (!defaults.endpoint) {
           widget.setStatus("No WebGPU — quoting passages");
         }
         widget.open();
@@ -353,7 +366,7 @@ file pickers, which also work from file://.
 
       function openRag(bytes) {
         return sql().then(function (SQL) {
-          rag = new KavalArchive.RagIndex(new SQL.Database(new Uint8Array(bytes)), params.get("collection"));
+          rag = new KavalArchive.RagIndex(new SQL.Database(new Uint8Array(bytes)), setting("collection"));
           mountChatbot();
         });
       }
@@ -370,6 +383,7 @@ file pickers, which also work from file://.
         var file = event.target.files[0];
         if (!file) return;
         file.arrayBuffer().then(openPages).then(function (ok) {
+          if (ok && defaults.endpoint) return mountChatbot();
           if (ok && pendingRag) return openRag(pendingRag);
           if (ok) notice([document.createTextNode("No RAG index loaded, so no chatbot.")]);
         });
@@ -402,11 +416,12 @@ file pickers, which also work from file://.
         if (data.type === "kaval-archive-navigate") go(data.href, current && current.url);
       });
 
-      var dbParam = params.get("db");
+      var dbParam = setting("db");
       if (dbParam) {
-        var ragParam = params.get("rag") || dbParam.replace(/\.pages\.db$/, ".rag.db");
+        var ragParam = setting("rag") || dbParam.replace(/\.pages\.db$/, ".rag.db");
         fetchBytes(dbParam).then(openPages).then(function (ok) {
           if (!ok) return;
+          if (defaults.endpoint) return mountChatbot();
           return fetchBytes(ragParam).then(openRag, function () {
             notice([document.createTextNode("No RAG index at " + ragParam + ", so no chatbot.")]);
           });

@@ -15,165 +15,161 @@ limitations under the License.
 """
 
 import json
+import re
 import sys
 
 import pytest
 
 from tools.zerocostchatbot import make_demo
-from tools.zerocostchatbot.build_index import build_rag_index
 from tools.zerocostchatbot.make_demo import (
     build_parser,
-    chunks_from_pages,
     compile_demo,
-    inject_base_tag,
-    read_site,
+    render_index,
+    site_url_of,
 )
 from tools.zerocostchatbot.pages_db import PagesDatabase
-from tools.zerocostchatbot.tests.test_build_index import add_page, make_rag
+from tools.zerocostchatbot.tests.test_build_index import add_page
 
 HOME_MARKDOWN = "# Welcome\n\nAcme makes fine anvils for discerning coyotes."
 PRICING_MARKDOWN = "# Pricing\n\nAnvils cost ten dollars each, shipping included."
 
 
-def make_site(tmp_path, screenshot=True):
+def make_site(tmp_path):
     path = str(tmp_path / "acme.com.pages.db")
     with PagesDatabase(path) as db:
+        db.add_urls(["https://acme.com/skipped"])
+        db.record_skipped("https://acme.com/skipped", "disallowed by robots.txt")
         add_page(db, "https://acme.com/", "Acme", HOME_MARKDOWN)
         add_page(db, "https://acme.com/pricing", "Pricing", PRICING_MARKDOWN)
-        db.add_urls(["https://acme.com/broken"])
-        if screenshot:
-            db.save_screenshot("https://acme.com/", b"png-bytes")
     return path
 
 
-def test_read_site_takes_the_first_row_as_the_start_page(tmp_path):
-    site = read_site(make_site(tmp_path))
-    assert site.site_url == "https://acme.com/"
-    assert site.title == "Acme"
-    assert site.screenshot == b"png-bytes"
-    assert site.homepage_html == "<html/>"
-    assert [row.url for row in site.pages] == [
-        "https://acme.com/",
-        "https://acme.com/pricing",
-    ]
+def make_index(tmp_path):
+    path = tmp_path / "acme.com.rag.db"
+    path.write_bytes(b"sqlite bytes")
+    return str(path)
 
 
-def test_read_site_refuses_an_empty_database(tmp_path):
+def defaults_of(index_html):
+    found = re.search(r"window\.KavalArchiveDefaults = (.*?);</script>", index_html)
+    assert found, "index.html defines no defaults"
+    return json.loads(found.group(1))
+
+
+def test_site_url_of_skips_rows_without_html(tmp_path):
+    assert site_url_of(make_site(tmp_path)) == "https://acme.com/"
+
+
+def test_site_url_of_refuses_an_empty_database(tmp_path):
     path = str(tmp_path / "empty.pages.db")
-    PagesDatabase(path).close()
-    with pytest.raises(ValueError, match="scrape first"):
-        read_site(path)
-
-
-def test_inject_base_tag():
-    html = '<html><head lang="en"><title>t</title></head></html>'
-    injected = inject_base_tag(html, "https://acme.com/")
-    assert '<head lang="en"><base href="https://acme.com/"><title>' in injected
-    # A fragment without a head still gets anchored.
-    assert inject_base_tag("<p>x</p>", "https://a/").startswith(
-        '<base href="https://a/">'
-    )
-
-
-async def test_compile_demo_with_screenshot_and_rag_index(tmp_path):
-    pages = make_site(tmp_path)
-    rag = make_rag(tmp_path)
-    with PagesDatabase(pages) as db:
-        await build_rag_index(db, rag, "acme.com")
-    out = str(tmp_path / "demo")
-
-    report = await compile_demo(
-        pages,
-        out,
-        index_path=str(tmp_path / "index.rag.db"),
-        suggestions=["Pricing?"],
-    )
-    assert report.backdrop == "screenshot"
-    assert report.chunks == 2
-
-    index_html = (tmp_path / "demo" / "index.html").read_text()
-    assert 'src="screenshot.png"' in index_html
-    assert '"Pricing?"' in index_html
-    assert '"endpoint": null' in index_html
-    assert (tmp_path / "demo" / "kaval-chatbot.js").exists()
-    assert (tmp_path / "demo" / "kaval-chatbot.css").exists()
-    assert (tmp_path / "demo" / "screenshot.png").read_bytes() == b"png-bytes"
-
-    chunks = json.loads((tmp_path / "demo" / "chunks.json").read_text())
-    assert {chunk["url"] for chunk in chunks} == {
-        "https://acme.com/",
-        "https://acme.com/pricing",
-    }
-    assert all(chunk["text"] for chunk in chunks)
-
-
-async def test_compile_demo_falls_back_to_html_and_markdown(tmp_path):
-    pages = make_site(tmp_path, screenshot=False)
-    out = str(tmp_path / "demo")
-
-    # No RAG index at the default path either, so chunks come from markdown.
-    report = await compile_demo(pages, out)
-    assert report.backdrop == "html"
-    assert report.chunks == 2
-
-    original = (tmp_path / "demo" / "original.html").read_text()
-    assert '<base href="https://acme.com/">' in original
-    assert 'src="original.html"' in (tmp_path / "demo" / "index.html").read_text()
-    assert not (tmp_path / "demo" / "screenshot.png").exists()
-
-
-async def test_compile_demo_endpoint_mode_ships_no_chunks(tmp_path):
-    out = str(tmp_path / "demo")
-    await compile_demo(
-        make_site(tmp_path), out, endpoint="http://host:25000/api/chat/stream_agent"
-    )
-    assert not (tmp_path / "demo" / "chunks.json").exists()
-    index_html = (tmp_path / "demo" / "index.html").read_text()
-    assert '"endpoint": "http://host:25000/api/chat/stream_agent"' in index_html
-
-
-async def test_compile_demo_refuses_an_ambiguous_index(tmp_path):
-    pages = make_site(tmp_path)
-    rag = make_rag(tmp_path)
-    with PagesDatabase(pages) as db:
-        await build_rag_index(db, rag, "one")
-        await build_rag_index(db, rag, "two")
-    with pytest.raises(ValueError, match="--collection"):
-        await compile_demo(
-            pages, str(tmp_path / "demo"), index_path=str(tmp_path / "index.rag.db")
-        )
-    # Naming one of them works; naming a wrong one does not.
-    report = await compile_demo(
-        pages,
-        str(tmp_path / "demo"),
-        index_path=str(tmp_path / "index.rag.db"),
-        collection="one",
-    )
-    assert report.chunks == 2
-    with pytest.raises(ValueError, match="no collection"):
-        await compile_demo(
-            pages,
-            str(tmp_path / "demo"),
-            index_path=str(tmp_path / "index.rag.db"),
-            collection="three",
-        )
-
-
-def test_chunks_from_pages_carries_metadata(tmp_path):
-    site = read_site(make_site(tmp_path))
-    chunks = chunks_from_pages(site)
-    assert chunks[0]["url"] == "https://acme.com/"
-    assert chunks[0]["title"] == "Acme"
-    assert chunks[1]["heading"] == "Pricing"
-
-
-async def test_compile_demo_without_content_fails(tmp_path):
-    path = str(tmp_path / "bare.pages.db")
     with PagesDatabase(path) as db:
         db.add_urls(["https://acme.com/"])
-        db.record_skipped("https://acme.com/", "disallowed by robots.txt")
-    with pytest.raises(ValueError, match="scrape first|No content"):
-        await compile_demo(path, str(tmp_path / "demo"))
+    with pytest.raises(ValueError, match="scrape first"):
+        site_url_of(path)
+
+
+def test_render_index_localises_the_widget_and_defines_defaults():
+    html = (
+        '<link href="../../chatbotwidget/kaval-chatbot.css">'
+        '<script src="../../chatbotwidget/kaval-chatbot.js"></script>'
+        '<script src="archive.js"></script>'
+    )
+    out = render_index(html, {"db": "a.pages.db", "title": "Ärimees"})
+    assert "../../chatbotwidget/" not in out
+    assert '<link href="kaval-chatbot.css">' in out
+    assert defaults_of(out) == {"db": "a.pages.db", "title": "Ärimees"}
+    assert out.index("KavalArchiveDefaults") < out.index('src="archive.js"')
+
+
+def test_render_index_refuses_a_page_without_the_marker():
+    with pytest.raises(ValueError, match="archive.js"):
+        render_index("<html></html>", {})
+
+
+def test_compile_demo_ships_the_databases_and_the_viewer(tmp_path):
+    pages = make_site(tmp_path)
+    make_index(tmp_path)
+    out = tmp_path / "demo"
+
+    report = compile_demo(
+        pages, str(out), suggestions=["Pricing?"], title="Acme bot", model="m"
+    )
+    assert report.site_url == "https://acme.com/"
+    assert report.pages_file == "acme.com.pages.db"
+    assert report.rag_file == "acme.com.rag.db"
+    assert report.endpoint is None
+
+    for name in (
+        "index.html",
+        "archive.js",
+        "kaval-chatbot.js",
+        "kaval-chatbot.css",
+        "acme.com.pages.db",
+        "acme.com.rag.db",
+    ):
+        assert (out / name).exists(), name
+    assert (out / "acme.com.rag.db").read_bytes() == b"sqlite bytes"
+
+    index_html = (out / "index.html").read_text()
+    assert "../../chatbotwidget/" not in index_html
+    assert defaults_of(index_html) == {
+        "db": "acme.com.pages.db",
+        "rag": "acme.com.rag.db",
+        "model": "m",
+        "title": "Acme bot",
+        "suggestions": ["Pricing?"],
+    }
+
+
+def test_compile_demo_without_an_index_ships_no_chatbot(tmp_path):
+    pages = make_site(tmp_path)
+    out = tmp_path / "demo"
+    report = compile_demo(pages, str(out))
+    assert report.rag_file is None
+    assert not (out / "acme.com.rag.db").exists()
+    assert defaults_of((out / "index.html").read_text()) == {"db": "acme.com.pages.db"}
+
+
+def test_compile_demo_takes_a_named_index_and_collection(tmp_path):
+    pages = make_site(tmp_path)
+    index = tmp_path / "other.rag.db"
+    index.write_bytes(b"other")
+    out = tmp_path / "demo"
+    report = compile_demo(pages, str(out), index_path=str(index), collection="one")
+    assert report.rag_file == "other.rag.db"
+    assert (out / "other.rag.db").read_bytes() == b"other"
+    defaults = defaults_of((out / "index.html").read_text())
+    assert defaults["rag"] == "other.rag.db" and defaults["collection"] == "one"
+
+
+def test_compile_demo_refuses_a_database_uri_as_index(tmp_path):
+    with pytest.raises(ValueError, match="SQLite file"):
+        compile_demo(
+            make_site(tmp_path),
+            str(tmp_path / "demo"),
+            index_path="postgresql://kavalai@localhost/kavalai",
+        )
+
+
+def test_compile_demo_endpoint_mode_ships_no_index(tmp_path):
+    pages = make_site(tmp_path)
+    make_index(tmp_path)
+    out = tmp_path / "demo"
+    report = compile_demo(
+        pages, str(out), endpoint="http://host:25000/api/chat/stream_agent"
+    )
+    assert report.rag_file is None
+    assert not (out / "acme.com.rag.db").exists()
+    assert defaults_of((out / "index.html").read_text()) == {
+        "db": "acme.com.pages.db",
+        "endpoint": "http://host:25000/api/chat/stream_agent",
+    }
+
+
+def test_compile_demo_defaults_the_output_folder(tmp_path):
+    report = compile_demo(make_site(tmp_path))
+    assert report.out_dir == str(tmp_path / "acme.com.demo")
+    assert (tmp_path / "acme.com.demo" / "index.html").exists()
 
 
 def test_main_exit_codes(tmp_path, monkeypatch):
@@ -196,51 +192,4 @@ def test_main_exit_codes(tmp_path, monkeypatch):
 def test_parser_defaults():
     args = build_parser().parse_args(["acme.pages.db"])
     assert args.out is None and args.endpoint is None and args.suggestion == []
-
-
-async def test_compile_demo_plain_backdrop_when_nothing_stored(tmp_path):
-    path = str(tmp_path / "nohtml.pages.db")
-    with PagesDatabase(path) as db:
-        db.add_urls(["https://acme.com/"])
-        db.record_success(
-            "https://acme.com/",
-            status_code=200,
-            fetch_mode="http",
-            title="A",
-            html=None,
-            markdown=HOME_MARKDOWN,
-        )
-    report = await compile_demo(path, str(tmp_path / "demo"))
-    assert report.backdrop == "none"
-    index_html = (tmp_path / "demo" / "index.html").read_text()
-    assert "screenshot.png" not in index_html and "original.html" not in index_html
-
-
-async def test_compile_demo_defaults_the_output_folder(tmp_path):
-    pages = make_site(tmp_path)
-    report = await compile_demo(pages)
-    assert report.out_dir == str(tmp_path / "acme.com.demo")
-    assert (tmp_path / "acme.com.demo" / "index.html").exists()
-
-
-async def test_chunks_from_index_accepts_a_database_uri(tmp_path):
-    pages = make_site(tmp_path)
-    rag = make_rag(tmp_path)
-    with PagesDatabase(pages) as db:
-        await build_rag_index(db, rag, "acme.com")
-    report = await compile_demo(
-        pages, str(tmp_path / "demo"), index_path=f"sqlite:///{tmp_path}/index.rag.db"
-    )
-    assert report.chunks == 2
-
-
-async def test_chunks_from_index_refuses_a_backend_without_iter_entries(
-    tmp_path, monkeypatch
-):
-    class Opaque:
-        def supports(self, capability):
-            return False
-
-    monkeypatch.setattr(make_demo, "make_rag_service", lambda *args: Opaque())
-    with pytest.raises(ValueError, match="cannot list its entries"):
-        await make_demo.chunks_from_index("whatever", None)
+    assert args.index is None and args.model is None

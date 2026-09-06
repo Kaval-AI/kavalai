@@ -27,7 +27,6 @@ from tools.zerocostchatbot.build_index import (
     build_parser,
     build_rag_index,
     chunk_markdown,
-    chunk_metadata,
     default_collection,
     default_index_path,
     make_rag_service,

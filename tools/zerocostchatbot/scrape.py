@@ -37,7 +37,8 @@ and a server-side-rendered site never contacts the container at all.
 import argparse
 import asyncio
 import base64
-import xml.etree.ElementTree as ET
+import html
+import re
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable, Optional
 from urllib import robotparser
@@ -199,15 +200,28 @@ def page_links(links: list[str], base: str, host: str) -> list[str]:
     )
 
 
+SITEMAP_LOC = re.compile(
+    r"<(?:\w+:)?loc\b[^>]*>\s*(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?\s*</(?:\w+:)?loc\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+SITEMAP_INDEX = re.compile(r"<(?:\w+:)?sitemapindex\b", re.IGNORECASE)
+
+
 def parse_sitemap(xml_text: str) -> tuple[list[str], list[str]]:
-    """The page URLs and nested sitemap URLs a sitemap file lists."""
-    root = ET.fromstring(xml_text)
+    """The page URLs and nested sitemap URLs a sitemap file lists.
+
+    A sitemap is untrusted input from the crawled site, and all it has to
+    yield is its ``<loc>`` values and whether it is an index, so they are
+    extracted with a pattern rather than an XML parser — nothing here
+    expands entities or resolves a DTD. Anything without a ``<loc>``, XML or
+    not, is an empty sitemap.
+    """
     locations = [
-        element.text.strip()
-        for element in root.iter()
-        if element.tag.endswith("loc") and element.text
+        html.unescape(text).strip()
+        for text in SITEMAP_LOC.findall(xml_text)
+        if text.strip()
     ]
-    if root.tag.endswith("sitemapindex"):
+    if SITEMAP_INDEX.search(xml_text):
         return [], locations
     return locations, []
 
@@ -232,7 +246,7 @@ async def sitemap_urls(
             if response.status_code != 200:
                 continue
             found, nested = parse_sitemap(response.text)
-        except (httpx.HTTPError, ET.ParseError) as error:
+        except httpx.HTTPError as error:
             logger.debug(f"Sitemap {sitemap_url} unusable: {error}")
             continue
         pages.extend(found)
@@ -411,7 +425,10 @@ class RemoteBrowserFetcher:
         markdown = result.get("markdown")
         if isinstance(markdown, dict):
             markdown = markdown.get("raw_markdown")
-        html = result.get("cleaned_html") or ""
+        # The rendered DOM, stylesheets and scripts included, so the archive
+        # viewer can show the page as the browser did; ``cleaned_html`` has
+        # them stripped and is only a fallback for the markdown.
+        html = result.get("html") or result.get("cleaned_html") or ""
         links = [
             item.get("href") if isinstance(item, dict) else item
             for group in (result.get("links") or {}).values()

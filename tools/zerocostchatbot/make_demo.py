@@ -13,31 +13,24 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
-Compile a client demo from a scraped site: a static folder showing the
-original page with the Kaval.AI chat widget floating over it.
+Compile a client demo from a scraped site: a static folder holding the
+archive viewer (``archive.html``), the pages database and the RAG index,
+so opening the folder's ``index.html`` browses the scraped site with the
+chat widget answering from its own content — entirely in the browser.
 
     python -m tools.zerocostchatbot.make_demo docs.kaval.ai.pages.db
     python -m http.server -d docs.kaval.ai.demo
 
-The folder is self-contained static files — servable from a bucket. The
-backdrop is the homepage screenshot when the scrape captured one, else the
-stored homepage HTML with a ``<base>`` tag injected so styles and images
-load from the live site.
-
-What answers the chat depends on ``--endpoint``:
-
-- Without it, the demo ships the site's chunks (from the RAG index when one
-  exists beside the pages database, else re-chunked from the stored
-  markdown) and answers client-side: a small lexical ranker picks the most
-  relevant passages and replies with them, source links included. No
-  backend, no API key, no model download — it demonstrates the widget and
-  the site's own content, not an LLM.
-- With ``--endpoint URL`` the widget talks to a running kavalai agent
-  server (``create_agent_router``) — the full LLM-backed bot.
+The folder is self-contained static files, servable from any bucket. The
+``index.html`` is ``archive.html`` with the widget paths made local and
+``window.KavalArchiveDefaults`` defined, so the page loads the two database
+files beside it without ``?db=``. What answers the chat depends on
+``--endpoint``: without it, WebLLM runs an in-browser model over the RAG
+index (quoting passages when WebGPU is missing); with ``--endpoint URL`` the
+widget talks to a running kavalai agent server and no index is shipped.
 """
 
 import argparse
-import asyncio
 import json
 import os
 import shutil
@@ -47,280 +40,59 @@ from urllib.parse import urlparse
 
 from loguru import logger
 
-from tools.zerocostchatbot.build_index import (
-    chunk_markdown,
-    default_index_path,
-    make_rag_service,
-)
-from tools.zerocostchatbot.pages_db import PagesDatabase, PageRow
+from tools.zerocostchatbot.build_index import default_index_path
+from tools.zerocostchatbot.pages_db import PagesDatabase
 
-WIDGET_DIR = os.path.normpath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "chatbotwidget")
-)
+TOOL_DIR = os.path.dirname(os.path.abspath(__file__))
+WIDGET_DIR = os.path.normpath(os.path.join(TOOL_DIR, "..", "..", "chatbotwidget"))
 WIDGET_FILES = ("kaval-chatbot.js", "kaval-chatbot.css")
-
-# Enough for a few hundred pages of passages while keeping chunks.json in the
-# low megabytes; ranking quality does not improve past that in a demo.
-DEFAULT_MAX_CHUNKS = 800
+WIDGET_PATH_PREFIX = "../../chatbotwidget/"
 
 
 @dataclass
 class DemoReport:
-    """What one compile produced."""
+    """What one compile produced: the folder, the site, the file names
+    inside the folder (``rag_file`` is None in endpoint mode or when no index
+    exists) and the endpoint, if any."""
 
     out_dir: str
     site_url: str
-    backdrop: str
-    chunks: int
+    pages_file: str
+    rag_file: Optional[str]
+    endpoint: Optional[str]
 
 
-@dataclass
-class SitePages:
-    """What the demo needs from the pages database."""
-
-    site_url: str
-    title: str
-    screenshot: Optional[bytes]
-    homepage_html: Optional[str]
-    pages: list[PageRow]
-
-
-def read_site(pages_path: str) -> SitePages:
-    """The site as the pages database recorded it.
-
-    The first row is the crawl's start URL — seeds are inserted before any
-    discovered link, in order.
-    """
+def site_url_of(pages_path: str) -> str:
+    """The crawl's start URL — the first row, since seeds are inserted before
+    any discovered link."""
     with PagesDatabase(pages_path) as db:
-        rows = [row for row in db.iter_pages()]
-        if not rows:
-            raise ValueError(f"{pages_path} holds no pages; scrape first")
-        start = rows[0]
-        return SitePages(
-            site_url=start.url,
-            title=start.title or urlparse(start.url).netloc,
-            screenshot=start.screenshot,
-            homepage_html=start.html,
-            pages=[row for row in rows if row.markdown],
-        )
+        for row in db.iter_pages():
+            if row.html:
+                return row.url
+    raise ValueError(f"{pages_path} holds no fetched pages; scrape first")
 
 
-async def chunks_from_index(index: str, collection: Optional[str]) -> list[dict]:
-    """The chunks a built RAG index holds, as chunks.json entries.
-
-    ``index`` is what ``build_index --index`` takes — a database URI or a
-    SQLite file path; reading needs no embedding model.
-    """
-    rag = make_rag_service(index, None, None)
-    if not rag.supports("iter_entries"):
-        raise ValueError(f"{type(rag).__name__} cannot list its entries")
-    collections = await rag.list_collections()
-    names = [c["name"] for c in collections]
-    if collection is None:
-        if len(names) != 1:
-            raise ValueError(
-                f"{index} holds collections {names}; pick one with --collection"
-            )
-        collection = names[0]
-    elif collection not in names:
-        raise ValueError(f"{index} has no collection {collection!r} (has {names})")
-
-    chunks = []
-    async for entry in rag.iter_entries(collection):
-        metadata = entry["rag_metadata"] or {}
-        chunks.append(
-            {
-                "text": entry["content"],
-                "url": metadata.get("url", ""),
-                "title": metadata.get("title", ""),
-                "heading": metadata.get("heading", ""),
-            }
-        )
-    return chunks
-
-
-def chunks_from_pages(site: SitePages, max_chars: int = 2000) -> list[dict]:
-    """Chunks re-derived from the stored markdown, when no RAG index exists."""
-    chunks = []
-    for row in site.pages:
-        for chunk in chunk_markdown(row.markdown, row.title or "", max_chars):
-            chunks.append(
-                {
-                    "text": chunk.text,
-                    "url": row.url,
-                    "title": row.title or "",
-                    "heading": chunk.heading,
-                }
-            )
-    return chunks
-
-
-def inject_base_tag(html: str, site_url: str) -> str:
-    """Anchor a stored page's relative URLs to the live site.
-
-    The stored homepage references styles and images by relative path; a
-    ``<base>`` right after ``<head>`` makes the browser fetch them from the
-    original site, so the saved page renders like the live one.
-    """
-    base = f'<base href="{site_url}">'
-    lowered = html.lower()
-    at = lowered.find("<head")
-    if at != -1:
-        end = lowered.find(">", at)
-        if end != -1:
-            return html[: end + 1] + base + html[end + 1 :]
-    return base + html
-
-
-INDEX_TEMPLATE = """<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>__TITLE__ — Kaval.AI chatbot demo</title>
-  <link rel="stylesheet" href="kaval-chatbot.css" />
-  <style>
-    html, body { height: 100%; margin: 0; }
-    body { font-family: system-ui, sans-serif; }
-    .demo-backdrop { position: fixed; inset: 0; border: none; width: 100%; height: 100%; }
-    img.demo-backdrop { object-fit: cover; object-position: top; }
-    .demo-badge {
-      position: fixed; left: 16px; bottom: 16px; z-index: 1200;
-      background: #273e47; color: #f4f4f6; font-size: 0.8rem;
-      padding: 8px 14px; border-radius: 999px; box-shadow: 0 4px 12px rgba(0,0,0,0.35);
-    }
-    .demo-badge a { color: #acc12f; text-decoration: none; font-weight: 600; }
-  </style>
-</head>
-<body>
-  __BACKDROP__
-  <div class="demo-badge">
-    Chatbot demo by <a href="https://kaval.ai" target="_blank" rel="noopener">Kaval.AI</a>
-    — built from <a href="__SITE_URL__" target="_blank" rel="noopener">this site</a>'s
-    public pages. Nothing was installed.
-  </div>
-
-  <script src="kaval-chatbot.js"></script>
-  <script>
-    var DEMO = __CONFIG_JSON__;
-
-    /* Lexical passage retrieval: enough to demonstrate the widget answering
-       from the site's own content with source links, with no backend at all.
-       An agent-server endpoint in the config replaces it with the real bot. */
-    function retrievalConnector(chunks) {
-      var docFreq = {};
-      var indexed = chunks.map(function (chunk) {
-        var terms = tokenize(chunk.text);
-        var seen = {};
-        terms.forEach(function (t) { seen[t] = true; });
-        Object.keys(seen).forEach(function (t) { docFreq[t] = (docFreq[t] || 0) + 1; });
-        return { chunk: chunk, terms: terms, length: terms.length || 1 };
-      });
-
-      function tokenize(text) {
-        return (text.toLowerCase().match(/[a-z0-9]{2,}/g) || []);
-      }
-
-      function score(queryTerms, doc) {
-        var counts = {};
-        doc.terms.forEach(function (t) { counts[t] = (counts[t] || 0) + 1; });
-        var total = 0;
-        queryTerms.forEach(function (t) {
-          var tf = counts[t] || 0;
-          if (!tf) { return; }
-          var idf = Math.log(1 + indexed.length / (docFreq[t] || 1));
-          total += idf * tf / (tf + 1.2 * (0.25 + 0.75 * doc.length / 120));
-        });
-        return total;
-      }
-
-      function snippet(text) {
-        var body = text.split("\\n\\n").slice(1).join(" ").replace(/\\s+/g, " ").trim() || text;
-        return body.length > 320 ? body.slice(0, 320) + "…" : body;
-      }
-
-      return {
-        send: function (text) {
-          var queryTerms = tokenize(text);
-          var ranked = indexed
-            .map(function (doc) { return { doc: doc, score: score(queryTerms, doc) }; })
-            .filter(function (hit) { return hit.score > 0; })
-            .sort(function (a, b) { return b.score - a.score; })
-            .slice(0, 3);
-
-          if (ranked.length === 0) {
-            return Promise.resolve({
-              text: "I could not find anything about that on this site. Try one of the suggestions below.",
-              choices: DEMO.suggestions,
-            });
-          }
-          var lines = ["Here is what this site says about that:", ""];
-          var seenUrls = {};
-          ranked.forEach(function (hit) {
-            var c = hit.doc.chunk;
-            var label = c.heading || c.title || c.url;
-            lines.push("**" + label + "** — " + snippet(c.text));
-            if (!seenUrls[c.url]) {
-              lines.push("[Read more](" + c.url + ")");
-              seenUrls[c.url] = true;
-            }
-            lines.push("");
-          });
-          lines.push("*This preview quotes the site directly; the full product answers in natural language.*");
-          return Promise.resolve({ text: lines.join("\\n"), choices: [] });
-        },
-        reset: function () {},
-      };
-    }
-
-    function start(connector) {
-      KavalChatbot.mount({
-        connector: connector,
-        mode: "floating",
-        title: DEMO.title,
-        greeting: DEMO.greeting,
-        emptyMessage: DEMO.emptyMessage,
-        suggestions: DEMO.suggestions,
-        theme: DEMO.theme,
-      });
-    }
-
-    if (DEMO.endpoint) {
-      start(KavalChatbot.agentConnector({ url: DEMO.endpoint }));
-    } else {
-      fetch("chunks.json")
-        .then(function (r) { return r.json(); })
-        .then(function (chunks) { start(retrievalConnector(chunks)); });
-    }
-  </script>
-</body>
-</html>
-"""
-
-
-def render_index(site: SitePages, backdrop: str, config: dict) -> str:
-    """The demo's index.html."""
-    if backdrop == "screenshot":
-        backdrop_html = '<img class="demo-backdrop" src="screenshot.png" alt="" />'
-    elif backdrop == "html":
-        backdrop_html = '<iframe class="demo-backdrop" src="original.html" title="Original site"></iframe>'
-    else:
-        backdrop_html = ""
-    return (
-        INDEX_TEMPLATE.replace("__TITLE__", site.title)
-        .replace("__SITE_URL__", site.site_url)
-        .replace("__BACKDROP__", backdrop_html)
-        .replace("__CONFIG_JSON__", json.dumps(config, indent=2))
+def render_index(archive_html: str, defaults: dict) -> str:
+    """``archive.html`` as the demo's ``index.html``: the widget files sit
+    beside it, and the defaults are defined before ``archive.js`` loads."""
+    script = (
+        "<script>window.KavalArchiveDefaults = "
+        + json.dumps(defaults, ensure_ascii=False)
+        + ";</script>\n  "
     )
+    marker = '<script src="archive.js">'
+    if marker not in archive_html:
+        raise ValueError("archive.html no longer loads archive.js where expected")
+    return archive_html.replace(WIDGET_PATH_PREFIX, "").replace(marker, script + marker)
 
 
-def default_out_dir(pages_path: str, site: SitePages) -> str:
+def default_out_dir(pages_path: str, site_url: str) -> str:
     """``<host>.demo`` next to the pages database."""
-    host = urlparse(site.site_url).netloc
+    host = urlparse(site_url).netloc
     return os.path.join(os.path.dirname(pages_path) or ".", f"{host}.demo")
 
 
-async def compile_demo(
+def compile_demo(
     pages_path: str,
     out_dir: Optional[str] = None,
     *,
@@ -329,65 +101,68 @@ async def compile_demo(
     endpoint: Optional[str] = None,
     title: Optional[str] = None,
     suggestions: Optional[list[str]] = None,
-    max_chunks: int = DEFAULT_MAX_CHUNKS,
+    model: Optional[str] = None,
 ) -> DemoReport:
     """Assemble the demo folder and return what was built."""
-    site = read_site(pages_path)
-    out_dir = out_dir or default_out_dir(pages_path, site)
+    site_url = site_url_of(pages_path)
+    out_dir = out_dir or default_out_dir(pages_path, site_url)
     os.makedirs(out_dir, exist_ok=True)
 
     for name in WIDGET_FILES:
         shutil.copy(os.path.join(WIDGET_DIR, name), os.path.join(out_dir, name))
+    shutil.copy(
+        os.path.join(TOOL_DIR, "archive.js"), os.path.join(out_dir, "archive.js")
+    )
 
-    if site.screenshot:
-        with open(os.path.join(out_dir, "screenshot.png"), "wb") as f:
-            f.write(site.screenshot)
-        backdrop = "screenshot"
-    elif site.homepage_html:
-        with open(os.path.join(out_dir, "original.html"), "w", encoding="utf-8") as f:
-            f.write(inject_base_tag(site.homepage_html, site.site_url))
-        backdrop = "html"
-    else:
-        backdrop = "none"
-        logger.warning(
-            "No screenshot or stored HTML for the start page; plain backdrop"
-        )
+    pages_file = os.path.basename(pages_path)
+    shutil.copy(pages_path, os.path.join(out_dir, pages_file))
 
-    chunk_count = 0
+    rag_file = None
     if not endpoint:
         index_path = index_path or default_index_path(pages_path)
-        missing_file = "://" not in index_path and not os.path.exists(index_path)
-        if missing_file:
-            logger.info(f"No RAG index at {index_path}; chunking the stored markdown")
-            chunks = chunks_from_pages(site)
+        if "://" in index_path:
+            raise ValueError(
+                "The demo ships the RAG index as a file the browser loads;"
+                f" build it into a SQLite file, not {index_path}"
+            )
+        if os.path.exists(index_path):
+            rag_file = os.path.basename(index_path)
+            shutil.copy(index_path, os.path.join(out_dir, rag_file))
         else:
-            chunks = await chunks_from_index(index_path, collection)
-        chunks = chunks[:max_chunks]
-        chunk_count = len(chunks)
-        if not chunk_count:
-            raise ValueError("No content to answer from; index or re-scrape first")
-        with open(os.path.join(out_dir, "chunks.json"), "w", encoding="utf-8") as f:
-            json.dump(chunks, f, ensure_ascii=False)
+            logger.warning(
+                f"No RAG index at {index_path}; the demo browses the site"
+                " without a chatbot (run build_index first)"
+            )
 
-    host = urlparse(site.site_url).netloc
-    config = {
-        "title": title or host,
-        "greeting": "Hello! Ask me about this site.",
-        "emptyMessage": f"Hi! Ask me anything about {host}.",
-        "suggestions": suggestions or [],
-        "theme": {},
-        "endpoint": endpoint,
-    }
+    defaults = {"db": pages_file}
+    if rag_file:
+        defaults["rag"] = rag_file
+    for key, value in (
+        ("collection", collection),
+        ("model", model),
+        ("endpoint", endpoint),
+        ("title", title),
+        ("suggestions", suggestions or None),
+    ):
+        if value:
+            defaults[key] = value
+
+    with open(os.path.join(TOOL_DIR, "archive.html"), encoding="utf-8") as f:
+        archive_html = f.read()
     with open(os.path.join(out_dir, "index.html"), "w", encoding="utf-8") as f:
-        f.write(render_index(site, backdrop, config))
+        f.write(render_index(archive_html, defaults))
 
     logger.info(
-        f"Demo compiled to {out_dir}: backdrop={backdrop},"
-        + (f" chunks={chunk_count}" if not endpoint else f" endpoint={endpoint}")
+        f"Demo compiled to {out_dir}: pages={pages_file},"
+        + (f" endpoint={endpoint}" if endpoint else f" rag={rag_file}")
         + f". Serve with: python -m http.server -d {out_dir}"
     )
     return DemoReport(
-        out_dir=out_dir, site_url=site.site_url, backdrop=backdrop, chunks=chunk_count
+        out_dir=out_dir,
+        site_url=site_url,
+        pages_file=pages_file,
+        rag_file=rag_file,
+        endpoint=endpoint,
     )
 
 
@@ -410,9 +185,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--index",
         default=None,
         help=(
-            "RAG index whose chunks feed the client-side retrieval preview, as"
-            " a database URI or SQLite path (default: the <site>.rag.db beside"
-            " the input; a missing file falls back to re-chunked markdown)"
+            "RAG index SQLite file shipped with the demo (default: the"
+            " <site>.rag.db beside the input; missing means no chatbot)"
         ),
     )
     parser.add_argument(
@@ -421,12 +195,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Collection inside --index (default: its only collection)",
     )
     parser.add_argument(
+        "--model",
+        default=None,
+        help="WebLLM chat model id the demo loads (default: the page's first choice)",
+    )
+    parser.add_argument(
         "--endpoint",
         default=None,
         metavar="URL",
         help=(
             "Agent-server stream endpoint (e.g. http://host:25000/api/chat/"
-            "stream_agent); replaces the retrieval preview with the real bot"
+            "stream_agent); the widget talks to it instead of an in-browser model"
         ),
     )
     parser.add_argument(
@@ -439,12 +218,6 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="TEXT",
         help="Suggested question chip; may be given more than once",
     )
-    parser.add_argument(
-        "--max-chunks",
-        type=int,
-        default=DEFAULT_MAX_CHUNKS,
-        help=f"Cap on chunks shipped to the browser (default: {DEFAULT_MAX_CHUNKS})",
-    )
     return parser
 
 
@@ -455,19 +228,17 @@ def main() -> int:
         logger.error(f"Pages database not found: {args.pages}")
         return 2
     try:
-        asyncio.run(
-            compile_demo(
-                args.pages,
-                args.out,
-                index_path=args.index,
-                collection=args.collection,
-                endpoint=args.endpoint,
-                title=args.title,
-                suggestions=args.suggestion,
-                max_chunks=args.max_chunks,
-            )
+        compile_demo(
+            args.pages,
+            args.out,
+            index_path=args.index,
+            collection=args.collection,
+            endpoint=args.endpoint,
+            title=args.title,
+            suggestions=args.suggestion,
+            model=args.model,
         )
-    except (ValueError, ImportError) as error:
+    except ValueError as error:
         logger.error(error)
         return 2
     return 0

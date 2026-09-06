@@ -142,6 +142,30 @@ def test_parse_sitemap_urlset_and_index():
     assert pages == [] and nested == ["https://kaval.ai/s1.xml"]
 
 
+def test_parse_sitemap_unescapes_and_tolerates_odd_markup():
+    pages, nested = parse_sitemap(
+        "<urlset><url><loc> https://kaval.ai/?a=1&amp;b=2 </loc></url>"
+        "<url><loc><![CDATA[https://kaval.ai/c]]></loc></url>"
+        "<url><loc></loc></url></urlset>"
+    )
+    assert pages == ["https://kaval.ai/?a=1&b=2", "https://kaval.ai/c"]
+    assert nested == []
+    # A namespace prefix on the tags, and an index file, still parse.
+    pages, nested = parse_sitemap(
+        '<sm:sitemapindex xmlns:sm="http://www.sitemaps.org/schemas/sitemap/0.9">'
+        "<sm:sitemap><sm:loc>https://kaval.ai/s1.xml</sm:loc></sm:sitemap>"
+        "</sm:sitemapindex>"
+    )
+    assert pages == [] and nested == ["https://kaval.ai/s1.xml"]
+    # An entity declaration is inert text, never expanded.
+    pages, _ = parse_sitemap(
+        '<?xml version="1.0"?><!DOCTYPE x [<!ENTITY e "boom">]>'
+        "<urlset><url><loc>https://kaval.ai/&e;</loc></url></urlset>"
+    )
+    assert pages == ["https://kaval.ai/&e;"]
+    assert parse_sitemap("not xml") == ([], [])
+
+
 def test_looks_like_shell():
     assert looks_like_shell("<div id=root></div>", "Loading…")
     assert looks_like_shell(
@@ -653,10 +677,17 @@ async def test_idle_worker_survives_a_slow_page(tmp_path):
     assert report.fetched == 2
 
 
+RENDERED_DOM = (
+    '<html><head><link rel="stylesheet" href="/site.css"><script src="/app.js">'
+    "</script></head><body><h1>Rendered</h1></body></html>"
+)
+
+
 def remote_result(**overrides):
     result = {
         "success": True,
         "status_code": 200,
+        "html": RENDERED_DOM,
         "cleaned_html": "<h1>Rendered</h1>",
         "markdown": {"raw_markdown": "# Rendered"},
         "links": {
@@ -695,6 +726,8 @@ async def test_remote_browser_fetcher_maps_the_server_result():
     assert outcome.success
     assert outcome.markdown == "# Rendered"
     assert outcome.title == "Rendered"
+    # The full rendered DOM is what gets stored, not crawl4ai's cleaned copy.
+    assert outcome.html == RENDERED_DOM
     assert outcome.links == ["https://kaval.ai/a"]
     assert image == b"png-bytes"
 
@@ -706,6 +739,16 @@ async def test_remote_browser_fetcher_maps_the_server_result():
     assert run_params["page_timeout"] == 20000
     assert "screenshot" not in run_params
     assert shot_payload["crawler_config"]["params"]["screenshot"] is True
+
+
+@pytest.mark.asyncio
+async def test_remote_browser_fetcher_falls_back_to_cleaned_html():
+    result = remote_result(html=None, markdown=None)
+    async with httpx.AsyncClient(transport=crawl4ai_transport(result, [])) as client:
+        fetcher = scrape.RemoteBrowserFetcher("http://x", client, "ua")
+        outcome = await fetcher.fetch("https://kaval.ai/")
+    assert outcome.html == "<h1>Rendered</h1>"
+    assert outcome.markdown == "# Rendered"
 
 
 @pytest.mark.asyncio
@@ -753,6 +796,7 @@ async def test_run_uses_the_crawl4ai_container_when_asked(tmp_path):
                     "success": True,
                     "results": [
                         remote_result(
+                            html=rich_page("Remote"),
                             cleaned_html=rich_page("Remote"),
                             markdown={"raw_markdown": RICH_TEXT},
                             links={"internal": [], "external": []},
