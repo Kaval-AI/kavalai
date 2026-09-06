@@ -37,7 +37,6 @@ and a server-side-rendered site never contacts the container at all.
 import argparse
 import asyncio
 import base64
-import sys
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable, Optional
@@ -190,12 +189,14 @@ def is_crawlable_path(url: str) -> bool:
 
 def page_links(links: list[str], base: str, host: str) -> list[str]:
     """The frontier-worthy subset of a page's links, normalized and deduplicated."""
-    seen: dict[str, None] = {}
-    for href in links:
-        url = normalize_url(href, base)
-        if url and same_site(url, host) and is_crawlable_path(url):
-            seen.setdefault(url)
-    return list(seen)
+    urls = (normalize_url(href, base) for href in links)
+    return list(
+        dict.fromkeys(
+            url
+            for url in urls
+            if url and same_site(url, host) and is_crawlable_path(url)
+        )
+    )
 
 
 def parse_sitemap(xml_text: str) -> tuple[list[str], list[str]]:
@@ -259,6 +260,16 @@ async def load_robots(
         # absent robots.txt means the opposite.
         robots.allow_all = True
     return robots
+
+
+async def robots_filter(
+    client: httpx.AsyncClient, start_url: str, token: str, ignore: bool
+) -> Callable[[str], bool]:
+    """The ``allowed(url)`` predicate a crawl consults before each fetch."""
+    if ignore:
+        return lambda url: True
+    robots = await load_robots(client, start_url)
+    return lambda url: robots.can_fetch(token, url)
 
 
 @dataclass
@@ -498,34 +509,39 @@ async def crawl_site(
     page_done = asyncio.Event()
     consecutive_escalations = 0
 
-    async def process(url: str) -> None:
-        nonlocal consecutive_escalations
-        if not allowed(url):
-            db.record_skipped(url, "disallowed by robots.txt")
-            report.disallowed += 1
-            return
+    async def fetch_with_escalation(url: str) -> tuple[Optional[FetchOutcome], str]:
+        """HTTP first, the browser when the response is not usable content.
 
-        site_is_js = consecutive_escalations >= ESCALATION_MEMO
+        Returns the outcome to record and the mode that produced it. A failed
+        escalation keeps the (thin but real) HTTP content rather than losing
+        the page entirely; once the site has escalated ``ESCALATION_MEMO``
+        times in a row the HTTP attempt is skipped as doomed.
+        """
+        nonlocal consecutive_escalations
         outcome: Optional[FetchOutcome] = None
         mode = "browser"
-        if http_fetch is not None and not site_is_js:
+        if http_fetch is not None and consecutive_escalations < ESCALATION_MEMO:
             await spacer.wait()
             outcome = await http_fetch(url)
             mode = "http"
         if browser_fetch is not None and (outcome is None or outcome.needs_browser):
-            escalating = outcome is not None
             await spacer.wait()
             browser_outcome = await browser_fetch(url)
-            if escalating:
+            if outcome is not None:
                 report.escalated += 1
                 consecutive_escalations += 1
-            # A failed escalation keeps the (thin but real) HTTP content
-            # rather than losing the page entirely.
             if browser_outcome.success or outcome is None or not outcome.success:
                 outcome, mode = browser_outcome, "browser"
         if outcome is not None and outcome.success and mode == "http":
             consecutive_escalations = 0
+        return outcome, mode
 
+    async def process(url: str) -> None:
+        if not allowed(url):
+            db.record_skipped(url, "disallowed by robots.txt")
+            report.disallowed += 1
+            return
+        outcome, mode = await fetch_with_escalation(url)
         if outcome is not None and outcome.success:
             links = page_links(outcome.links, url, host)
             db.record_success(
@@ -607,17 +623,9 @@ async def run(
             seeds = [start_url] + await sitemap_urls(client, start_url, args.max_pages)
             db.add_urls(page_links(seeds, start_url, host))
 
-            if args.ignore_robots:
-
-                def allowed(url: str) -> bool:
-                    return True
-
-            else:
-                robots = await load_robots(client, start_url)
-
-                def allowed(url: str) -> bool:
-                    return robots.can_fetch(robots_token, url)
-
+            allowed = await robots_filter(
+                client, start_url, robots_token, args.ignore_robots
+            )
             browser = browser_fetcher
             if browser is None and not args.force_http:
                 browser = RemoteBrowserFetcher(
@@ -746,10 +754,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--screenshot",
         action="store_true",
-        help=(
-            "Save a PNG of the start page into the files directory"
-            " (needs the browser stack)"
-        ),
+        help="Store a PNG of the start page on its row (needs the crawl4ai container)",
     )
     return parser
 

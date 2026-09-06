@@ -51,7 +51,7 @@ from loguru import logger
 from kavalai.rag import SqliteRagService, rag_service_from_uri
 from kavalai.rag.base import BaseRagService
 from kavalai.settings import apply_normalizer_from_env
-from tools.zerocostchatbot.pages_db import PagesDatabase
+from tools.zerocostchatbot.pages_db import PagesDatabase, PageRow
 
 # Small, local and key-free — and the same model family the browser widget
 # embeds queries with (snowflake-arctic-embed-s over WebLLM), so an index
@@ -59,8 +59,8 @@ from tools.zerocostchatbot.pages_db import PagesDatabase
 # fastembed model list for alternatives.
 DEFAULT_MODEL = "fastembed/snowflake/snowflake-arctic-embed-s"
 
-# bge-small truncates at 512 tokens, so a much longer chunk would embed only
-# its beginning anyway.
+# Small embedding models (arctic-embed-s, bge-small) truncate at 512 tokens,
+# so a much longer chunk would embed only its beginning anyway.
 DEFAULT_MAX_CHARS = 2000
 
 DEFAULT_BATCH_SIZE = 32
@@ -146,6 +146,18 @@ def chunk_markdown(
     return chunks
 
 
+def chunk_metadata(row: PageRow, chunk: Chunk) -> dict:
+    """What a chunk carries besides its text — enough to cite the page."""
+    fields = {
+        "url": row.url,
+        "title": row.title,
+        "heading": chunk.heading,
+        "crawled_at": row.last_crawled_at,
+        "chunk": chunk.position,
+    }
+    return {key: value for key, value in fields.items() if value not in (None, "")}
+
+
 @dataclass
 class IndexReport:
     """What one indexing run did."""
@@ -200,19 +212,7 @@ async def build_rag_index(
         report.pages += 1
         for chunk in chunks:
             texts.append(chunk.text)
-            metadata.append(
-                {
-                    key: value
-                    for key, value in {
-                        "url": row.url,
-                        "title": row.title,
-                        "heading": chunk.heading,
-                        "crawled_at": row.last_crawled_at,
-                        "chunk": chunk.position,
-                    }.items()
-                    if value not in (None, "")
-                }
-            )
+            metadata.append(chunk_metadata(row, chunk))
             source_ids.append(row.url)
             if len(texts) >= batch_size:
                 await flush()

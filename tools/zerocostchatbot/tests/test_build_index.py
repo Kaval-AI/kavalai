@@ -27,6 +27,7 @@ from tools.zerocostchatbot.build_index import (
     build_parser,
     build_rag_index,
     chunk_markdown,
+    chunk_metadata,
     default_collection,
     default_index_path,
     make_rag_service,
@@ -257,3 +258,14 @@ def test_make_rag_service_postgres_reads_the_environment(tmp_path, monkeypatch):
     monkeypatch.setenv("KAVALAI_DB_URI", f"sqlite:///{tmp_path}/env.rag.db")
     service = make_rag_service("postgres", "fake/model", None)
     assert isinstance(service, SqliteRagService)
+
+
+def test_chunk_metadata_drops_empty_fields(tmp_path):
+    with make_pages(tmp_path) as pages:
+        add_page(pages, "https://docs.kaval.ai/", "", "Body only.")
+        (row,) = pages.iter_pages()
+    (chunk,) = chunk_markdown(row.markdown, row.title or "")
+    metadata = chunk_metadata(row, chunk)
+    assert metadata["url"] == "https://docs.kaval.ai/" and metadata["chunk"] == 0
+    assert "title" not in metadata and "heading" not in metadata
+    assert "crawled_at" in metadata

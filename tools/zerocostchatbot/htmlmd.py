@@ -50,6 +50,8 @@ BLOCK_TAGS = {
     "figure",
 }
 HEADING_TAGS = {f"h{level}": level for level in range(1, 7)}
+# Table cells sit on one row; a space keeps "Price" and "10 EUR" apart.
+CELL_TAGS = {"td", "th"}
 
 BLANK_LINES = re.compile(r"\n{3,}")
 SPACES = re.compile(r"[ \t]+")
@@ -101,6 +103,8 @@ class _Extractor(HTMLParser):
             self.parts.append("\n- ")
         elif tag == "br":
             self.parts.append("\n")
+        elif tag in CELL_TAGS:
+            self.parts.append(" ")
         elif tag in BLOCK_TAGS:
             self.parts.append("\n\n")
 

@@ -47,9 +47,12 @@ from urllib.parse import urlparse
 
 from loguru import logger
 
-from kavalai.rag import SqliteRagService
-from tools.zerocostchatbot.build_index import chunk_markdown, default_index_path
-from tools.zerocostchatbot.pages_db import PagesDatabase
+from tools.zerocostchatbot.build_index import (
+    chunk_markdown,
+    default_index_path,
+    make_rag_service,
+)
+from tools.zerocostchatbot.pages_db import PagesDatabase, PageRow
 
 WIDGET_DIR = os.path.normpath(
     os.path.join(os.path.dirname(__file__), "..", "..", "chatbotwidget")
@@ -79,7 +82,7 @@ class SitePages:
     title: str
     screenshot: Optional[bytes]
     homepage_html: Optional[str]
-    pages: list
+    pages: list[PageRow]
 
 
 def read_site(pages_path: str) -> SitePages:
@@ -103,8 +106,14 @@ def read_site(pages_path: str) -> SitePages:
 
 
 async def chunks_from_index(index_path: str, collection: Optional[str]) -> list[dict]:
-    """The chunks a built RAG index holds, as chunks.json entries."""
-    rag = SqliteRagService(index_path, model=None)
+    """The chunks a built RAG index holds, as chunks.json entries.
+
+    ``index_path`` takes what ``build_index --index`` takes (a file, a URI,
+    ``postgres``); reading needs no embedding model.
+    """
+    rag = make_rag_service(index_path, None, None)
+    if not rag.supports("iter_entries"):
+        raise ValueError(f"{type(rag).__name__} cannot list its entries")
     collections = await rag.list_collections()
     names = [c["name"] for c in collections]
     if collection is None:
@@ -305,9 +314,15 @@ def render_index(site: SitePages, backdrop: str, config: dict) -> str:
     )
 
 
+def default_out_dir(pages_path: str, site: SitePages) -> str:
+    """``<host>.demo`` next to the pages database."""
+    host = urlparse(site.site_url).netloc
+    return os.path.join(os.path.dirname(pages_path) or ".", f"{host}.demo")
+
+
 async def compile_demo(
     pages_path: str,
-    out_dir: str,
+    out_dir: Optional[str] = None,
     *,
     index_path: Optional[str] = None,
     collection: Optional[str] = None,
@@ -318,6 +333,7 @@ async def compile_demo(
 ) -> DemoReport:
     """Assemble the demo folder and return what was built."""
     site = read_site(pages_path)
+    out_dir = out_dir or default_out_dir(pages_path, site)
     os.makedirs(out_dir, exist_ok=True)
 
     for name in WIDGET_FILES:
@@ -395,7 +411,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "RAG index whose chunks feed the client-side retrieval preview"
             " (default: the <pages>.rag.db beside the input, else re-chunked"
-            " markdown)"
+            " markdown); a database URI or 'postgres' works too"
         ),
     )
     parser.add_argument(
@@ -438,14 +454,10 @@ def main() -> int:
         logger.error(f"Pages database not found: {args.pages}")
         return 2
     try:
-        site_host = urlparse(read_site(args.pages).site_url).netloc
-        out_dir = args.out or os.path.join(
-            os.path.dirname(args.pages) or ".", f"{site_host}.demo"
-        )
         asyncio.run(
             compile_demo(
                 args.pages,
-                out_dir,
+                args.out,
                 index_path=args.index,
                 collection=args.collection,
                 endpoint=args.endpoint,

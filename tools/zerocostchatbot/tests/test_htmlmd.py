@@ -89,3 +89,10 @@ def test_chrome_text_is_dropped_but_its_links_survive():
     )
     assert parsed.markdown == "# Real\n\ncontent"
     assert parsed.links == ["https://kaval.ai/docs", "https://kaval.ai/imprint"]
+
+
+def test_table_cells_stay_separated():
+    parsed = parse_html(
+        "<table><tr><th>Item</th><th>Price</th></tr><tr><td>Anvil</td><td>10 EUR</td></tr></table>"
+    )
+    assert parsed.markdown == "Item Price\n\nAnvil 10 EUR"

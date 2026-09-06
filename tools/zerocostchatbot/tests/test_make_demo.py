@@ -29,11 +29,7 @@ from tools.zerocostchatbot.make_demo import (
     read_site,
 )
 from tools.zerocostchatbot.pages_db import PagesDatabase
-from tools.zerocostchatbot.tests.test_build_index import (
-    add_page,
-    fake_embedding_client,
-    make_rag,
-)
+from tools.zerocostchatbot.tests.test_build_index import add_page, make_rag
 
 HOME_MARKDOWN = "# Welcome\n\nAcme makes fine anvils for discerning coyotes."
 PRICING_MARKDOWN = "# Pricing\n\nAnvils cost ten dollars each, shipping included."
@@ -218,3 +214,33 @@ async def test_compile_demo_plain_backdrop_when_nothing_stored(tmp_path):
     assert report.backdrop == "none"
     index_html = (tmp_path / "demo" / "index.html").read_text()
     assert "screenshot.png" not in index_html and "original.html" not in index_html
+
+
+async def test_compile_demo_defaults_the_output_folder(tmp_path):
+    pages = make_site(tmp_path)
+    report = await compile_demo(pages)
+    assert report.out_dir == str(tmp_path / "acme.com.demo")
+    assert (tmp_path / "acme.com.demo" / "index.html").exists()
+
+
+async def test_chunks_from_index_accepts_a_database_uri(tmp_path):
+    pages = make_site(tmp_path)
+    rag = make_rag(tmp_path)
+    with PagesDatabase(pages) as db:
+        await build_rag_index(db, rag, "acme.com")
+    report = await compile_demo(
+        pages, str(tmp_path / "demo"), index_path=f"sqlite:///{tmp_path}/index.rag.db"
+    )
+    assert report.chunks == 2
+
+
+async def test_chunks_from_index_refuses_a_backend_without_iter_entries(
+    tmp_path, monkeypatch
+):
+    class Opaque:
+        def supports(self, capability):
+            return False
+
+    monkeypatch.setattr(make_demo, "make_rag_service", lambda *args: Opaque())
+    with pytest.raises(ValueError, match="cannot list its entries"):
+        await make_demo.chunks_from_index("whatever", None)
