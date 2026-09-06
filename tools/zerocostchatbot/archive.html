@@ -27,7 +27,8 @@ file pickers, which also work from file://.
     :root { --bar: #273e47; --accent: #acc12f; --muted: #8a9aa3; --panel: #f4f4f6; }
     html, body { height: 100%; margin: 0; font-family: system-ui, sans-serif; font-size: 14px; color: #1f2d34; }
     body { display: grid; grid-template-rows: auto 1fr; grid-template-columns: 300px 1fr; }
-    body.nav-hidden { grid-template-columns: 0 1fr; }
+    /* With the sidebar gone the grid has one column, so the viewer fills it. */
+    body.nav-hidden { grid-template-columns: 1fr; }
     body.nav-hidden aside { display: none; }
     header { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; padding: 8px 12px; background: var(--bar); color: #fff; flex-wrap: wrap; }
     header .brand { font-weight: 700; color: var(--accent); white-space: nowrap; }
@@ -46,7 +47,7 @@ file pickers, which also work from file://.
     aside li.current { border-left-color: var(--accent); background: #e5e5e8; }
     aside li .t { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     aside li .u { display: block; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    main { position: relative; min-height: 0; }
+    main { position: relative; min-height: 0; min-width: 0; }
     iframe { width: 100%; height: 100%; border: none; background: #fff; }
     .notice { position: absolute; left: 50%; top: 24px; transform: translateX(-50%); background: var(--bar); color: #fff; padding: 10px 16px; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); max-width: 80%; }
     .notice a { color: var(--accent); }
