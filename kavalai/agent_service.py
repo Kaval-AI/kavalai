@@ -17,7 +17,7 @@ limitations under the License.
 from typing import Optional, Dict, List, Any
 from uuid import UUID
 
-from sqlalchemy import asc, delete, select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from kavalai.db import Agent, Session, Run, Task, ChatMessage, ModelCallStat
 from kavalai.resolvers import resolve_path, find_key_recursive
@@ -298,18 +298,18 @@ class AgentService:
         self, session_id: UUID, limit: int = 50
     ) -> List[ChatMessage]:
         """
-        Retrieves the conversation history for a session,
+        Retrieves the ``limit`` most recent messages of a session,
         ordered from oldest to newest.
         """
         async with self.session_maker() as session:
             stmt = (
                 select(ChatMessage)
                 .where(ChatMessage.session_id == session_id)
-                .order_by(asc(ChatMessage.created_at))
+                .order_by(ChatMessage.created_at.desc())
                 .limit(limit)
             )
             result = await session.execute(stmt)
-            return list(result.scalars().all())
+            return list(reversed(result.scalars().all()))
 
     async def add_task(
         self,

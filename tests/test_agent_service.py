@@ -320,7 +320,7 @@ class TestAgentService:
         assert [m.content for m in messages] == [f"message {i}" for i in range(5)]
 
         window = await service.get_chat_history(session.id, limit=2)
-        assert len(window) == 2
+        assert [m.content for m in window] == ["message 3", "message 4"]
 
     async def test_add_model_call_stats_assigns_agent(self, session_maker):
         service = AgentService(session_maker)
