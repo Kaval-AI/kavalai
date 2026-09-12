@@ -33,13 +33,15 @@ import sqlite3
 import struct
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import AsyncIterator, Callable, Optional
+from typing import Any, AsyncIterator, Callable, Optional
 from uuid import UUID
 
-from loguru import logger
-
 from kavalai.normalizer import Normalizer
-from kavalai.rag.collections import CollectionInfo, CollectionRagService
+from kavalai.rag.collections import (
+    CollectionInfo,
+    CollectionRagService,
+    MetadataValue,
+)
 
 _COLLECTION_UPGRADES: dict[int, Callable] = {}
 
@@ -78,8 +80,7 @@ class SqliteRagService(CollectionRagService):
 
     All methods run the SQLite work synchronously on the calling loop — no
     worker threads — so the service also works under Pyodide / WebAssembly.
-    Unlike :class:`~kavalai.rag.postgres.PostgresRagService`, embedding usage
-    stats are logged but not persisted (the index file has no stats table).
+    Embeddings are stored as 32-bit floats; ``halfvec`` is a PostgreSQL option.
     """
 
     collection_upgrades = _COLLECTION_UPGRADES
@@ -90,6 +91,10 @@ class SqliteRagService(CollectionRagService):
         model: Optional[str] = None,
         auto_create: bool = True,
         normalizer: Optional[Normalizer] = None,
+        *,
+        provision: bool = True,
+        stats_receiver: Any = None,
+        vector_type: str = "vector",
     ):
         """
         Initialize the SqliteRagService.
@@ -97,14 +102,19 @@ class SqliteRagService(CollectionRagService):
         Args:
             filename (str): Path of the SQLite database file (":memory:" for an
                             in-memory index).
-            model (Optional[str]): The embedding model to use (e.g.
-                "openai/text-embedding-3-small"). May be ``None`` to browse,
-                count, export or drop collections; indexing and querying
-                then fail.
+            model (Optional[str]): Embedding model for collections this
+                service creates (e.g. "openai/text-embedding-3-small").
+                Existing collections are embedded with their own model, so
+                ``None`` still browses, queries and indexes them.
             auto_create (bool): If True (default), create the file and the
                                 registry when they do not exist. If False,
                                 raise when the file or the registry is missing.
             normalizer (Optional[Normalizer]): Optional normalizer to use for embeddings.
+            provision (bool): Whether the service may create collection tables
+                itself. See
+                :class:`~kavalai.rag.collections.CollectionRagService`.
+            stats_receiver: Receives each embedding call's statistics.
+            vector_type (str): Only ``"vector"`` is stored by this backend.
 
         Raises:
             FileNotFoundError: If the file is missing and auto_create is False.
@@ -112,7 +122,13 @@ class SqliteRagService(CollectionRagService):
                         or the file holds the single-table layout of
                         kavalai 1.0, which this version does not read.
         """
-        super().__init__(model=model, normalizer=normalizer)
+        super().__init__(
+            model=model,
+            normalizer=normalizer,
+            provision=provision,
+            stats_receiver=stats_receiver,
+            vector_type=vector_type,
+        )
         self.filename = filename
 
         in_memory = filename == ":memory:"
@@ -155,7 +171,8 @@ class SqliteRagService(CollectionRagService):
         except ModuleNotFoundError as e:
             raise ImportError(
                 "SqliteRagService requires the sqlite-vector extension. "
-                "Install it with: pip install sqliteai-vector (or the kavalai[common] extra)."
+                'Install it with: pip install "kavalai[runtime]" '
+                "(or just sqliteai-vector)."
             ) from e
 
         self._conn.enable_load_extension(True)
@@ -184,11 +201,11 @@ class SqliteRagService(CollectionRagService):
     async def _commit(self, conn: sqlite3.Connection) -> None:
         conn.commit()
 
-    async def _record_stats(self, conn, stats) -> None:
-        logger.debug(
-            f"SqliteRagService embedded {stats.batch_size} texts with "
-            f"{self.model} ({stats.total_tokens} tokens)"
-        )
+    async def _rollback(self, conn: sqlite3.Connection) -> None:
+        conn.rollback()
+
+    async def _registry_exists(self, conn: sqlite3.Connection) -> bool:
+        return self._table_exists(self.REGISTRY_TABLE)
 
     async def _create_registry(self, conn: sqlite3.Connection) -> None:
         conn.execute(
@@ -323,10 +340,14 @@ class SqliteRagService(CollectionRagService):
             ],
         )
 
-    async def _delete_row(
-        self, conn: sqlite3.Connection, info: CollectionInfo, item_id: UUID
+    async def _delete_rows(
+        self, conn: sqlite3.Connection, info: CollectionInfo, item_ids: list[UUID]
     ) -> None:
-        conn.execute(f"DELETE FROM {info.table_name} WHERE id = ?", (str(item_id),))
+        placeholders = ", ".join("?" for _ in item_ids)
+        conn.execute(
+            f"DELETE FROM {info.table_name} WHERE id IN ({placeholders})",
+            tuple(str(item_id) for item_id in item_ids),
+        )
 
     async def _delete_rows_by_source_ids(
         self, conn: sqlite3.Connection, info: CollectionInfo, source_ids: list[str]
@@ -335,6 +356,39 @@ class SqliteRagService(CollectionRagService):
         conn.execute(
             f"DELETE FROM {info.table_name} WHERE source_id IN ({placeholders})",
             tuple(source_ids),
+        )
+
+    async def _delete_rows_by_metadata(
+        self,
+        conn: sqlite3.Connection,
+        info: CollectionInfo,
+        match: dict[str, MetadataValue],
+    ) -> None:
+        """One equality per key, typed as PostgreSQL's ``@>`` types it.
+
+        ``json_extract`` returns JSON ``true`` as the integer 1, so on its own
+        it would let ``{"flag": True}`` match ``{"flag": 1}`` and the reverse.
+        Booleans are therefore compared by ``json_type`` and numbers only
+        against JSON numbers.
+        """
+        clauses, params = [], []
+        for key, value in match.items():
+            path = f'$."{key}"'
+            if isinstance(value, bool):
+                clauses.append("json_type(metadata, ?) = ?")
+                params.extend([path, "true" if value else "false"])
+            elif isinstance(value, (int, float)):
+                clauses.append(
+                    "json_type(metadata, ?) IN ('integer', 'real') "
+                    "AND json_extract(metadata, ?) = ?"
+                )
+                params.extend([path, path, value])
+            else:
+                clauses.append("json_extract(metadata, ?) = ?")
+                params.extend([path, value])
+        conn.execute(
+            f"DELETE FROM {info.table_name} WHERE {' AND '.join(clauses)}",
+            tuple(params),
         )
 
     async def _iter_rows(

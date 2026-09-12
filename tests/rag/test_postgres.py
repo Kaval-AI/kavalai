@@ -589,24 +589,32 @@ async def test_collection_provisioning_and_drop(
     agents_db_config, service, embedding_model, collection
 ):
     """Indexing provisions a typed table + registry row; drop removes both."""
-    from sqlalchemy import create_engine, inspect
+    from sqlalchemy import inspect
+    from sqlalchemy.ext.asyncio import create_async_engine
 
-    from kavalai.migrate_db import ensure_sync_scheme
+    from kavalai.db import ensure_async_scheme
 
     await service.index_batch(
         texts=["a", "b"], metadata_list=[{}, {}], collection_name=collection
     )
 
     table_name = PostgresRagService.table_name_for_collection(collection)
-    engine = create_engine(ensure_sync_scheme(agents_db_config["uri"]))
-    insp = inspect(engine)
-    tables = insp.get_table_names(schema=agents_db_config["schema"])
+    schema = agents_db_config["schema"]
+    engine = create_async_engine(ensure_async_scheme(agents_db_config["uri"]))
+
+    async def table_names() -> list[str]:
+        async with engine.connect() as conn:
+            return await conn.run_sync(
+                lambda c: inspect(c).get_table_names(schema=schema)
+            )
+
+    tables = await table_names()
     assert table_name in tables
     assert "rag_collections" in tables
-    index_names = {
-        i["name"]
-        for i in insp.get_indexes(table_name, schema=agents_db_config["schema"])
-    }
+    async with engine.connect() as conn:
+        index_names = await conn.run_sync(
+            lambda c: {i["name"] for i in inspect(c).get_indexes(table_name, schema)}
+        )
     assert f"ix_{table_name}_embedding" in index_names
     assert f"ix_{table_name}_metadata" in index_names
 
@@ -621,10 +629,9 @@ async def test_collection_provisioning_and_drop(
     assert stats["total_entries"] >= 2
 
     await service.drop_collection(collection)
-    insp = inspect(engine)
-    assert table_name not in insp.get_table_names(schema=agents_db_config["schema"])
+    assert table_name not in await table_names()
+    await engine.dispose()
     assert await service.count_entries(collection) == 0
-    engine.dispose()
 
 
 @pytest.mark.asyncio
@@ -728,3 +735,344 @@ def test_vector_literal_and_parse_vector_round_trip():
     assert _parse_vector(literal) == [0.5, -1.0, 2.0]
     # A driver that already decodes the vector hands back a sequence.
     assert _parse_vector((0.5, -1.0)) == [0.5, -1.0]
+
+
+def test_parse_version():
+    from kavalai.rag.postgres import _parse_version
+
+    assert _parse_version("0.8.0") == (0, 8, 0)
+    assert _parse_version("0.7") == (0, 7)
+    assert _parse_version("0.7.4dev") == (0, 7)
+    assert _parse_version("") == (0,)
+    assert _parse_version(None) == (0,)
+    assert _parse_version("unknown") == (0,)
+
+
+@asynccontextmanager
+async def _no_session():
+    yield AsyncMock()
+
+
+def test_options_are_keyword_only_and_agent_is_gone():
+    """The old positional ``agent`` parameter is removed, not reinterpreted."""
+    with pytest.raises(TypeError):
+        PostgresRagService(_no_session, EMBEDDING_MODEL, Normalizer())
+    with pytest.raises(TypeError, match="agent"):
+        PostgresRagService(_no_session, EMBEDDING_MODEL, agent=object())
+
+
+def test_from_uri_and_from_session_maker_forward_options(agents_db_config):
+    receiver = MagicMock()
+    svc = PostgresRagService.from_uri(
+        agents_db_config["uri"],
+        EMBEDDING_MODEL,
+        schema="elsewhere",
+        provision=False,
+        stats_receiver=receiver,
+        vector_type="halfvec",
+    )
+    assert (svc.schema, svc.provision, svc.vector_type) == (
+        "elsewhere",
+        False,
+        "halfvec",
+    )
+    assert svc.stats_receiver is receiver
+
+    other = PostgresRagService.from_session_maker(
+        svc.session_maker, EMBEDDING_MODEL, schema="s", provision=False
+    )
+    assert (other.session_maker, other.schema, other.provision) == (
+        svc.session_maker,
+        "s",
+        False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_service_writes_no_model_call_stats(
+    agents_db_config, service, collection
+):
+    """Statistics go to a receiver; the RAG service owns no table of them."""
+    schema = agents_db_config["schema"]
+
+    async def stat_rows() -> int:
+        async with service.session_maker() as session:
+            return (
+                await session.execute(
+                    text(f'SELECT count(*) FROM "{schema}".model_call_stats')
+                )
+            ).scalar()
+
+    before = await stat_rows()
+    await service.index_batch(
+        texts=["apple", "banana"], metadata_list=[{}, {}], collection_name=collection
+    )
+    await service.query("apple", collection_name=collection)
+
+    assert await stat_rows() == before
+
+
+@pytest.mark.asyncio
+async def test_pgvector_version_is_read_once(service):
+    async with service.session_maker() as session:
+        version = await service._pgvector(session)
+    assert version >= (0, 7)
+    service._pgvector_version = (9, 9)
+    async with service.session_maker() as session:
+        assert await service._pgvector(session) == (9, 9)
+
+
+@pytest.mark.asyncio
+async def test_postgres_only_paths_on_a_missing_collection(service):
+    assert await service.batch_query_with_join(
+        texts=["apple"], collection_name="never_created"
+    ) == [[]]
+    assert await service.compute_similarity_matrix(
+        texts=["apple"], source_ids=["a", "b"], collection_name="never_created"
+    ) == [[0.0, 0.0]]
+    with pytest.raises(Exception, match="No embeddings found"):
+        await service.learn_normalizer("never_created")
+    with pytest.raises(ValueError, match="Unknown RAG collection 'never_created'"):
+        service.build_batch_query_cte(
+            embeddings=[[0.1] * EMBEDDING_DIM], top_k=5, collection_name="never_created"
+        )
+
+
+@pytest.mark.asyncio
+async def test_learn_normalizer_on_an_empty_collection(service, collection):
+    await service.create_collection(collection, embedding_size=EMBEDDING_DIM)
+    with pytest.raises(Exception, match="No embeddings found"):
+        await service.learn_normalizer(collection)
+    await service.drop_collection(collection)
+
+
+# Half-precision vectors.
+
+
+@pytest.fixture
+def halfvec_service(agents_db_config, migrated_agents_db):
+    svc = PostgresRagService.from_uri(
+        agents_db_config["uri"],
+        EMBEDDING_MODEL,
+        schema=agents_db_config["schema"],
+        vector_type="halfvec",
+    )
+    svc.embedding_client = fake_embedding_client()
+    return svc
+
+
+async def _column_type(svc, collection) -> str:
+    async with svc.session_maker() as session:
+        return (
+            await session.execute(
+                text(
+                    "SELECT format_type(atttypid, atttypmod) FROM pg_attribute "
+                    "WHERE attrelid = to_regclass(:table) AND attname = 'embedding'"
+                ).bindparams(
+                    table=svc._qualified(svc.table_name_for_collection(collection))
+                )
+            )
+        ).scalar()
+
+
+@pytest.mark.asyncio
+async def test_a_halfvec_collection_round_trips(
+    agents_db_config, halfvec_service, collection
+):
+    texts = ["apple pie", "banana bread", "cherry tart"]
+    await halfvec_service.index_batch(
+        texts=texts,
+        metadata_list=[{"n": i} for i in range(3)],
+        source_ids=["a", "b", "c"],
+        collection_name=collection,
+    )
+    assert (
+        await _column_type(halfvec_service, collection) == f"halfvec({EMBEDDING_DIM})"
+    )
+    assert halfvec_service._collections[collection].vector_type == "halfvec"
+
+    hits = await halfvec_service.query("apple pie", top_k=1, collection_name=collection)
+    assert hits[0].content == "apple pie"
+    assert hits[0].similarity == pytest.approx(1.0, abs=1e-3)
+
+    # A service configured for 32-bit vectors reads the type from the table,
+    # so the casts in its queries match the column.
+    reader = PostgresRagService.from_uri(
+        agents_db_config["uri"], EMBEDDING_MODEL, schema=agents_db_config["schema"]
+    )
+    reader.embedding_client = fake_embedding_client()
+    filtered = await reader.query(
+        "banana", top_k=5, collection_name=collection, source_ids=["b"]
+    )
+    assert [hit.content for hit in filtered] == ["banana bread"]
+    assert reader._collections[collection].vector_type == "halfvec"
+
+    normalizer = await reader.learn_normalizer(collection)
+    assert len(normalizer.center_vector) == EMBEDDING_DIM
+    entries = [entry async for entry in reader.iter_entries(collection)]
+    assert {len(entry["embedding"]) for entry in entries} == {EMBEDDING_DIM}
+    by_id = await reader.get_embeddings_by_ids(collection, [entries[0]["id"]])
+    assert by_id[entries[0]["id"]] == pytest.approx(entries[0]["embedding"])
+    matrix = await reader.compute_similarity_matrix(
+        texts=["apple pie"], source_ids=["a", "b"], collection_name=collection
+    )
+    assert matrix[0][0] == pytest.approx(1.0, abs=1e-3)
+    joined = await reader.batch_query_with_join(
+        texts=["cherry tart"], top_k=1, collection_name=collection
+    )
+    assert joined[0][0]["content"] == "cherry tart"
+
+    await reader.drop_collection(collection)
+
+
+@pytest.mark.asyncio
+async def test_halfvec_indexes_more_dimensions_than_vector(
+    service, halfvec_service, collection
+):
+    """HNSW stops at 2,000 dimensions for ``vector`` and 4,000 for ``halfvec``."""
+    await halfvec_service.create_collection(f"{collection}_half", embedding_size=3072)
+    assert await _column_type(halfvec_service, f"{collection}_half") == "halfvec(3072)"
+
+    with pytest.raises(Exception, match="2000 dimensions"):
+        await service.create_collection(collection, embedding_size=3072)
+    assert collection not in {c["name"] for c in await service.list_collections()}
+
+    await service.create_collection(
+        f"{collection}_explicit", embedding_size=3072, vector_type="halfvec"
+    )
+    await halfvec_service.drop_collection(f"{collection}_half")
+    await service.drop_collection(f"{collection}_explicit")
+
+
+@pytest.mark.asyncio
+async def test_halfvec_needs_pgvector_0_7(halfvec_service, collection):
+    halfvec_service._pgvector_version = (0, 6, 2)
+
+    with pytest.raises(ValueError, match="need pgvector 0.7 or later.*has 0.6.2"):
+        await halfvec_service.create_collection(collection, embedding_size=4)
+    assert collection not in {
+        c["name"] for c in await halfvec_service.list_collections()
+    }
+
+
+# Iterative index scans.
+
+
+def _vector_client(vectors: dict[str, list[float]]):
+    async def compute_embeddings(texts, *args, **kwargs):
+        return [vectors[t] for t in texts], None
+
+    client = MagicMock()
+    client.compute_embeddings = AsyncMock(side_effect=compute_embeddings)
+    return client
+
+
+def _unit(vector: list[float]) -> list[float]:
+    norm = math.sqrt(sum(v * v for v in vector))
+    return [v / norm for v in vector]
+
+
+NEAR_ROWS = 2000
+FAR_ROWS = 1000
+
+
+@pytest.fixture
+async def filtered_collection(service, collection):
+    """Rows of a "near" source around the query, and a "far" source opposite.
+
+    A third of the rows are "far", which is too many for the planner to fetch
+    them through the ``source_id`` index and sort them: it walks the HNSW
+    index in distance order and filters as it goes. A plain HNSW scan stops
+    after ``ef_search`` (40) candidates, all of them "near", so a query
+    restricted to "far" comes back empty; an iterative scan keeps going.
+    With only a handful of "far" rows the planner uses the ``source_id``
+    index instead and the result is exact either way, which is why this
+    fixture is not built that way.
+    """
+    vectors = {"query": _unit([1.0] + [0.0] * (EMBEDDING_DIM - 1))}
+    texts, source_ids = [], []
+    for i in range(NEAR_ROWS):
+        noise = [((i * 7919 + d * 104729) % 1000) / 1000.0 for d in range(8)]
+        vectors[f"near {i}"] = _unit([5.0] + noise + [0.0] * (EMBEDDING_DIM - 9))
+        texts.append(f"near {i}")
+        source_ids.append("near")
+    for i in range(FAR_ROWS):
+        noise = [((i * 31 + d * 17) % 100) / 100.0 for d in range(8)]
+        vectors[f"far {i}"] = _unit([-5.0] + [0.0] * (EMBEDDING_DIM - 9) + noise)
+        texts.append(f"far {i}")
+        source_ids.append("far")
+    service.embedding_client = _vector_client(vectors)
+    for start in range(0, len(texts), 500):
+        await service.index_batch(
+            texts=texts[start : start + 500],
+            metadata_list=[{}] * len(texts[start : start + 500]),
+            source_ids=source_ids[start : start + 500],
+            collection_name=collection,
+        )
+    table = service._qualified(service.table_name_for_collection(collection))
+    async with service.session_maker() as session:
+        await session.execute(text(f"ANALYZE {table}"))
+        await session.commit()
+    yield service
+    await service.drop_collection(collection)
+
+
+@pytest.mark.asyncio
+async def test_a_filter_on_distant_rows_still_returns_top_k(
+    filtered_collection, collection
+):
+    hits = await filtered_collection.query(
+        "query", top_k=5, collection_name=collection, source_ids=["far"]
+    )
+
+    assert len(hits) == 5
+    assert {hit.source_id for hit in hits} == {"far"}
+
+
+@pytest.mark.asyncio
+async def test_without_an_iterative_scan_the_filter_comes_back_short(
+    filtered_collection, collection, monkeypatch
+):
+    """The control for the test above: the planner does use the HNSW index."""
+
+    async def no_iterative_scan(session):
+        return None
+
+    monkeypatch.setattr(filtered_collection, "_enable_filtered_scan", no_iterative_scan)
+
+    hits = await filtered_collection.query(
+        "query", top_k=5, collection_name=collection, source_ids=["far"]
+    )
+
+    assert len(hits) < 5
+
+
+@pytest.mark.asyncio
+async def test_before_pgvector_0_8_no_iterative_scan_is_requested(
+    filtered_collection, collection
+):
+    filtered_collection._pgvector_version = (0, 7, 4)
+    executed = []
+    original = filtered_collection.session_maker
+
+    @asynccontextmanager
+    async def recording_session():
+        async with original() as session:
+            execute = session.execute
+
+            async def record(statement, *args, **kwargs):
+                executed.append(str(statement))
+                return await execute(statement, *args, **kwargs)
+
+            session.execute = record
+            yield session
+
+    filtered_collection.session_maker = recording_session
+    try:
+        await filtered_collection.query(
+            "query", top_k=5, collection_name=collection, source_ids=["far"]
+        )
+    finally:
+        filtered_collection.session_maker = original
+
+    assert not any("iterative_scan" in statement for statement in executed)

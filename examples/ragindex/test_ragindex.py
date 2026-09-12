@@ -40,16 +40,18 @@ SONGS_CSV = "examples/ragindex/songs.csv"
 class FakeRag:
     """A RAG service that records calls instead of embedding anything."""
 
-    def __init__(self, results=None, existing=(), can_iter=True):
+    def __init__(self, results=None, existing=(), can_iter=True, can_replace=True):
         self.batches = []
-        self.deleted = []
+        self.replaced = []
         self.queries = []
         self._results = results or []
         self._existing = list(existing)
-        self._can_iter = can_iter
+        self._capabilities = {"iter_entries"} if can_iter else set()
+        if can_replace:
+            self._capabilities.add("replace")
 
     def supports(self, capability):
-        return capability == "iter_entries" and self._can_iter
+        return capability in self._capabilities
 
     async def iter_entries(self, collection_name, batch_size=500):
         for source_id in self._existing:
@@ -59,8 +61,11 @@ class FakeRag:
         self.batches.append((texts, metadata_list, source_ids, collection_name))
         return [{} for _ in texts]
 
-    async def delete_by_source_id(self, collection_name, source_id):
-        self.deleted.append((collection_name, list(source_id)))
+    async def replace(
+        self, collection_name, texts, metadata_list, source_ids=None, *, source_id
+    ):
+        self.replaced.append((collection_name, texts, source_ids, source_id))
+        return [{} for _ in texts]
 
     async def query(self, text, top_k, collection_name, source_ids, keep_best):
         self.queries.append((text, top_k, collection_name, source_ids, keep_best))
@@ -210,15 +215,57 @@ async def test_index_rows_batches_and_counts():
     assert [len(batch[0]) for batch in rag.batches] == [2, 2, 1]
     assert rag.batches[0][2] == ["0", "1"]
     assert rag.batches[0][3] == "songs"
-    assert rag.deleted == []
+    assert rag.replaced == []
 
 
-async def test_index_rows_replaces_the_same_source_ids_first():
+async def test_index_rows_replaces_each_source_in_one_call():
     rag = FakeRag()
-    rows = [IndexRow("7", "text", {})]
+    rows = [IndexRow("7", "a", {}), IndexRow("8", "b", {}), IndexRow("7", "c", {})]
+
+    report = await index_rows(rag, iter(rows), "songs", batch_size=3, replace=True)
+    assert report.indexed == 3
+    assert rag.replaced == [
+        ("songs", ["a", "c"], ["7", "7"], "7"),
+        ("songs", ["b"], ["8"], "8"),
+    ]
+    assert rag.batches == []
+
+
+async def test_a_source_spanning_two_batches_is_replaced_once():
+    """The second batch appends: replacing again would delete the first."""
+    rag = FakeRag()
+    rows = [IndexRow("7", "a", {}), IndexRow("8", "b", {}), IndexRow("7", "c", {})]
 
     await index_rows(rag, iter(rows), "songs", batch_size=2, replace=True)
-    assert rag.deleted == [("songs", ["7"])]
+    assert rag.replaced == [
+        ("songs", ["a"], ["7"], "7"),
+        ("songs", ["b"], ["8"], "8"),
+    ]
+    assert rag.batches == [(["c"], [{}], ["7"], "songs")]
+
+
+async def test_replace_needs_a_backend_that_can_replace():
+    with pytest.raises(ValueError, match="--replace is unavailable"):
+        await index_rows(FakeRag(can_replace=False), iter([]), "songs", replace=True)
+
+
+async def test_replace_on_a_real_index_is_idempotent(tmp_path):
+    """Re-running with --replace leaves one entry per row, not two."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    async def compute_embeddings(texts, *args, **kwargs):
+        return [[1.0, float(len(text)), 0.5] for text in texts], None
+
+    rag = make_rag_service(str(tmp_path / "index.db"), "fastembed/model", None)
+    rag.embedding_client = MagicMock()
+    rag.embedding_client.compute_embeddings = AsyncMock(side_effect=compute_embeddings)
+    rows = [IndexRow(str(i), f"text {i}", {"n": str(i)}) for i in range(5)]
+
+    for _ in range(2):
+        await index_rows(rag, iter(rows), "songs", batch_size=2, replace=True)
+
+    assert await rag.count_entries("songs") == 5
+    rag.close()
 
 
 async def test_index_rows_on_an_empty_file_indexes_nothing():

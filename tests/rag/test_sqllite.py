@@ -270,8 +270,10 @@ async def test_results_carry_the_collection_model(service_factory, tmp_path):
 
     browsing = service_factory(filename, model=None)
     assert [c["model"] for c in await browsing.list_collections()] == ["fake/model-a"]
-    with pytest.raises(ValueError, match="without an embedding model"):
-        await browsing.query("apple", collection_name="c")
+    # The collection's own model answers, so a model-less service can query.
+    assert [r.model for r in await browsing.query("apple", collection_name="c")] == [
+        "fake/model-a"
+    ]
 
     results = await service_a.query("apple", top_k=10, collection_name="c")
     assert [r.model for r in results] == ["fake/model-a"]
@@ -395,3 +397,59 @@ async def test_inherited_compute_similarity_matrix(service_factory):
     assert matrix[0][0] > matrix[0][1]  # apple closer to sid_apple than sid_banana
     assert matrix[1][1] > 0.99  # banana vs sid_banana
     assert matrix[0][2] == 0.0  # missing source
+
+
+def test_halfvec_is_a_postgres_option(service_factory):
+    with pytest.raises(ValueError, match=r"\['vector'\] embeddings, not 'halfvec'"):
+        service_factory(vector_type="halfvec")
+
+
+@pytest.mark.asyncio
+async def test_create_collection_refuses_halfvec(service_factory):
+    service = service_factory()
+    with pytest.raises(ValueError, match="not 'halfvec'"):
+        await service.create_collection("c", embedding_size=3, vector_type="halfvec")
+    assert await service.list_collections() == []
+
+
+@pytest.mark.asyncio
+async def test_metadata_keys_are_matched_whole(service_factory):
+    """A dotted key is one top-level key, not a path into nested metadata."""
+    service = service_factory()
+    await service.index_batch(
+        texts=["apple", "banana"],
+        metadata_list=[{"a.b": "x"}, {"a": {"b": "x"}}],
+        collection_name="c",
+    )
+
+    await service.delete_by_metadata("c", {"a.b": "x"})
+
+    assert [r.content for r in await service.query("banana", collection_name="c")] == [
+        "banana"
+    ]
+    assert await service.count_entries("c") == 1
+
+
+@pytest.mark.asyncio
+async def test_provision_false_on_a_new_file_creates_nothing(service_factory, tmp_path):
+    """Opening a file is not provisioning: the registry waits for DDL."""
+    filename = str(tmp_path / "runtime.db")
+    service = service_factory(filename, provision=False)
+
+    assert await service.list_collections() == []
+    conn = sqlite3.connect(filename)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master")}
+    conn.close()
+    # sqlite-vector keeps its own bookkeeping tables; Kaval.AI created none.
+    assert {name for name in tables if name.startswith("rag_")} == set()
+
+
+def test_decode_f32_blob_accepts_what_a_driver_may_return():
+    import struct
+
+    from kavalai.rag.sqllite import _decode_f32_blob
+
+    assert _decode_f32_blob(None) is None
+    assert _decode_f32_blob(struct.pack("<2f", 0.5, -1.0)) == [0.5, -1.0]
+    assert _decode_f32_blob("[0.5, -1.0]") == [0.5, -1.0]
+    assert _decode_f32_blob((0.5, -1.0)) == [0.5, -1.0]

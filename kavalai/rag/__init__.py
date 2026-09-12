@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-from typing import Optional
+from typing import Any, Optional
 
 from kavalai.db import is_sqlite_uri, sqlite_path_from_uri
 from kavalai.normalizer import Normalizer
@@ -39,18 +39,21 @@ def rag_service_from_uri(
     model: Optional[str] = None,
     schema: Optional[str] = None,
     normalizer: Optional[Normalizer] = None,
+    **options: Any,
 ) -> CollectionRagService:
     """The RAG service for a database URI, chosen by its scheme.
 
     ``postgresql://…`` gives a :class:`PostgresRagService` on the given
     ``schema``; ``sqlite:///path`` gives a :class:`SqliteRagService` on that
-    file, ``schema`` ignored. ``model`` may be omitted to browse an index
-    without embedding anything.
+    file, ``schema`` ignored. ``model`` is the model new collections are
+    created with; it may be omitted to browse or query existing collections.
+    ``options`` are passed to the service — ``provision``,
+    ``stats_receiver``, and on PostgreSQL ``vector_type``.
     """
     if is_sqlite_uri(uri):
         return SqliteRagService(
-            sqlite_path_from_uri(uri), model=model, normalizer=normalizer
+            sqlite_path_from_uri(uri), model=model, normalizer=normalizer, **options
         )
     return PostgresRagService.from_uri(
-        uri, model=model, normalizer=normalizer, schema=schema
+        uri, model=model, normalizer=normalizer, schema=schema, **options
     )

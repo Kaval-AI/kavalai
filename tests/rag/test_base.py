@@ -28,6 +28,7 @@ class InMemoryRagService(BaseRagService):
     ):
         self.canned_results = canned_results or {}
         self.query_batch_calls: list[dict] = []
+        self.deleted: list[tuple] = []
 
     async def index(
         self,
@@ -74,8 +75,10 @@ class InMemoryRagService(BaseRagService):
         )
         return [self.canned_results.get(text, [])[:top_k] for text in texts]
 
-    async def delete(self, item_id: uuid.UUID) -> None:
-        return None
+    async def delete(
+        self, item_id: uuid.UUID, collection_name: Optional[str] = None
+    ) -> None:
+        self.deleted.append((item_id, collection_name))
 
     async def delete_by_source_id(
         self,
@@ -191,3 +194,23 @@ async def test_iter_entries_is_optional_for_backends():
     service = InMemoryRagService()
     with pytest.raises(NotImplementedError, match="iter_entries"):
         service.iter_entries("docs")
+
+
+async def test_delete_many_defaults_to_one_delete_per_id():
+    service = InMemoryRagService()
+    ids = [uuid.uuid4(), uuid.uuid4()]
+
+    await service.delete_many(ids, collection_name="docs")
+
+    assert service.deleted == [(ids[0], "docs"), (ids[1], "docs")]
+
+
+async def test_metadata_deletion_and_replace_are_optional_for_backends():
+    service = InMemoryRagService()
+
+    assert not service.supports("delete_by_metadata")
+    assert not service.supports("replace")
+    with pytest.raises(NotImplementedError, match="delete_by_metadata"):
+        await service.delete_by_metadata("docs", {"page": "p1"})
+    with pytest.raises(NotImplementedError, match="replace"):
+        await service.replace("docs", ["text"], [{}], source_id="s1")

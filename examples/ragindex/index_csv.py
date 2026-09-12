@@ -247,6 +247,50 @@ async def existing_source_ids(rag: BaseRagService, collection_name: str) -> set[
     return {entry["source_id"] async for entry in rag.iter_entries(collection_name)}
 
 
+async def replace_rows(
+    rag: BaseRagService,
+    rows: list[IndexRow],
+    collection_name: str,
+    replaced: set[str],
+) -> None:
+    """Swap each source's existing entries for ``rows``, one source per call.
+
+    :meth:`~kavalai.rag.base.BaseRagService.replace` embeds first and then
+    deletes and inserts in one transaction, so a failure leaves a source's
+    old entries in place instead of deleting them with nothing to follow. It
+    selects one source at a time, which costs one embedding call per source
+    rather than per batch. A source already replaced during this run is
+    appended to, so a source whose rows span two batches keeps both.
+
+    Args:
+        rag: The RAG backend to write to.
+        rows: One batch of rows.
+        collection_name: Collection the rows belong to.
+        replaced: Source ids replaced so far in this run; updated in place.
+    """
+    appended = [row for row in rows if row.source_id in replaced]
+    groups: dict[str, list[IndexRow]] = {}
+    for row in rows:
+        if row.source_id not in replaced:
+            groups.setdefault(row.source_id, []).append(row)
+    for source_id, group in groups.items():
+        await rag.replace(
+            collection_name,
+            [row.text for row in group],
+            [row.metadata for row in group],
+            source_ids=[source_id] * len(group),
+            source_id=source_id,
+        )
+        replaced.add(source_id)
+    if appended:
+        await rag.index_batch(
+            texts=[row.text for row in appended],
+            metadata_list=[row.metadata for row in appended],
+            source_ids=[row.source_id for row in appended],
+            collection_name=collection_name,
+        )
+
+
 async def index_rows(
     rag: BaseRagService,
     rows: Iterator[IndexRow],
@@ -262,30 +306,42 @@ async def index_rows(
         rows: Rows to index, consumed lazily.
         collection_name: Collection the rows are added to.
         batch_size: How many rows are embedded per call.
-        replace: Delete any existing entries carrying the same source ids
-            first, which makes re-running the script idempotent instead of
-            doubling the collection.
+        replace: Replace any existing entries carrying the same source ids,
+            which makes re-running the script idempotent instead of doubling
+            the collection — see :func:`replace_rows`.
         skip_source_ids: Source ids to leave alone. A skipped row is never
             embedded, which is the whole point — see
             :func:`existing_source_ids`.
 
     Returns:
         IndexReport: How many rows were indexed and how many were skipped.
+
+    Raises:
+        ValueError: If ``replace`` is asked of a backend that does not
+            implement ``replace``, an optional part of
+            :class:`BaseRagService`.
     """
+    if replace and not rag.supports("replace"):
+        raise ValueError(
+            f"{type(rag).__name__} cannot replace entries, so --replace is "
+            "unavailable; use --skip-existing instead"
+        )
     report = IndexReport()
     batch: list[IndexRow] = []
+    replaced: set[str] = set()
 
     async def flush() -> None:
         if not batch:
             return
         if replace:
-            await rag.delete_by_source_id(collection_name, [r.source_id for r in batch])
-        await rag.index_batch(
-            texts=[r.text for r in batch],
-            metadata_list=[r.metadata for r in batch],
-            source_ids=[r.source_id for r in batch],
-            collection_name=collection_name,
-        )
+            await replace_rows(rag, batch, collection_name, replaced)
+        else:
+            await rag.index_batch(
+                texts=[r.text for r in batch],
+                metadata_list=[r.metadata for r in batch],
+                source_ids=[r.source_id for r in batch],
+                collection_name=collection_name,
+            )
         report.indexed += len(batch)
         logger.info(f"Indexed {report.indexed} rows into {collection_name!r}")
         batch.clear()
@@ -382,7 +438,10 @@ def build_parser() -> argparse.ArgumentParser:
     rerun.add_argument(
         "--replace",
         action="store_true",
-        help="Delete entries with the same source ids first (idempotent re-run)",
+        help=(
+            "Replace entries with the same source ids, deleting and inserting "
+            "in one transaction (idempotent re-run)"
+        ),
     )
     rerun.add_argument(
         "--skip-existing",
