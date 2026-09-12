@@ -153,6 +153,19 @@ async def test_gemini_404_in_message_not_retried():
 
 
 @pytest.mark.asyncio
+async def test_a_truncated_output_is_not_retried():
+    """The same cap cuts the same answer, and the retry would be billed."""
+    from kavalai.llm_clients.base_client import OutputTruncatedError
+
+    func, calls = make_flaky(
+        1, lambda: OutputTruncatedError(model="openai/m", reason="max_output_tokens")
+    )
+    with pytest.raises(OutputTruncatedError):
+        await with_retry(func)
+    assert calls["count"] == 1
+
+
+@pytest.mark.asyncio
 async def test_non_retriable_raises_immediately():
     func, calls = make_flaky(1, lambda: ValueError("bad"))
     with pytest.raises(ValueError):

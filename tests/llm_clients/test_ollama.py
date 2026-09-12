@@ -10,8 +10,15 @@ from kavalai.llm_clients.base_client import (
     ChatMessage,
     LlmClientParameters,
     ModelStatsReceiver,
+    OutputTruncatedError,
 )
 from kavalai.llm_clients.ollama_client import OllamaClient
+from tests.llm_clients.truncation_cases import (
+    StatsCollector,
+    streamed_text_over_the_cap_raises,
+    structured_answer_fits_the_cap,
+    structured_answer_over_the_cap_raises,
+)
 
 
 class SimpleResponse(BaseModel):
@@ -126,9 +133,65 @@ async def test_unset_parameters_send_no_options():
     [_ async for _ in streamer]
 
     assert client.client.call_kwargs["options"] == {}
+    assert "think" not in client.client.call_kwargs
     assert client.client.call_kwargs["messages"] == [
         {"role": "user", "content": "Say 'Hello'"}
     ]
+
+
+@pytest.mark.asyncio
+async def test_the_output_cap_is_sent_as_num_predict():
+    client = make_client(
+        chunks=[{"message": {"content": "hi"}}, {"done": True}],
+        parameters=LlmClientParameters(max_output_tokens=300),
+    )
+
+    await client.chat_completions(chat_history=USER_HISTORY)
+
+    assert client.client.call_kwargs["options"] == {"num_predict": 300}
+
+
+@pytest.mark.parametrize(
+    ("effort", "think"), [("high", "high"), ("low", "low"), ("none", False)]
+)
+@pytest.mark.asyncio
+async def test_reasoning_effort_is_sent_as_think(effort, think):
+    client = make_client(
+        chunks=[{"message": {"content": "hi"}}, {"done": True}],
+        parameters=LlmClientParameters(reasoning_effort=effort),
+    )
+
+    await client.chat_completions(chat_history=USER_HISTORY)
+
+    assert client.client.call_kwargs["think"] == think
+
+
+@pytest.mark.asyncio
+async def test_a_stop_at_the_length_limit_raises_and_is_recorded():
+    stats_receiver = CollectingStats()
+    client = make_client(
+        chunks=[
+            {"message": {"content": '{"answer": "Pa'}},
+            {
+                "done": True,
+                "done_reason": "length",
+                "prompt_eval_count": 7,
+                "eval_count": 16,
+            },
+        ],
+        parameters=LlmClientParameters(max_output_tokens=16),
+        stats_receiver=stats_receiver,
+    )
+
+    with pytest.raises(OutputTruncatedError) as caught:
+        await client.chat_completions(
+            chat_history=USER_HISTORY, response_model=SimpleResponse
+        )
+
+    assert (caught.value.reason, caught.value.max_output_tokens) == ("length", 16)
+    assert caught.value.partial_output == '{"answer": "Pa'
+    (stat,) = stats_receiver.stats
+    assert (stat.prompt_tokens, stat.completion_tokens) == (7, 16)
 
 
 @pytest.mark.asyncio
@@ -191,6 +254,42 @@ def ollama_client(model_name):
     if not is_ollama_running():
         pytest.skip("OLLAMA_HOST not set or Ollama service not reachable")
     return OllamaClient(model=model_name)
+
+
+@pytest.fixture
+def reachable_ollama():
+    if not is_ollama_running():
+        pytest.skip("OLLAMA_HOST not set or Ollama service not reachable")
+
+
+def real_client(stats, **parameters):
+    return OllamaClient(
+        model="llama3.2:1b",
+        llm_client_parameters=LlmClientParameters(timeout_seconds=60.0, **parameters),
+        model_stats_receiver=stats,
+    )
+
+
+@requires_ollama
+async def test_ollama_structured_answer_within_a_generous_cap(reachable_ollama):
+    stats = StatsCollector()
+    client = real_client(stats, max_output_tokens=1024)
+    await structured_answer_fits_the_cap(client, stats, cap=1024)
+
+
+@requires_ollama
+async def test_ollama_structured_answer_over_the_cap_raises(reachable_ollama):
+    stats = StatsCollector()
+    client = real_client(stats, max_output_tokens=40)
+    error = await structured_answer_over_the_cap_raises(client, stats, cap=40)
+    assert error.reason == "length"
+
+
+@requires_ollama
+async def test_ollama_streamed_text_over_the_cap_raises(reachable_ollama):
+    stats = StatsCollector()
+    client = real_client(stats, max_output_tokens=40)
+    await streamed_text_over_the_cap_raises(client, stats, cap=40)
 
 
 @requires_ollama

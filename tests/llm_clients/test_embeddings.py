@@ -5,11 +5,17 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from openai.types import CreateEmbeddingResponse, Embedding
+from openai.types.create_embedding_response import Usage
 
 from kavalai.db import ModelCallStat
 from kavalai.llm_clients import browser_client
 from kavalai.llm_clients import embeddings as emb
 from kavalai.llm_clients.base_client import LlmClientException
+from kavalai.llm_clients.registry import (
+    embedding_providers,
+    register_embedding_provider,
+)
 from kavalai.llm_clients.embeddings import (
     BaseEmbeddingClient,
     BrowserEmbeddingClient,
@@ -57,16 +63,28 @@ def test_base_client_not_implemented():
         asyncio.run(BaseEmbeddingClient("m").compute_embeddings(["a"]))
 
 
-async def test_openai_embeddings(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "k")
-    client = OpenAIEmbeddingClient("text-embedding-3-small")
-    response = SimpleNamespace(
-        data=[SimpleNamespace(embedding=[0.1, 0.2])],
-        usage=SimpleNamespace(total_tokens=7),
-        model_dump=lambda: {"ok": True},
+def openai_embedding_response(*vectors, tokens=7):
+    """A real ``CreateEmbeddingResponse``, as the OpenAI SDK returns it."""
+    return CreateEmbeddingResponse(
+        data=[
+            Embedding(embedding=vector, index=i, object="embedding")
+            for i, vector in enumerate(vectors)
+        ],
+        model="text-embedding-3-small",
+        object="list",
+        usage=Usage(prompt_tokens=tokens, total_tokens=tokens),
     )
+
+
+def openai_client_returning(response, **init):
+    client = OpenAIEmbeddingClient("text-embedding-3-small", api_key="k", **init)
     client.client = MagicMock()
     client.client.embeddings.create = AsyncMock(return_value=response)
+    return client
+
+
+async def test_openai_embeddings():
+    client = openai_client_returning(openai_embedding_response([0.1, 0.2]))
 
     vectors, stats = await client.compute_embeddings(["hello"])
     assert vectors == [[0.1, 0.2]]
@@ -74,6 +92,49 @@ async def test_openai_embeddings(monkeypatch):
     assert stats.call_type == "embedding"
     assert stats.model == "openai/text-embedding-3-small"
     assert stats.total_tokens == 7
+
+
+async def test_openai_embedding_stats_keep_model_and_usage_but_no_vectors():
+    """The vectors are the result; stored in the stats row they doubled it."""
+    client = openai_client_returning(
+        openai_embedding_response([0.1, 0.2], [0.3, 0.4], tokens=9)
+    )
+
+    _, stats = await client.compute_embeddings(["a", "b"])
+
+    assert stats.response_data == {
+        "model": "text-embedding-3-small",
+        "usage": {"prompt_tokens": 9, "total_tokens": 9},
+    }
+
+
+async def test_openai_dimensions_are_sent_only_when_set():
+    unset = openai_client_returning(openai_embedding_response([0.1]))
+    await unset.compute_embeddings(["a"])
+    assert "dimensions" not in unset.client.embeddings.create.call_args.kwargs
+
+    reduced = openai_client_returning(openai_embedding_response([0.1]), dimensions=256)
+    await reduced.compute_embeddings(["a"])
+    assert reduced.client.embeddings.create.call_args.kwargs["dimensions"] == 256
+
+
+async def test_a_registered_reduced_model_reaches_the_provider():
+    """``dimensions`` bound at registration names the reduced model."""
+    register_embedding_provider("openai-512", OpenAIEmbeddingClient, dimensions=512)
+    try:
+        client = make_embedding_client("openai-512/text-embedding-3-small", api_key="k")
+    finally:
+        embedding_providers.unregister("openai-512")
+    client.client = MagicMock()
+    client.client.embeddings.create = AsyncMock(
+        return_value=openai_embedding_response([0.1])
+    )
+
+    await client.compute_embeddings(["a"])
+
+    assert isinstance(client, OpenAIEmbeddingClient)
+    sent = client.client.embeddings.create.call_args.kwargs
+    assert (sent["model"], sent["dimensions"]) == ("text-embedding-3-small", 512)
 
 
 def test_maybe_normalize_passes_through_when_disabled():
@@ -87,16 +148,8 @@ def test_maybe_normalize_falls_back_to_the_default_normalizer():
     assert len(result[0]) == 2
 
 
-async def test_openai_embeddings_normalized(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "k")
-    client = OpenAIEmbeddingClient("text-embedding-3-small")
-    response = SimpleNamespace(
-        data=[SimpleNamespace(embedding=[3.0, 4.0])],
-        usage=SimpleNamespace(total_tokens=1),
-        model_dump=lambda: {},
-    )
-    client.client = MagicMock()
-    client.client.embeddings.create = AsyncMock(return_value=response)
+async def test_openai_embeddings_normalized():
+    client = openai_client_returning(openai_embedding_response([3.0, 4.0]))
 
     vectors, _ = await client.compute_embeddings(
         ["x"], normalize=True, normalizer=Normalizer(l2=True)
@@ -120,6 +173,20 @@ async def test_gemini_embeddings(monkeypatch):
     vectors, stats = await client.compute_embeddings(["hi"])
     assert vectors == [[0.5, 0.6]]
     assert stats.model == "gemini/text-embedding-004"
+    assert client.client.aio.models.embed_content.call_args.kwargs["config"] == {}
+
+
+async def test_gemini_dimensions_are_sent_as_output_dimensionality():
+    client = GeminiEmbeddingClient("gemini-embedding-001", api_key="k", dimensions=768)
+    response = SimpleNamespace(embeddings=[SimpleNamespace(values=[0.5])])
+    client.client = MagicMock()
+    client.client.aio.models.embed_content = AsyncMock(return_value=response)
+
+    await client.compute_embeddings(["hi"], task_type="RETRIEVAL_QUERY")
+
+    config = client.client.aio.models.embed_content.call_args.kwargs["config"]
+    assert config.output_dimensionality == 768
+    assert config.task_type == "RETRIEVAL_QUERY"
 
 
 async def test_ollama_embeddings():
@@ -170,6 +237,13 @@ def test_fastembed_get_model_lazy(monkeypatch):
     second = client._get_model()
     assert first is second
     assert created and created[0]["model_name"] == "m"
+
+
+def test_fastembed_missing_names_the_extra_to_install(monkeypatch):
+    monkeypatch.setitem(sys.modules, "fastembed", None)
+
+    with pytest.raises(ImportError, match=r'pip install "kavalai\[fastembed\]"'):
+        FastEmbedClient("BAAI/bge-small-en-v1.5")._get_model()
 
 
 class FakeEmbedBridge:

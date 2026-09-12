@@ -1,6 +1,7 @@
 import pytest
 
 from kavalai.workflow import clients
+from kavalai.workflow.models import WorkflowException
 from kavalai.llm_clients.anthropic_client import AnthropicClient
 from kavalai.llm_clients.base_client import LlmClientParameters
 from kavalai.llm_clients.browser_client import BrowserLLMClient
@@ -9,13 +10,45 @@ from kavalai.llm_clients.ollama_client import OllamaClient
 from kavalai.llm_clients.openai_client import OpenAIClient
 
 
-def test_build_parameters_filters_unknown():
+def test_build_parameters_maps_every_known_key():
     params = clients.build_parameters(
-        {"temperature": 0.3, "top_p": 0.9, "unknown_key": "ignored"}
+        {"temperature": 0.3, "top_p": 0.9, "max_output_tokens": 512}
     )
     assert isinstance(params, LlmClientParameters)
     assert params.temperature == 0.3
     assert params.top_p == 0.9
+    assert params.max_output_tokens == 512
+
+
+@pytest.mark.parametrize(
+    "key", ["max_tokens", "max_completion_tokens", "num_predict", "max_new_tokens"]
+)
+def test_a_provider_name_for_the_cap_points_at_max_output_tokens(key):
+    with pytest.raises(WorkflowException) as caught:
+        clients.build_parameters({key: 256})
+
+    assert str(caught.value).startswith(
+        f"Unknown llm_kwargs key '{key}' (did you mean 'max_output_tokens'?). "
+        "Valid keys: max_output_tokens, reasoning_effort, service_tier, "
+        "stream_timeout_seconds, temperature, timeout_seconds, top_p."
+    )
+
+
+def test_a_misspelled_key_suggests_the_closest_parameter():
+    with pytest.raises(
+        WorkflowException, match="'temprature' \\(did you mean 'temperature'\\?\\)"
+    ):
+        clients.build_parameters({"temprature": 0.2})
+
+
+def test_unknown_keys_are_all_named_and_unrelated_ones_get_no_hint():
+    with pytest.raises(WorkflowException) as caught:
+        clients.build_parameters({"seed": 7, "max_tokens": 9, "temperature": 0})
+
+    assert str(caught.value).startswith(
+        "Unknown llm_kwargs keys 'max_tokens' (did you mean "
+        "'max_output_tokens'?), 'seed'. Valid keys: "
+    )
 
 
 def test_build_parameters_none():

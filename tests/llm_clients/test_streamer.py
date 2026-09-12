@@ -227,6 +227,36 @@ async def test_streamer_restart_passes_through_and_reset_active():
     assert contents[-1].type == "complete"
 
 
+class ClientError(RuntimeError):
+    """Stands in for a client's own exception type."""
+
+
+@pytest.mark.asyncio
+async def test_a_runtime_error_reaches_the_consumer_as_itself():
+    """A client's exception type survives the queue, so it can be caught."""
+    streamer = Streamer()
+    error = ClientError("cut off at the cap")
+    await streamer.stream_error(error)
+
+    with pytest.raises(ClientError) as caught:
+        async for _ in streamer:
+            pass
+
+    assert caught.value is error
+
+
+@pytest.mark.asyncio
+async def test_other_errors_reach_the_consumer_as_runtime_errors():
+    streamer = Streamer()
+    await streamer.stream_error(ValueError("provider exploded"))
+
+    with pytest.raises(RuntimeError, match="provider exploded") as caught:
+        async for _ in streamer:
+            pass
+
+    assert type(caught.value) is RuntimeError
+
+
 @pytest.mark.asyncio
 async def test_streamer_stale_complete_after_reset_is_harmless():
     """A streamer completing after reset_active() dropped its name must not

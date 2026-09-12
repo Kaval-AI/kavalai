@@ -19,7 +19,7 @@ import json
 import time
 from typing import Any, Optional, Type, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from loguru import logger
 
 from kavalai.llm_clients.streamer import Streamer
@@ -32,12 +32,20 @@ class LlmClientParameters(BaseModel):
     Sampling parameters default to ``None`` and are only sent to a provider
     when explicitly set, so each provider's own defaults apply otherwise
     (some models, e.g. recent Claude models, reject sampling params outright).
+
+    ``max_output_tokens`` caps the tokens a call may generate. Each client
+    sends it under its provider's own name (``max_output_tokens`` for OpenAI
+    and Gemini, ``max_tokens`` for Anthropic and WebLLM, ``num_predict`` for
+    Ollama). On reasoning models the cap includes the reasoning tokens. A call
+    that reaches the cap raises :class:`OutputTruncatedError` rather than
+    returning the partial answer.
     """
 
     temperature: Optional[float] = None
     top_p: Optional[float] = None
     reasoning_effort: Optional[str] = None
     service_tier: Optional[str] = None
+    max_output_tokens: Optional[int] = Field(default=None, gt=0)
     timeout_seconds: Optional[float] = 30.0
     # Inter-chunk inactivity timeout for streaming consumers. When unset,
     # ``stream_chat_completions`` uses 2 x timeout_seconds so the stream survives
@@ -136,6 +144,89 @@ def error_status_code(error: Exception) -> Optional[int]:
     response = getattr(error, "response", None)
     status = getattr(response, "status_code", None)
     return status if isinstance(status, int) else None
+
+
+class LlmClientException(RuntimeError):
+    """An error the LLM clients raise themselves, as opposed to a provider SDK."""
+
+
+class OutputTruncatedError(LlmClientException):
+    """The provider stopped generating because the output cap was reached.
+
+    Raised in place of the partial answer. For a structured call that answer
+    is JSON cut off mid-value, which either fails to parse or, after lenient
+    repair, validates into a model with content missing. The retry loop does
+    not retry it: the same cap produces the same cut, and is billed again.
+
+    ``max_output_tokens`` is the cap that was sent, or ``None`` when the
+    provider's own limit applied. ``reason`` is the stop reason as the provider
+    reported it (``max_output_tokens``, ``MAX_TOKENS``, ``max_tokens``,
+    ``length``). ``partial_output`` is the text generated before the cut, and
+    the token counts are those of the truncated call, which is recorded as a
+    model call like any other because it was billed.
+    """
+
+    def __init__(
+        self,
+        *,
+        model: str,
+        reason: str,
+        max_output_tokens: Optional[int] = None,
+        partial_output: str = "",
+        request_data: Any = None,
+        prompt_tokens: Optional[int] = None,
+        completion_tokens: Optional[int] = None,
+        cached_prompt_tokens: Optional[int] = None,
+        reasoning_tokens: Optional[int] = None,
+    ):
+        self.model = model
+        self.reason = reason
+        self.max_output_tokens = max_output_tokens
+        self.partial_output = partial_output
+        self.request_data = request_data
+        self.prompt_tokens = prompt_tokens
+        self.completion_tokens = completion_tokens
+        self.cached_prompt_tokens = cached_prompt_tokens
+        self.reasoning_tokens = reasoning_tokens
+        super().__init__(self._describe())
+
+    def _describe(self) -> str:
+        if self.max_output_tokens is None:
+            limit = "the provider's default output limit"
+        else:
+            limit = f"the output cap of {self.max_output_tokens} tokens"
+        spent = ""
+        if self.completion_tokens is not None:
+            spent = f" after {self.completion_tokens} output tokens"
+            if self.reasoning_tokens:
+                spent += f", {self.reasoning_tokens} of them reasoning"
+        message = (
+            f"The output of '{self.model}' was cut off at {limit}{spent} "
+            f"(stop reason '{self.reason}')."
+        )
+        if not self.partial_output:
+            message += " No visible output was produced before the cut."
+        return (
+            f"{message} The partial output is not returned. Raise "
+            "max_output_tokens (LlmClientParameters, or llm_kwargs in a "
+            "workflow) or ask for a shorter answer."
+        )
+
+
+def _truncated_call_fields(error: OutputTruncatedError) -> dict:
+    """The :class:`ModelCallStat` fields a truncated call adds to a failure row."""
+    fields = {
+        "request_data": json.dumps(error.request_data, default=str),
+        "prompt_tokens": error.prompt_tokens,
+        "completion_tokens": error.completion_tokens,
+        "cached_prompt_tokens": error.cached_prompt_tokens,
+        "reasoning_tokens": error.reasoning_tokens,
+    }
+    if error.prompt_tokens is not None and error.completion_tokens is not None:
+        fields["total_tokens"] = error.prompt_tokens + error.completion_tokens
+    if error.partial_output:
+        fields["response_data"] = f"{error}\n\n{error.partial_output}"
+    return fields
 
 
 class BaseLlmClient:
@@ -294,22 +385,51 @@ class BaseLlmClient:
         return f"{self.provider}/{model}" if self.provider else model
 
     async def _record_failed_call(self, error: Exception, duration: float) -> None:
-        """Record an attempt that never produced a response.
+        """Record an attempt that never produced a usable response.
 
         Successful calls were the only ones ever written, so the Model Calls
         table showed a suspiciously healthy service: a provider outage or a
-        rate-limit storm left no trace at all. There are no token counts to
-        report for a failed attempt, so the row carries the status code and the
-        error text.
+        rate-limit storm left no trace at all. A failed attempt has no token
+        counts, so the row carries the status code and the error text.
+
+        A truncated call is the exception: the provider generated and billed
+        its output, so the row also carries the request, the token counts and
+        the partial output. It has no status code, which is what marks it as
+        failed.
         """
-        await self._send_model_call_stats(
-            ModelCallStat(
-                call_type="llm",
-                model=self.stat_model_name(),
-                response_code=error_status_code(error),
-                response_data=str(error),
-                duration_seconds=duration,
-            )
+        stat = ModelCallStat(
+            call_type="llm",
+            model=self.stat_model_name(),
+            response_code=error_status_code(error),
+            response_data=str(error),
+            duration_seconds=duration,
+        )
+        if isinstance(error, OutputTruncatedError):
+            stat = stat.model_copy(update=_truncated_call_fields(error))
+        await self._send_model_call_stats(stat)
+
+    def _output_truncated(
+        self,
+        reason: str,
+        partial_output: str,
+        *,
+        max_output_tokens: Optional[int] = None,
+        **details: Any,
+    ) -> OutputTruncatedError:
+        """Build the error for a call the provider cut off at the output cap.
+
+        ``max_output_tokens`` defaults to the cap in the client parameters;
+        a client that sends a cap of its own (Anthropic's required default)
+        passes it. ``details`` are ``request_data`` and the token counts.
+        """
+        if max_output_tokens is None:
+            max_output_tokens = self.parameters.max_output_tokens
+        return OutputTruncatedError(
+            model=self.stat_model_name(),
+            reason=reason,
+            max_output_tokens=max_output_tokens,
+            partial_output=partial_output,
+            **details,
         )
 
     async def _record_completed_call(
@@ -362,7 +482,3 @@ class BaseLlmClient:
         subclasses override it.
         """
         raise NotImplementedError("Subclasses must implement _run_chat_completions")
-
-
-class LlmClientException(RuntimeError):
-    pass

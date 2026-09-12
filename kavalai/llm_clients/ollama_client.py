@@ -79,11 +79,14 @@ class OllamaClient(BaseLlmClient):
             for msg in ensure_user_turn(chat_history.messages)
         ]
 
+        params = self.parameters
         options = {}
-        if self.parameters.temperature is not None:
-            options["temperature"] = self.parameters.temperature
-        if self.parameters.top_p is not None:
-            options["top_p"] = self.parameters.top_p
+        if params.temperature is not None:
+            options["temperature"] = params.temperature
+        if params.top_p is not None:
+            options["top_p"] = params.top_p
+        if params.max_output_tokens is not None:
+            options["num_predict"] = params.max_output_tokens
 
         call_kwargs = {
             "model": self.model,
@@ -91,6 +94,13 @@ class OllamaClient(BaseLlmClient):
             "stream": True,
             "options": options,
         }
+        if params.reasoning_effort is not None:
+            # `think` takes a boolean or, on models that grade it, "low",
+            # "medium" or "high". "none" is the one effort name that means
+            # off; any other value goes out as given for Ollama to judge.
+            call_kwargs["think"] = (
+                False if params.reasoning_effort == "none" else params.reasoning_effort
+            )
 
         if response_model:
             # Ollama takes a full JSON Schema here (since v0.5). The older
@@ -100,6 +110,7 @@ class OllamaClient(BaseLlmClient):
 
         prompt_tokens = 0
         completion_tokens = 0
+        done_reason = None
         full_response = ""
 
         # Errors propagate: the caller's background task turns them into an
@@ -113,6 +124,16 @@ class OllamaClient(BaseLlmClient):
             if chunk.get("done"):
                 prompt_tokens = chunk.get("prompt_eval_count", 0)
                 completion_tokens = chunk.get("eval_count", 0)
+                done_reason = chunk.get("done_reason")
+
+        if done_reason == "length":
+            raise self._output_truncated(
+                done_reason,
+                full_response,
+                request_data=call_kwargs,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+            )
 
         await value_streamer.stream_complete()
         await self._record_completed_call(

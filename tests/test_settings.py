@@ -33,6 +33,7 @@ def test_values_are_parsed_to_the_parameter_type():
             "KAVALAI_LLM_TOP_P": "0.9",
             "KAVALAI_LLM_REASONING_EFFORT": "low",
             "KAVALAI_LLM_SERVICE_TIER": "flex",
+            "KAVALAI_LLM_MAX_OUTPUT_TOKENS": "2048",
             "KAVALAI_LLM_TIMEOUT_SECONDS": "45",
             "KAVALAI_LLM_STREAM_TIMEOUT_SECONDS": "90",
         }
@@ -42,10 +43,12 @@ def test_values_are_parsed_to_the_parameter_type():
         "top_p": 0.9,
         "reasoning_effort": "low",
         "service_tier": "flex",
+        "max_output_tokens": 2048,
         "timeout_seconds": 45.0,
         "stream_timeout_seconds": 90.0,
     }
     assert build_parameters(parameters).temperature == 0.2
+    assert build_parameters(parameters).max_output_tokens == 2048
 
 
 def test_a_value_that_does_not_parse_fails_at_start_up():
@@ -53,6 +56,13 @@ def test_a_value_that_does_not_parse_fails_at_start_up():
         ValueError, match="KAVALAI_LLM_TEMPERATURE='warm' is not a float"
     ):
         llm_parameters_from_env({"KAVALAI_LLM_TEMPERATURE": "warm"})
+
+
+def test_an_output_cap_that_is_not_a_whole_number_fails_at_start_up():
+    with pytest.raises(
+        ValueError, match="KAVALAI_LLM_MAX_OUTPUT_TOKENS='2k' is not an int"
+    ):
+        llm_parameters_from_env({"KAVALAI_LLM_MAX_OUTPUT_TOKENS": "2k"})
 
 
 def test_the_process_environment_is_the_default(monkeypatch):

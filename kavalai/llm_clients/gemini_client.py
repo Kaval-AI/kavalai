@@ -102,11 +102,16 @@ class GeminiClient(BaseLlmClient):
             if service_tier in _SERVICE_TIERS:
                 config_kwargs["service_tier"] = _SERVICE_TIERS[service_tier]
                 logger.info(f"Gemini Service Tier: {service_tier.upper()}")
+        if params.max_output_tokens is not None:
+            config_kwargs["max_output_tokens"] = params.max_output_tokens
         if params.reasoning_effort is not None:
-            # Gemini has no effort levels here; any setting turns on streamed
-            # thoughts, delivered on the "thought" value streamer below.
+            # Gemini 3 models take the effort as `thinking_level` (minimal,
+            # low, medium, high); any other value goes out as given for the
+            # API to reject. The thoughts themselves are streamed on the
+            # "thought" value streamer below.
             config_kwargs["thinking_config"] = types.ThinkingConfig(
                 include_thoughts=True,
+                thinking_level=params.reasoning_effort,
             )
 
         if system_instruction:
@@ -128,6 +133,7 @@ class GeminiClient(BaseLlmClient):
         completion_tokens = 0
         cached_prompt_tokens = None
         reasoning_tokens = None
+        finish_reason = None
         full_response = ""
 
         try:
@@ -138,6 +144,8 @@ class GeminiClient(BaseLlmClient):
             ):
                 if chunk.candidates:
                     candidate = chunk.candidates[0]
+                    if candidate.finish_reason is not None:
+                        finish_reason = candidate.finish_reason
                     if candidate.content and candidate.content.parts:
                         for part in candidate.content.parts:
                             if part.thought:
@@ -148,8 +156,9 @@ class GeminiClient(BaseLlmClient):
                                 await value_streamer.stream_partial(part.text)
                 if chunk.usage_metadata:
                     usage = chunk.usage_metadata
-                    prompt_tokens = usage.prompt_token_count
-                    completion_tokens = usage.candidates_token_count
+                    prompt_tokens = usage.prompt_token_count or 0
+                    # Absent when the cap is spent on thoughts alone.
+                    completion_tokens = usage.candidates_token_count or 0
                     # Context cache hits and "thinking" tokens, when reported.
                     cached_prompt_tokens = getattr(
                         usage, "cached_content_token_count", None
@@ -159,22 +168,34 @@ class GeminiClient(BaseLlmClient):
             logger.error(f"Gemini Stream Error: {e}")
             raise
 
+        request_data = {
+            "model": self.model,
+            "contents": [str(c) for c in contents],
+            "config": config_kwargs,
+        }
+        usage_counts = {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "cached_prompt_tokens": cached_prompt_tokens,
+            "reasoning_tokens": reasoning_tokens,
+        }
+        if finish_reason == types.FinishReason.MAX_TOKENS:
+            raise self._output_truncated(
+                finish_reason.value,
+                full_response,
+                request_data=request_data,
+                **usage_counts,
+            )
+
         await value_streamer.stream_complete()
         if thought_streamer:
             await thought_streamer.stream_complete()
 
         await self._record_completed_call(
-            request_data={
-                "model": self.model,
-                "contents": [str(c) for c in contents],
-                "config": config_kwargs,
-            },
+            request_data=request_data,
             response_data=full_response,
             started=start_time,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            cached_prompt_tokens=cached_prompt_tokens,
-            reasoning_tokens=reasoning_tokens,
+            **usage_counts,
         )
 
 
