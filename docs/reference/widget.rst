@@ -64,8 +64,8 @@ that the connector and the server speak the same protocol:
 
 .. code-block:: text
 
-   https://cdn.jsdelivr.net/gh/Kaval-AI/kaval.ai@v1.1.0/kavalai/widget/kaval-chatbot.js
-   https://cdn.jsdelivr.net/gh/Kaval-AI/kaval.ai@v1.1.0/kavalai/widget/kaval-chatbot.css
+   https://cdn.jsdelivr.net/gh/Kaval-AI/kavalai@v1.0.4/kavalai/widget/kaval-chatbot.js
+   https://cdn.jsdelivr.net/gh/Kaval-AI/kavalai@v1.0.4/kavalai/widget/kaval-chatbot.css
 
 A branch name in place of the tag would change the files under the page with
 every commit. The widget is not published to npm: a second release process
