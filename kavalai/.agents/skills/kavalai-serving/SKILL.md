@@ -84,6 +84,16 @@ Lifecycle events (`workflow_started`, `node_started`, `node_completed`,
 only comes from nodes that opted in with `stream_output` — see
 `kavalai-workflows`.
 
+**The stream carries the operator's view by default:** a failed run's error
+text (which can quote a provider's message), token usage and every node's name.
+For a server that people other than the operator reach, serve it through
+`kavalai.server.public_events` — `create_agent_router(engine, ...,
+event_filter=public_events)`, or `KAVALAI_AGENT_PUBLIC_EVENTS=true` under
+`python -m kavalai.server`. It drops node events, token usage and restart
+reasons, and replaces a failure's text with a fixed message quoting the run
+id. Which nodes stream content is still the workflow's `stream_output`.
+`KAVALAI_AGENT_RUN_TIMEOUT_SECONDS` bounds a run's duration.
+
 ## Calling it from Python
 
 ```python
@@ -140,6 +150,13 @@ the lifespan hook — one engine serves many concurrent runs. `create_agent_app`
 does the same for a standalone app; `create_app_from_env_conf` is what
 `python -m kavalai.server` calls.
 
+A route of your own — with admission checks the router cannot know — returns
+`sse_response(engine.run_stream(...), event_filter=..., headers=...)` and types
+its body as `AgentRequest[MyInput]`, both from `kavalai.server`, so the frames,
+keepalive and headers stay the SDK's. There is no per-request engine resolver:
+the router's typed schema comes from one engine's graph, and `AgentClient` /
+`kavalai-eval` discover it from OpenAPI.
+
 ## Authentication
 
 Basic auth is enabled by setting **both** `KAVALAI_AGENT_BASIC_AUTH_USER` and
@@ -173,6 +190,29 @@ python -m kavalai.migrate_db backoffice   # backoffice tables: KAVALAI_BO_DB_URI
 
 The two schemas are independent and may share a Postgres instance (`agents` and
 `backoffice` by convention) or live apart.
+
+They run over the runtime's own async driver — `postgresql://` on asyncpg,
+`sqlite://` on aiosqlite — so `kavalai[runtime]` is all a migration step needs.
+**psycopg2 is not a dependency**; do not add it for migrations. A URI that
+names a sync driver (`postgresql+psycopg2://`) is still run on that driver if
+it is installed.
+
+To apply the sets inside an application's own migration step, pass the open
+connection instead of a URI. The set joins that connection's transaction and
+the caller commits it:
+
+```python
+from kavalai.migrate_db import migrate, migrate_async
+
+with engine.begin() as connection:                 # sync Connection
+    migrate("agents", connection=connection, schema="agents")
+
+async with async_engine.begin() as connection:     # inside an event loop
+    await migrate_async("agents", connection=connection, schema="agents")
+```
+
+`migrate()` refuses to run inside a running event loop; await `migrate_async`
+there (it also takes `uri=`).
 
 If you extend the schema yourself, three rules matter:
 
@@ -219,6 +259,50 @@ enough that a derived total would be wrong rather than merely stale. Do not add
 one; compute cost outside, from the token columns
 (`cached_prompt_tokens` and `reasoning_tokens` are there).
 
+**Every model call row carries `agent_id`, `session_id` and `run_id`** —
+indexed, without foreign keys — so cost per run or per conversation is a
+`GROUP BY` over `model_call_stats`, or
+`service.get_model_call_stats(run_id=…)` / `session_id=…`. The ids come from
+the run's `TokenAccumulator`. A client or RAG service used *outside* a run
+records nothing unless it is given
+`StatsBridge(task_logger, agent_id, session_id=…, run_id=…)` as its stats
+receiver.
+
+**Recording less is an explicit option, never a silent default.** Every task
+logger takes `record_nodes=False` (no `tasks` rows; model calls still recorded)
+and `record_payloads=False` (no node `inputs`/`output`/`prompt`, no call
+`request_data`/`response_data`; names, timings, errors and tokens stay).
+`max_payload_bytes` (256 KiB) caps node *and* model-call payloads.
+`WorkflowEngine(..., record_context=False)` keeps only the input and the output
+in `runs.context`. A call's `request_data` is the whole prompt — history and
+retrieved passages — a second copy of the transcript.
+
+```python
+tasklog = PostgresTaskLogger(service, record_payloads=False)
+engine = WorkflowEngine.from_yaml_path(
+    path, agent_service=service, task_logger=tasklog, record_context=False
+)
+```
+
+**A custom logger implements `write_node` and `write_model_call`** (they were
+`_log_node_impl` / `_log_model_call_impl`; the old names are gone). To keep the
+database rows as well, compose — `TeeTaskLogger(PostgresTaskLogger(service),
+meter)` — rather than subclass `PostgresTaskLogger`.
+
+**Retention is `purge_sessions`.** `sessions.updated_at` is the time of the
+last run, and
+
+```python
+async for ids in service.purge_sessions(cutoff, agent_ids=None, batch_size=1000):
+    ...  # delete your own rows keyed by these session ids
+```
+
+deletes sessions idle since before `cutoff`, one transaction per batch. Runs,
+tasks and chat messages go by cascade; model calls stay with their token counts
+and their payloads set to NULL. `agent_ids=[]` purges nothing.
+`service.list_sessions(agent_ids, …)` is the matching reader (most recently
+active first, with counts and first/last message).
+
 ## Docker
 
 ```bash
@@ -230,8 +314,11 @@ docker compose up postgres_db backoffice-migrations backoffice   # UI on :8000
 `torproxy` services. The agent server is not in it: build
 `dockerfiles/agent.Dockerfile` and run the image with the entrypoint mode
 `agent-migrations` (needs `KAVALAI_DB_URI`, `KAVALAI_DB_SCHEMA`) and then
-`agent-server` (additionally `KAVALAI_AGENT_WORKFLOW_PATH`). The backoffice
-image (`dockerfiles/backoffice.Dockerfile`) takes `backoffice-migrations` and
+`agent-server` (additionally `KAVALAI_AGENT_WORKFLOW_PATH`). The agent image
+installs `kavalai[runtime]` only; a workflow that embeds locally or uses the
+bundled web tools needs `--build-arg EXTRAS=runtime,fastembed` (or
+`webtools`). The backoffice image (`dockerfiles/backoffice.Dockerfile`)
+installs `runtime,backoffice`, takes `backoffice-migrations` and
 `backoffice-server` the same way, and needs `KAVALAI_BO_DB_URI` and
 `KAVALAI_BO_DB_SCHEMA`.
 

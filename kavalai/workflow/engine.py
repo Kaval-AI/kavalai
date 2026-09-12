@@ -21,6 +21,7 @@ name anything.
 
 import asyncio
 import importlib
+import inspect
 import itertools
 import json
 import time
@@ -53,6 +54,7 @@ from kavalai.workflow.models import (
     WorkflowException,
     WorkflowGraph,
     WorkflowStreamEvent,
+    WorkflowTimeoutError,
 )
 from kavalai.agent_service import AgentService
 from kavalai.workflow.state import WorkflowState
@@ -128,6 +130,81 @@ def _tool_short_name(tool_uri: str) -> str:
     return rest or tool_uri
 
 
+def _accepts_keyword(func: Callable, name: str) -> bool:
+    """Whether ``func`` takes ``name`` as a keyword argument.
+
+    A ``rag_query`` node hands the run's stats receiver to the services that
+    take one. A service written against the older interface keeps working; its
+    embedding calls are simply not attributed to the run.
+    """
+    try:
+        parameters = inspect.signature(func).parameters
+    except (TypeError, ValueError):  # pragma: no cover - builtins only
+        return False
+    return name in parameters or any(
+        p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters.values()
+    )
+
+
+def _hit_summary(hit: Any) -> dict:
+    """A retrieved hit as recorded on the task row and the node event."""
+    return {
+        "id": str(hit.id),
+        "source_id": hit.source_id,
+        "similarity": hit.similarity,
+        "metadata": to_plain(hit.rag_metadata),
+    }
+
+
+async def _within_deadline(
+    events: AsyncGenerator[WorkflowStreamEvent, None], seconds: Optional[float]
+) -> AsyncGenerator[WorkflowStreamEvent, None]:
+    """Relay ``events``, cancelling them once ``seconds`` have passed.
+
+    The walk runs in a task of its own so that the cancellation is confined to
+    it. A timeout scope around the ``yield`` points of an async generator would
+    instead fire inside whatever the consumer happens to be doing between two
+    events.
+    """
+    if seconds is None:
+        async for event in events:
+            yield event
+        return
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + seconds
+    queue: asyncio.Queue = asyncio.Queue()
+    finished = object()
+
+    async def pump() -> None:
+        try:
+            async for event in events:
+                queue.put_nowait(event)
+        finally:
+            queue.put_nowait(finished)
+
+    task = asyncio.create_task(pump())
+    try:
+        while True:
+            try:
+                item = await asyncio.wait_for(
+                    queue.get(), max(deadline - loop.time(), 0)
+                )
+            except asyncio.TimeoutError:
+                raise WorkflowTimeoutError(
+                    f"The run exceeded its time limit of {seconds:g} s."
+                ) from None
+            if item is finished:
+                break
+            yield item
+        # Re-raises whatever ended the walk early.
+        await task
+    finally:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+
 def make_prompt(prompt: str, input_data: dict) -> str:
     """Combine a rendered prompt with resolved input data into a system message."""
     pieces = [prompt]
@@ -179,6 +256,17 @@ class WorkflowEngine:
         graph's and the node's own: node > graph > these > provider defaults.
         ``python -m kavalai.server`` fills it from the ``KAVALAI_LLM_*``
         variables.
+    record_context: bool
+        Whether ``runs.context`` keeps every node's data (the default) or only
+        the run's input and output. The full context is what makes a run
+        explainable afterwards; it is also a second copy of everything the
+        run saw, which a deployer bound by data-protection rules may not want
+        to keep. Off is an explicit choice, never a silent one.
+    run_timeout: Optional[float]
+        Seconds after which a run is cancelled and recorded as failed, unless
+        ``run_stream(timeout=...)`` says otherwise. ``None`` (the default)
+        sets no limit. ``python -m kavalai.server`` fills it from
+        ``KAVALAI_AGENT_RUN_TIMEOUT_SECONDS``.
     """
 
     def __init__(
@@ -193,6 +281,8 @@ class WorkflowEngine:
         max_node_visits: int = DEFAULT_MAX_NODE_VISITS,
         default_llm_model: Optional[str] = None,
         default_llm_parameters: Optional[dict] = None,
+        record_context: bool = True,
+        run_timeout: Optional[float] = None,
     ):
         self.graph = graph
         self.agent_service = agent_service
@@ -201,6 +291,12 @@ class WorkflowEngine:
         self.max_node_visits = max_node_visits
         self.default_llm_model = default_llm_model
         self.default_llm_parameters = dict(default_llm_parameters or {})
+        self.record_context = record_context
+        self.run_timeout = run_timeout
+        # Registered services are built once and kept, like the kernel: a
+        # service's registry and collection caches are only worth anything if
+        # they outlive a single query.
+        self._registered_rag_services: dict[str, Any] = {}
 
         # A single service is stored under "default", so the common case --- one
         # index, one collection --- names nothing at all in the YAML.
@@ -338,22 +434,25 @@ class WorkflowEngine:
         Mirrors :meth:`_resolve_model`: the node wins, then the workflow's
         ``rag_service``, then ``"default"``. Services passed to the engine take
         precedence over registered ones, so a test can hand in a fake without
-        touching global state.
+        touching global state. A registered service is built on first use and
+        then kept for the engine's lifetime.
         """
         name = node_service or self.graph.rag_service or DEFAULT_RAG_SERVICE
-        service = self.rag_services.get(name)
+        service = self.rag_services.get(name) or self._registered_rag_services.get(name)
         if service is not None:
             return service
 
         from kavalai.llm_clients.registry import RegistryError, make_rag_service
 
         try:
-            return make_rag_service(name)
+            service = make_rag_service(name)
         except RegistryError as error:
             passed = sorted(self.rag_services) or "(none)"
             raise WorkflowException(
                 f"No RAG service '{name}'. Passed to the engine: {passed}. {error}"
             ) from error
+        self._registered_rag_services[name] = service
+        return service
 
     def _make_llm_client(
         self, node_model: Optional[str], llm_kwargs: dict, run_context: RunContext
@@ -409,7 +508,11 @@ class WorkflowEngine:
 
         messages = [ChatMessage(role="system", content=text)]
         if node.use_history and self.agent_service and run_context.session_id:
-            history = await self.agent_service.get_chat_history(run_context.session_id)
+            history = await self.agent_service.get_chat_history(
+                run_context.session_id,
+                limit=node.history_limit,
+                max_chars=node.history_max_chars,
+            )
             messages.extend(
                 ChatMessage(role=msg.role, content=msg.content) for msg in history
             )
@@ -429,7 +532,10 @@ class WorkflowEngine:
         async for chunk in streamer:
             if chunk.type == "restart":
                 buffer = ""
-                yield self._scoped_event(node, chunk)
+                # A restart tells a client to discard partial output; a node
+                # that streams nothing has none to discard.
+                if node.stream_output:
+                    yield self._scoped_event(node, chunk)
                 continue
             if chunk.name == "response":
                 if chunk.type == "partial" and node.stream_delta:
@@ -473,6 +579,9 @@ class WorkflowEngine:
             # would leak agent internals onto the public streaming contract.
             on_step=self._make_step_logger(node, run_context),
         )
+        streams_anything = (
+            node.stream_output or node.stream_instructions or node.stream_partials
+        )
         start = time.perf_counter()
         result_value: Optional[str] = None
         async for chunk in agent.prompt_stream(
@@ -488,6 +597,8 @@ class WorkflowEngine:
                 result_value = chunk.value
                 if node.stream_output:
                     yield self._scoped_event(node, chunk)
+            elif chunk.type == "restart" and not streams_anything:
+                continue
             else:
                 # The agent already gates its progress streams by the flags.
                 yield self._scoped_event(node, chunk)
@@ -568,41 +679,64 @@ class WorkflowEngine:
         )
 
     async def _run_rag_query_node(
-        self, node: RagQueryNode, run_context: RunContext
+        self, node: RagQueryNode, run_context: RunContext, event_data: dict
     ) -> None:
         """Query a RAG service and store the hits in the run context.
 
-        Read-only: ``query`` is the only method this reaches for.
+        Read-only: ``query`` is the only method this reaches for. The query
+        embedding is reported to the run's token accumulator, so it is
+        attributed to the agent, session and run like any other model call.
+        ``min_similarity`` is applied here rather than left to the service, so
+        it means the same on a backend that predates it.
         """
         service = self._resolve_rag_service(node.service)
         query = await run_context.render_prompt(node.query)
         collection = node.collection or self.graph.rag_collection
 
+        arguments: dict[str, Any] = {
+            "text": query,
+            "top_k": node.top_k,
+            "collection_name": collection,
+            "source_ids": node.source_ids,
+            "keep_best": node.keep_best,
+            "include_content": True,
+        }
+        if run_context.token_stats is not None and _accepts_keyword(
+            service.query, "stats_receiver"
+        ):
+            arguments["stats_receiver"] = run_context.token_stats
+
         start = time.perf_counter()
-        hits = await service.query(
-            text=query,
-            top_k=node.top_k,
-            collection_name=collection,
-            source_ids=node.source_ids,
-            keep_best=node.keep_best,
-            include_content=True,
-        )
+        hits = await service.query(**arguments)
         duration = time.perf_counter() - start
+        if node.min_similarity is not None:
+            hits = [hit for hit in hits if hit.similarity >= node.min_similarity]
+        summary = [_hit_summary(hit) for hit in hits]
+        event_data["hits"] = summary
 
         # "results" keeps scores and metadata reachable for routing; "content"
         # is what a following llm node's prompt usually wants, without the
         # UUIDs and timestamps a serialised result list would carry into it.
         if node.store == "content":
             value = "\n\n".join(hit.content or "" for hit in hits)
+            recorded = {"content": value, "hits": summary}
         else:
             value = hits
+            recorded = value
 
         self._store_output(
             run_context,
             node,
             value,
-            inputs={"query": query, "collection": collection},
+            inputs={
+                "query": query,
+                "collection": collection,
+                "top_k": node.top_k,
+                "source_ids": node.source_ids,
+                "min_similarity": node.min_similarity,
+            },
             duration=duration,
+            recorded_output=recorded,
         )
 
     def _store_output(
@@ -615,14 +749,20 @@ class WorkflowEngine:
         prompt: Optional[str] = None,
         duration: float,
         tool_uri: Optional[str] = None,
+        recorded_output: Any = None,
     ) -> None:
-        """Store a node's result under ``node.output`` and write its task row."""
+        """Store a node's result under ``node.output`` and write its task row.
+
+        ``recorded_output`` replaces ``value`` on the task row when the row
+        should say more than the context holds — a ``rag_query`` node storing
+        only text still records which hits the text came from.
+        """
         run_context.data[node.output] = value
         self._log_node(
             run_context,
             node,
             inputs=inputs,
-            output=value,
+            output=value if recorded_output is None else recorded_output,
             prompt=prompt,
             duration=duration,
             tool_uri=tool_uri,
@@ -739,8 +879,13 @@ class WorkflowEngine:
         run_context: RunContext,
         state: WorkflowState,
         budget: _VisitBudget,
+        event_data: dict,
     ) -> AsyncGenerator[WorkflowStreamEvent, None]:
-        """Run a side-effecting node (branch nodes are pure routing)."""
+        """Run a side-effecting node (branch nodes are pure routing).
+
+        ``event_data`` is filled by nodes that report something on their
+        ``node_completed`` event; today that is a ``rag_query`` node's hits.
+        """
         if isinstance(node, LLMNode):
             async for event in self._run_llm_node(node, run_context):
                 yield event
@@ -750,7 +895,7 @@ class WorkflowEngine:
         elif isinstance(node, FunctionNode):
             await self._run_function_node(node, run_context)
         elif isinstance(node, RagQueryNode):
-            await self._run_rag_query_node(node, run_context)
+            await self._run_rag_query_node(node, run_context, event_data)
         elif isinstance(node, ParallelNode):
             async for event in self._run_parallel_node(
                 node, run_context, state, budget
@@ -777,6 +922,7 @@ class WorkflowEngine:
             run_id=parent.run_id,
             data=dict(parent.data),
             templates=parent.templates,
+            template_overrides=parent.template_overrides,
             agent_service=parent.agent_service,
             # Shared on purpose: branches are part of one run, so their model
             # calls belong in the same total, and their task rows draw from one
@@ -900,6 +1046,8 @@ class WorkflowEngine:
         session_id: Optional[str] = None,
         external_id: Optional[str] = None,
         task_logger: Optional[TaskLogger] = None,
+        templates: Optional[dict[str, str]] = None,
+        timeout: Optional[float] = None,
     ) -> WorkflowState:
         """Execute the workflow for ``input_data`` and return the final state.
 
@@ -912,6 +1060,10 @@ class WorkflowEngine:
                 run's trajectory back without a database — this is what the
                 evaluation runner does, and what makes one engine safe to share
                 across concurrent runs that each want their own trace.
+            templates: Template values for this run only. See
+                :meth:`run_stream`.
+            timeout: Seconds before the run is cancelled. See
+                :meth:`run_stream`.
         """
         state = WorkflowState(workflow_name=self.graph.name)
         async for _ in self.run_stream(
@@ -920,9 +1072,35 @@ class WorkflowEngine:
             external_id=external_id,
             state=state,
             task_logger=task_logger,
+            templates=templates,
+            timeout=timeout,
         ):
             pass
         return state
+
+    def _merge_templates(self, overrides: Optional[dict[str, str]]) -> dict[str, str]:
+        """The graph's templates with this run's values applied.
+
+        Only templates the document declares may be overridden: the document
+        then still lists every template a prompt can reference, and a
+        misspelt name fails instead of being ignored.
+        """
+        merged = {t.name: t.value for t in self.graph.templates}
+        if not overrides:
+            return merged
+        unknown = sorted(set(overrides) - set(merged))
+        if unknown:
+            raise WorkflowException(
+                f"Template(s) {unknown} are not declared by workflow "
+                f"'{self.graph.name}' (declared: {sorted(merged) or 'none'}). "
+                "Declare a template in the document before passing a value "
+                "for it."
+            )
+        not_text = sorted(k for k, v in overrides.items() if not isinstance(v, str))
+        if not_text:
+            raise WorkflowException(f"Template value(s) {not_text} are not strings.")
+        merged.update(overrides)
+        return merged
 
     async def run_stream(
         self,
@@ -932,6 +1110,8 @@ class WorkflowEngine:
         external_id: Optional[str] = None,
         state: Optional[WorkflowState] = None,
         task_logger: Optional[TaskLogger] = None,
+        templates: Optional[dict[str, str]] = None,
+        timeout: Optional[float] = None,
     ) -> AsyncGenerator[WorkflowStreamEvent, None]:
         """Execute the workflow, yielding :class:`WorkflowStreamEvent` events.
 
@@ -954,12 +1134,25 @@ class WorkflowEngine:
                 draining the stream.
             task_logger: Records this run only, instead of the engine's own
                 logger. See :meth:`run`.
+            templates: Values for templates the workflow declares, for this
+                run only. They are rendered in one pass like every template
+                value, so text passed here is never interpreted as template
+                syntax, and they are recorded with the run. This is a Python
+                argument and deliberately not a field of the HTTP request: a
+                request field would let a caller rewrite the author's
+                instructions.
+            timeout: Seconds after which the run is cancelled — parallel
+                branches included — and recorded as failed with a
+                :class:`~kavalai.workflow.models.WorkflowTimeoutError`.
+                Defaults to the engine's ``run_timeout``.
         """
         invocation_id = uuid4().hex[:8]
         run_logger = task_logger or self.task_logger
         # One aggregator per run, carried on the run context, so concurrent runs
         # on the same engine never see each other's tokens.
         token_stats = TokenAccumulator(run_logger)
+        run_templates = self._merge_templates(templates)
+        run_timeout = timeout if timeout is not None else self.run_timeout
 
         parsed_input = self.get_data_type("input")(**input_data)
         run_context = RunContext()
@@ -969,7 +1162,8 @@ class WorkflowEngine:
         run_context.seq_counter = itertools.count()
         run_context.task_logger = run_logger
         run_context.data["input"] = parsed_input
-        run_context.templates = {t.name: t.value for t in self.graph.templates}
+        run_context.templates = run_templates
+        run_context.template_overrides = dict(templates or {})
 
         if state is None:
             state = WorkflowState(workflow_name=self.graph.name)
@@ -995,9 +1189,12 @@ class WorkflowEngine:
                     input_data=to_plain(input_data),
                 )
                 run_context.agent_id = agent.id
-                # Model calls are logged against the agent; the accumulator is
-                # not shared with any other run, so setting this once is safe.
+                # Model calls are logged against the agent, session and run;
+                # the accumulator is not shared with any other run, so setting
+                # these once is safe.
                 token_stats.agent_id = str(agent.id)
+                token_stats.session_id = str(session.id)
+                token_stats.run_id = str(run.id)
                 run_context.session_id = session.id
                 run_context.run_id = run.id
                 # Lets ``history:`` inputs resolve values from previous runs.
@@ -1022,19 +1219,21 @@ class WorkflowEngine:
                     session_id=state.session_id,
                     run_id=state.run_id,
                 )
-                async for event in self._walk_from(
+                walk = self._walk_from(
                     self.graph.start,
                     run_context,
                     state,
                     _VisitBudget(self.max_node_visits),
                     trace=state.trace,
-                ):
+                )
+                async for event in _within_deadline(walk, run_timeout):
                     yield event
                 state.token_usage = token_stats.summary()
                 yield WorkflowStreamEvent(
                     type="workflow_completed",
                     name=self.graph.name,
                     session_id=state.session_id,
+                    run_id=state.run_id,
                     output_data=state.output_data,
                     token_usage=state.token_usage,
                 )
@@ -1055,10 +1254,12 @@ class WorkflowEngine:
             except WorkflowException as e:
                 state.status = "failed"
                 state.error = str(e)
+                await self._record_failure(run_context, state)
                 yield WorkflowStreamEvent(
                     type="workflow_failed",
                     name=self.graph.name,
                     session_id=state.session_id,
+                    run_id=state.run_id,
                     value=state.error,
                 )
                 raise
@@ -1070,6 +1271,7 @@ class WorkflowEngine:
                     type="workflow_failed",
                     name=self.graph.name,
                     session_id=state.session_id,
+                    run_id=state.run_id,
                     value=state.error,
                 )
                 raise WorkflowException(e) from e
@@ -1133,12 +1335,17 @@ class WorkflowEngine:
             if record_state:
                 state.current_node = node.name
             yield WorkflowStreamEvent(type="node_started", name=node.name)
-            async for event in self._execute_node(node, run_context, state, budget):
+            event_data: dict = {}
+            async for event in self._execute_node(
+                node, run_context, state, budget, event_data
+            ):
                 yield event
             trace.append(node.name)
             if record_state:
                 state.data = to_plain(run_context.data)
-            yield WorkflowStreamEvent(type="node_completed", name=node.name)
+            yield WorkflowStreamEvent(
+                type="node_completed", name=node.name, output_data=event_data or None
+            )
 
             if isinstance(node, EndNode):
                 if not record_state:
@@ -1173,7 +1380,7 @@ class WorkflowEngine:
             await self.agent_service.update_run(
                 run_context.run_id,
                 output_data=output_data,
-                context=to_plain(run_context.data),
+                context=self._recorded_context(run_context, node.output),
             )
             # Chat-shaped workflows answer in `agent_response`; for any other
             # output type record the data itself, so the chat history is never
@@ -1195,6 +1402,25 @@ class WorkflowEngine:
             f"(session={state.session_id})"
         )
 
+    def _recorded_context(self, run_context: RunContext, output_key: str) -> dict:
+        """What ``runs.context`` keeps for a completed run.
+
+        Everything the run held, unless the engine was built with
+        ``record_context=False``, in which case only the input and the output.
+        Per-run template values are recorded either way: they are part of the
+        prompt, and a run cannot be explained without them.
+        """
+        if self.record_context:
+            context = to_plain(run_context.data)
+        else:
+            context = {
+                "input": to_plain(run_context.data.get("input")),
+                output_key: to_plain(run_context.data.get(output_key)),
+            }
+        if run_context.template_overrides:
+            context["run_templates"] = dict(run_context.template_overrides)
+        return context
+
     async def _record_failure(
         self, run_context: RunContext, state: WorkflowState
     ) -> None:
@@ -1202,15 +1428,13 @@ class WorkflowEngine:
         backoffice; best-effort, since the failure may be the database itself."""
         if not (self.agent_service and run_context.run_id):
             return
+        context: dict[str, Any] = {"status": state.status, "error": state.error}
+        if self.record_context:
+            context["data"] = state.data
+        if run_context.template_overrides:
+            context["run_templates"] = dict(run_context.template_overrides)
         try:
-            await self.agent_service.update_run(
-                run_context.run_id,
-                context={
-                    "status": state.status,
-                    "error": state.error,
-                    "data": state.data,
-                },
-            )
+            await self.agent_service.update_run(run_context.run_id, context=context)
         except Exception:
             logger.warning(
                 f"[{state.invocation_id}] Could not persist failure state "

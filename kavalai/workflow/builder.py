@@ -186,6 +186,8 @@ class WorkflowBuilder:
         next: str,
         inputs: Optional[dict[str, InputSpec]] = None,
         use_history: bool = True,
+        history_limit: int = 50,
+        history_max_chars: Optional[int] = None,
         llm_model: Optional[str] = None,
         llm_kwargs: Optional[dict[str, Any]] = None,
         stream_output: bool = False,
@@ -199,6 +201,8 @@ class WorkflowBuilder:
                 next=next,
                 inputs=_coerce_inputs(inputs),
                 use_history=use_history,
+                history_limit=history_limit,
+                history_max_chars=history_max_chars,
                 llm_model=llm_model,
                 llm_kwargs=llm_kwargs or {},
                 stream_output=stream_output,
@@ -277,6 +281,7 @@ class WorkflowBuilder:
         top_k: int = 5,
         source_ids: Optional[list[str]] = None,
         keep_best: bool = False,
+        min_similarity: Optional[float] = None,
         store: str = "results",
     ) -> "WorkflowBuilder":
         """Add a read-only retrieval node.
@@ -284,8 +289,10 @@ class WorkflowBuilder:
         ``query`` is a template, like an ``llm`` node's prompt. ``service`` and
         ``collection`` default to the workflow's ``rag_service`` /
         ``rag_collection``; leave both unset when there is only one index.
-        ``store="content"`` keeps just the hit texts, which is what a following
-        ``llm`` node's prompt usually wants.
+        ``source_ids=[]`` matches nothing; ``None`` does not filter.
+        ``min_similarity`` drops weaker hits. ``store="content"`` keeps just
+        the hit texts, which is what a following ``llm`` node's prompt
+        usually wants.
         """
         self._nodes.append(
             RagQueryNode(
@@ -298,6 +305,7 @@ class WorkflowBuilder:
                 top_k=top_k,
                 source_ids=source_ids,
                 keep_best=keep_best,
+                min_similarity=min_similarity,
                 store=store,
             )
         )

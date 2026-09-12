@@ -412,3 +412,67 @@ def test_rag_query_rejects_a_connection_string_as_a_service(service):
     """GET /workflow serves the document, so it must not carry credentials."""
     with pytest.raises(ValidationError, match="looks like a connection string"):
         make_graph(rag_nodes(service=service))
+
+
+@pytest.mark.parametrize("value", [-1.5, 1.5])
+def test_min_similarity_is_bounded_like_a_cosine_similarity(value):
+    with pytest.raises(ValidationError):
+        make_graph(rag_nodes(min_similarity=value))
+
+
+def llm_graph(**node_extra):
+    return make_graph(
+        [
+            {"name": "s", "type": "start", "next": "a"},
+            {
+                "name": "a",
+                "type": "llm",
+                "prompt": "p",
+                "output": "output",
+                "next": "e",
+                **node_extra,
+            },
+            {"name": "e", "type": "end", "output": "output"},
+        ]
+    )
+
+
+def test_known_llm_kwargs_are_accepted():
+    graph = llm_graph(llm_kwargs={"temperature": 0.2, "max_output_tokens": 256})
+    assert graph.node_map["a"].llm_kwargs == {
+        "temperature": 0.2,
+        "max_output_tokens": 256,
+    }
+
+
+def test_an_unknown_llm_kwarg_fails_at_load_with_the_right_spelling():
+    """An output cap that loads, looks set and does nothing is the case."""
+    with pytest.raises(ValidationError, match="spelled 'max_output_tokens'"):
+        llm_graph(llm_kwargs={"max_tokens": 800})
+
+
+def test_an_unknown_workflow_level_llm_kwarg_fails_at_load():
+    with pytest.raises(ValidationError, match=r"unknown llm_kwargs \['frequency'\]"):
+        make_graph(
+            [
+                {"name": "s", "type": "start", "next": "e"},
+                {"name": "e", "type": "end", "output": "output"},
+            ],
+            llm_kwargs={"frequency": 1},
+        )
+
+
+def test_an_llm_kwarg_of_the_wrong_type_fails_at_load():
+    with pytest.raises(ValidationError, match="invalid llm_kwargs"):
+        llm_graph(llm_kwargs={"temperature": "hot"})
+
+
+def test_history_window_defaults():
+    node = llm_graph().node_map["a"]
+    assert (node.history_limit, node.history_max_chars) == (50, None)
+
+
+@pytest.mark.parametrize("extra", [{"history_limit": -1}, {"history_max_chars": 0}])
+def test_history_window_bounds_are_validated(extra):
+    with pytest.raises(ValidationError):
+        llm_graph(**extra)

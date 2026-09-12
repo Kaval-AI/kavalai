@@ -127,3 +127,18 @@ html_favicon = "_static/favicon.svg"
 # https://www.sphinx-doc.org/en/master/usage/extensions/todo.html#configuration
 
 todo_include_todos = True
+
+# The public generics' type variables: autodoc renders ``AgentRequest``'s
+# signature with ``InputT``, which has no page of its own to link to.
+_TYPE_VARIABLES = {"InputT"}
+
+
+def _type_variable_as_text(app, env, node, contnode):
+    """Render a reference to a type variable as plain text instead of warning."""
+    if node.get("reftarget") in _TYPE_VARIABLES:
+        return contnode
+    return None
+
+
+def setup(app):
+    app.connect("missing-reference", _type_variable_as_text)

@@ -32,6 +32,15 @@ class WorkflowException(Exception):
     """Base exception for errors building, validating or running a workflow."""
 
 
+class WorkflowTimeoutError(WorkflowException):
+    """A run exceeded its time limit and was cancelled.
+
+    Raised by :meth:`~kavalai.WorkflowEngine.run_stream` when ``timeout`` (or
+    the engine's ``run_timeout``) elapses. The run is recorded as failed with
+    this message, and its parallel branches are cancelled with it.
+    """
+
+
 class ArgumentInfo(BaseModel):
     """Describes input arguments in workflow YAML files.
 
@@ -190,6 +199,19 @@ class LLMNode(BaseNode):
         render-ready with no client-side assembly, at the cost of re-sending
         the whole buffer on every chunk (O(n^2) wire traffic over the stream;
         prefer ``stream_delta: true`` for long outputs).
+
+    Chat history (read only when ``use_history`` is true and the engine has an
+    ``AgentService``):
+
+    ``history_limit``
+        The most recent messages of the session sent with the prompt, the
+        current user message included. ``0`` sends none.
+    ``history_max_chars``
+        A ceiling on the characters of those messages. Whole messages are
+        dropped from the oldest end until the rest fits; a message is never
+        cut. Characters rather than tokens, so the budget means the same for
+        every provider and needs no tokenizer; it is a cost ceiling, not an
+        exact token count.
     """
 
     type: Literal["llm"] = "llm"
@@ -198,6 +220,8 @@ class LLMNode(BaseNode):
     output: str
     next: str
     use_history: bool = True
+    history_limit: int = Field(default=50, ge=0)
+    history_max_chars: Optional[int] = Field(default=None, ge=1)
     llm_model: Optional[str] = None
     llm_kwargs: dict[str, Any] = Field(default_factory=dict)
     stream_output: bool = False
@@ -405,14 +429,25 @@ class RagQueryNode(BaseNode):
         collection: Collection to search. Defaults to the workflow's
             ``rag_collection``, then the backend's own default.
         top_k: Maximum number of hits.
-        source_ids: Restrict the search to these source identifiers.
+        source_ids: Restrict the search to these source identifiers. Absent
+            means no restriction; an empty list matches nothing, so a filter
+            computed to be empty never widens into a search of everything.
         keep_best: Keep only the best hit per ``source_id``. Useful when one
             document was indexed as many chunks.
+        min_similarity: Drop hits whose ``similarity`` is below this value.
+            ``similarity`` is higher-is-better cosine on every backend, so one
+            number means the same thing on each; a useful threshold still
+            depends on the embedding model and on whether a normaliser is used.
         store: ``"results"`` (default) stores the full
             :class:`~kavalai.rag.RagServiceResult` list, so scores and metadata
             stay available for routing. ``"content"`` stores just the hit texts
             joined by blank lines, which is what a following ``llm`` node's
             prompt usually wants.
+
+    Whatever ``store`` says, the node records its hits — ``id``,
+    ``source_id``, ``similarity`` and ``metadata``, without the text — on its
+    task row and in the ``output_data`` of its ``node_completed`` event, so the
+    passages behind an answer can be cited and audited.
     """
 
     type: Literal["rag_query"] = "rag_query"
@@ -425,6 +460,7 @@ class RagQueryNode(BaseNode):
     top_k: int = 5
     source_ids: Optional[list[str]] = None
     keep_best: bool = False
+    min_similarity: Optional[float] = Field(default=None, ge=-1.0, le=1.0)
     store: Literal["results", "content"] = "results"
 
 
@@ -459,7 +495,8 @@ class WorkflowStreamEvent(BaseModel):
       ``output_data`` and ``token_usage``; ``workflow_failed`` carries the
       error message in ``value``.
     - ``node_started`` / ``node_completed``: node lifecycle; ``name`` is the
-      node name.
+      node name. A ``rag_query`` node's ``node_completed`` carries its hits in
+      ``output_data`` (``{"hits": [...]}``, without the text).
     - ``partial`` / ``complete``: streamed content. The node's own output
       streams under the node name; auxiliary streams are prefixed with it
       (``<node>_thought``, ``<node>_instructions``, ``<node>_step<N>``).
@@ -468,7 +505,14 @@ class WorkflowStreamEvent(BaseModel):
     - ``restart``: the named stream is starting over (an LLM call was retried
       after a transient error; ``value`` describes the attempt). Clients must
       discard content accumulated for streams under this name — it will be
-      re-sent.
+      re-sent. Only a node that streams emits it: a restart exists to tell a
+      client to discard partial output, and a node that streams nothing has
+      none to discard.
+
+    The engine's events are complete, because in-process consumers (tests,
+    notebooks, the evaluation runner) want the full error text and token
+    counts. What reaches an HTTP client is decided at the server boundary; see
+    ``kavalai.server.public_events``.
     """
 
     type: Literal[
@@ -526,6 +570,40 @@ def _validate_model_name(label: str, model: str) -> None:
             "The workflow will still load; this fails when the node runs, "
             "unless a client_factory supplies the client."
         )
+
+
+_OUTPUT_CAP_SPELLINGS = frozenset(
+    {"max_tokens", "max_completion_tokens", "num_predict", "max_new_tokens"}
+)
+
+
+def _validate_llm_kwargs(label: str, kwargs: dict[str, Any]) -> None:
+    """Refuse ``llm_kwargs`` the clients do not understand.
+
+    A key that is not a field of ``LlmClientParameters`` would otherwise load,
+    look set, and do nothing — an output cap spelled ``max_tokens`` is the
+    common case. Failing at load puts the typo in front of whoever deploys the
+    document rather than in a server log. Values are validated too, so a
+    string where a number belongs fails here rather than on the first call.
+    """
+    from pydantic import ValidationError
+
+    from kavalai.llm_clients.base_client import LlmClientParameters
+
+    known = set(LlmClientParameters.model_fields)
+    unknown = sorted(set(kwargs) - known)
+    if unknown:
+        hint = ""
+        if _OUTPUT_CAP_SPELLINGS & set(unknown):
+            hint = " The output cap is spelled 'max_output_tokens'."
+        raise ValueError(
+            f"{label} has unknown llm_kwargs {unknown}; the known keys are "
+            f"{sorted(known)}.{hint}"
+        )
+    try:
+        LlmClientParameters(**kwargs)
+    except ValidationError as error:
+        raise ValueError(f"{label} has invalid llm_kwargs: {error}") from error
 
 
 class WorkflowGraph(BaseModel):
@@ -684,6 +762,12 @@ class WorkflowGraph(BaseModel):
         # first time that node runs -- possibly on a branch taken once a month.
         for label, model in self._named_models():
             _validate_model_name(label, model)
+
+        _validate_llm_kwargs("The workflow", self.llm_kwargs)
+        for node in self.nodes:
+            kwargs = getattr(node, "llm_kwargs", None)
+            if kwargs:
+                _validate_llm_kwargs(f"Node '{node.name}'", kwargs)
 
         # Branches of a 'parallel' node run concurrently on private copies of
         # the run context, so they have to be independent. That is checkable

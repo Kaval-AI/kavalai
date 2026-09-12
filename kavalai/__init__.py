@@ -50,6 +50,7 @@ from kavalai.workflow import (
     TemplateModel,
     ArgumentInfo,
     WorkflowException,
+    WorkflowTimeoutError,
     evaluate_expression,
     evaluate_bool,
     evaluate_value,
@@ -83,12 +84,14 @@ from kavalai.functionkernel import (
 from kavalai.llm_clients.base_client import (
     BaseLlmClient,
     ensure_user_turn,
+    LlmClientException,
     LlmClientParameters,
     ChatHistory,
     ChatMessage,
     ModelCallStat,
     ModelStatsReceiver,
     ModelStatsLogger,
+    OutputTruncatedError,
 )
 from kavalai.llm_clients.embeddings import (
     BaseEmbeddingClient,
@@ -107,7 +110,7 @@ from kavalai.llm_clients.browser_client import BrowserLLMClient
 # part of the pyodide-compatible core (``openai`` / ``google-genai`` /
 # ``anthropic`` / ``ollama``). They are resolved lazily via ``__getattr__``
 # below so that ``import kavalai`` works in lightweight / pyodide environments
-# where only the core dependencies are installed. Install ``kavalai[common]``
+# where only the core dependencies are installed. Install ``kavalai[runtime]``
 # (or just the one SDK) to use them.
 #
 # The table is derived from the registry's built-in provider registrations, so
@@ -144,7 +147,7 @@ def __getattr__(name: str):
         except ImportError as exc:
             raise ImportError(
                 f"'{name}' requires the optional '{package}' package. "
-                f"Install it with: pip install kavalai[common]"
+                'Install it with: pip install "kavalai[runtime]"'
             ) from exc
         return getattr(module, name)
     raise AttributeError(f"module 'kavalai' has no attribute {name!r}")
@@ -204,13 +207,16 @@ __all__ = [
     "TemplateModel",
     "ArgumentInfo",
     "WorkflowException",
+    "WorkflowTimeoutError",
     "FunctionKernel",
     "FunctionKernelException",
     "pythontool",
     # LLM & embedding clients
     "BaseLlmClient",
     "ensure_user_turn",
+    "LlmClientException",
     "LlmClientParameters",
+    "OutputTruncatedError",
     "ChatHistory",
     "ChatMessage",
     "ModelCallStat",

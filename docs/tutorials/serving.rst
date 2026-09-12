@@ -171,6 +171,108 @@ auth headers, and this is a ``POST``. Use ``fetch()`` with a streaming reader.
 A ``: ping`` comment frame is sent during silent stretches — a long tool call,
 say — so proxies do not drop the connection.
 
+Public streams
+^^^^^^^^^^^^^^
+
+The stream above is the operator's view. It names every node, reports token
+usage, and a failed run's ``workflow_failed`` carries the exception text,
+which can quote a provider's error message. A server that people other than
+the operator reach — a chat widget on a website — serves the stream through
+:func:`~kavalai.server.public_events` instead. It drops ``node_started`` and
+``node_completed``, removes ``token_usage`` and the reason attached to a
+``restart``, and replaces a failure's text with a fixed message quoting the run
+id, so a report can be matched to the recorded run while the detail stays in
+the server log and on the run row. Which nodes stream content remains the
+workflow's ``stream_output``.
+
+.. code-block:: python
+
+   from fastapi.testclient import TestClient
+
+   from kavalai import WorkflowEngine
+   from kavalai.agent_service import AgentService
+   from kavalai.db import DatabaseManager
+   from kavalai.server import create_agent_app, public_events
+   from kavalai.testing import ScriptedLlmClient
+
+   WORKFLOW = """
+   name: Village help
+   llm_model: openai/gpt-5.6-luna
+   data_types:
+     input: {type: object, properties: {user_message: {type: string}}}
+     output: {type: object, properties: {agent_response: {type: string}}}
+   nodes:
+     - {name: begin, type: start, next: reply}
+     - name: reply
+       type: llm
+       prompt: Answer the villager in one sentence.
+       inputs: {input: {type: context, value: input}}
+       output: output
+       next: finish
+       stream_output: true
+     - {name: finish, type: end, output: output}
+   """
+
+   model = ScriptedLlmClient(
+       [
+           {"agent_response": "The hall is free on Saturday."},
+           RuntimeError("Error code: 401 - invalid x-api-key sk-…"),
+       ],
+       chunk_size=64,
+   )
+   engine = WorkflowEngine.from_yaml(
+       WORKFLOW,
+       client_factory=model,
+       agent_service=AgentService(
+           DatabaseManager().get_sqlite_compat_sessionmaker(db_path="agents.db")
+       ),
+   )
+   app = create_agent_app(
+       engine, auth_dependency=lambda: None, event_filter=public_events
+   )
+   client = TestClient(app)
+
+   for question in ["Is the hall free?", "And on Sunday?"]:
+       response = client.post(
+           "/stream_agent", json={"data": {"user_message": question}}
+       )
+       print(response.text)
+
+.. code-block:: text
+
+   event: workflow_started
+   data: {"type":"workflow_started","name":"Village help",
+          "session_id":"24526583-…","run_id":"c35d3163-…"}
+
+   event: partial
+   data: {"type":"partial","name":"reply",
+          "value":"{\"agent_response\": \"The hall is free on Saturday.\"}"}
+
+   event: complete
+   data: {"type":"complete","name":"reply",
+          "value":"{\"agent_response\": \"The hall is free on Saturday.\"}"}
+
+   event: workflow_completed
+   data: {"type":"workflow_completed","name":"Village help",
+          "session_id":"24526583-…","run_id":"c35d3163-…",
+          "output_data":{"agent_response":"The hall is free on Saturday."}}
+
+   event: workflow_started
+   data: {"type":"workflow_started","name":"Village help",
+          "session_id":"04e02631-…","run_id":"99be2cbf-…"}
+
+   event: workflow_failed
+   data: {"type":"workflow_failed","name":"Village help",
+          "value":"The agent could not complete this request. Reference:
+                   99be2cbf-8833-4ca2-bfc4-a185d7b7cba8.",
+          "session_id":"04e02631-…","run_id":"99be2cbf-…"}
+
+The second question's model call failed with a provider error that quoted a
+key; the client received the reference and nothing else. Under
+``python -m kavalai.server`` the same filter is switched on with
+``KAVALAI_AGENT_PUBLIC_EVENTS=true``, and ``KAVALAI_AGENT_RUN_TIMEOUT_SECONDS``
+bounds how long any run may take (see :doc:`../reference/config`).
+
 Calling it from Python
 ----------------------
 
@@ -263,6 +365,77 @@ side under different prefixes, and you control auth and middleware:
 
 ``create_agent_app`` does the same for a standalone application, and
 ``create_app_from_env_conf`` is what ``python -m kavalai.server`` calls.
+
+A route of your own
+^^^^^^^^^^^^^^^^^^^
+
+A host whose chat route must first check something the router cannot know —
+a site token, a budget, a rate limit — writes the route itself and keeps the
+protocol. :class:`~kavalai.server.AgentRequest` is the request body the router
+accepts, typed by the workflow's input, and
+:func:`~kavalai.server.sse_response` returns the same frames, keepalive pings
+and headers as ``/stream_agent``, with an optional event filter and headers of
+the host's own:
+
+.. code-block:: python
+
+   import json
+
+   from fastapi import FastAPI, Header, HTTPException
+   from fastapi.testclient import TestClient
+   from pydantic import BaseModel
+
+   from kavalai.server import AgentRequest, public_events, sse_response
+
+
+   class Question(BaseModel):
+       user_message: str
+
+
+   app = FastAPI()
+
+
+   @app.post("/chat")
+   async def chat(body: AgentRequest[Question], x_site_token: str = Header("")):
+       if x_site_token != "village":
+           raise HTTPException(status_code=403, detail="Unknown site")
+       events = engine.run_stream(
+           body.data.model_dump(), external_id=body.external_id
+       )
+       return sse_response(
+           events,
+           event_filter=public_events,
+           headers={"X-Conversation": body.external_id or ""},
+       )
+
+
+   client = TestClient(app)
+   body = {"external_id": "visitor-17", "data": {"user_message": "Market day?"}}
+
+   refused = client.post("/chat", json=body)
+   print(refused.status_code, refused.json())
+
+   answered = client.post(
+       "/chat", json=body, headers={"X-Site-Token": "village"}
+   )
+   print(answered.status_code, answered.headers["x-conversation"])
+   last = [l for l in answered.text.splitlines() if l.startswith("data:")]
+   print(json.loads(last[-1][len("data: ") :])["output_data"])
+
+.. code-block:: text
+
+   403 {'detail': 'Unknown site'}
+   200 visitor-17
+   {'agent_response': 'The market is on Friday.'}
+
+Here ``engine`` answers from a scripted model, as in the previous section. The
+admission check runs before the engine is touched, so a refused request costs
+nothing. There is deliberately no router option that picks an engine per
+request: the router's request and response schemas are generated from one
+engine's graph, and :class:`~kavalai.client.AgentClient` and ``kavalai-eval``
+discover them from the OpenAPI schema, so an engine chosen per request would
+leave the schema untyped. Several engines are served by mounting several
+routers, as above.
 
 Where to next
 -------------

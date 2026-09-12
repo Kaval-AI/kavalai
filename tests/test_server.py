@@ -563,3 +563,163 @@ def test_create_app_from_env_conf_requires_the_rag_uri_with_the_model(
     monkeypatch.delenv("KAVALAI_RAG_URI", raising=False)
     with pytest.raises(EnvError):
         create_app_from_env_conf()
+
+
+def test_public_events_withholds_what_only_the_operator_should_see():
+    from kavalai.server import PUBLIC_FAILURE_MESSAGE, public_events
+
+    assert public_events(WorkflowStreamEvent(type="node_started", name="n")) is None
+    assert public_events(WorkflowStreamEvent(type="node_completed", name="n")) is None
+
+    failed = public_events(
+        WorkflowStreamEvent(
+            type="workflow_failed", name="wf", run_id="r-1", value="provider: bad key"
+        )
+    )
+    assert failed.value == f"{PUBLIC_FAILURE_MESSAGE} Reference: r-1."
+    anonymous = public_events(
+        WorkflowStreamEvent(type="workflow_failed", name="wf", value="boom")
+    )
+    assert anonymous.value == PUBLIC_FAILURE_MESSAGE
+
+    restart = public_events(
+        WorkflowStreamEvent(type="restart", name="reply", value="attempt 1: 429")
+    )
+    assert restart.value is None
+
+    completed = public_events(
+        WorkflowStreamEvent(
+            type="workflow_completed",
+            name="wf",
+            output_data={"agent_response": "hi"},
+            token_usage={"total_tokens": 9},
+        )
+    )
+    assert completed.token_usage is None
+    assert completed.output_data == {"agent_response": "hi"}
+
+    partial = WorkflowStreamEvent(type="partial", name="reply", value="hel")
+    assert public_events(partial) is partial
+
+
+def make_public_client(client_factory=_factory):
+    from kavalai.server import public_events
+
+    engine = WorkflowEngine.from_yaml(YAML, client_factory=client_factory)
+    app = create_agent_app(
+        engine=engine, auth_dependency=lambda: None, event_filter=public_events
+    )
+    return TestClient(app)
+
+
+def test_stream_agent_applies_the_event_filter():
+    client = make_public_client()
+
+    response = client.post("/stream_agent", json={"data": {"user_message": "hi"}})
+
+    events = parse_sse(response.text)
+    types = [event["type"] for event in events]
+    assert "node_started" not in types and "node_completed" not in types
+    assert (types[0], types[-1]) == ("workflow_started", "workflow_completed")
+    assert "token_usage" not in events[-1]
+    assert events[-1]["output_data"] == {"agent_response": "hello"}
+
+
+def test_a_failed_public_stream_carries_no_error_text():
+    from kavalai.server import PUBLIC_FAILURE_MESSAGE
+
+    client = make_public_client(client_factory=lambda *a, **k: BoomClient())
+
+    response = client.post("/stream_agent", json={"data": {"user_message": "hi"}})
+
+    events = parse_sse(response.text)
+    assert events[-1]["type"] == "workflow_failed"
+    assert events[-1]["value"] == PUBLIC_FAILURE_MESSAGE
+    assert "boom" not in response.text
+
+
+def test_sse_response_adds_headers_to_the_sse_defaults():
+    from fastapi import FastAPI
+
+    from kavalai.server import SSE_HEADERS, sse_response
+
+    engine = WorkflowEngine.from_yaml(YAML, client_factory=_factory)
+    app = FastAPI()
+
+    @app.post("/chat")
+    async def chat():
+        return sse_response(
+            engine.run_stream({"user_message": "hi"}),
+            headers={"X-Conversation": "c-1"},
+        )
+
+    response = TestClient(app).post("/chat")
+
+    assert response.headers["x-conversation"] == "c-1"
+    for name, value in SSE_HEADERS.items():
+        assert response.headers[name] == value
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert parse_sse(response.text)[-1]["type"] == "workflow_completed"
+
+
+def test_agent_request_types_a_hosts_own_route():
+    from pydantic import BaseModel
+
+    from kavalai.server import AgentRequest
+
+    class Question(BaseModel):
+        user_message: str
+
+    request = AgentRequest[Question].model_validate(
+        {"external_id": "c-1", "data": {"user_message": "hi"}}
+    )
+
+    assert request.data.user_message == "hi"
+    assert (request.session_id, request.external_id) == (None, "c-1")
+
+
+def test_the_request_schema_keeps_its_name():
+    """Clients discover the input type from the OpenAPI schema by this name."""
+    spec = make_client_app().get("/openapi.json").json()
+
+    assert "InputType" in spec["components"]["schemas"]
+
+
+def _capture_create_agent_app(monkeypatch) -> dict:
+    captured = {}
+    real = server_module.create_agent_app
+
+    def spy(**kwargs):
+        captured.update(kwargs)
+        return real(**kwargs)
+
+    monkeypatch.setattr(server_module, "create_agent_app", spy)
+    return captured
+
+
+def test_create_app_from_env_conf_applies_public_events_and_the_run_timeout(
+    env_configured_agent, monkeypatch
+):
+    from kavalai.server import public_events
+
+    captured = _capture_create_agent_app(monkeypatch)
+    monkeypatch.setenv("KAVALAI_AGENT_PUBLIC_EVENTS", "true")
+    monkeypatch.setenv("KAVALAI_AGENT_RUN_TIMEOUT_SECONDS", "45")
+
+    app = create_app_from_env_conf()
+
+    assert captured["event_filter"] is public_events
+    assert app.state.engine.run_timeout == 45.0
+
+
+def test_create_app_from_env_conf_streams_everything_without_a_limit_by_default(
+    env_configured_agent, monkeypatch
+):
+    captured = _capture_create_agent_app(monkeypatch)
+    monkeypatch.delenv("KAVALAI_AGENT_PUBLIC_EVENTS", raising=False)
+    monkeypatch.delenv("KAVALAI_AGENT_RUN_TIMEOUT_SECONDS", raising=False)
+
+    app = create_app_from_env_conf()
+
+    assert captured["event_filter"] is None
+    assert app.state.engine.run_timeout is None
