@@ -36,7 +36,7 @@ from pydantic import BaseModel, create_model
 
 # ``mcp`` is an optional extra: it is not pyodide-compatible and pulls in a
 # large dependency tree. Import it lazily so the core library imports without
-# it; only MCP tool calls require ``pip install kavalai[common]``.
+# it; only MCP tool calls require ``pip install "kavalai[runtime]"``.
 try:
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.sse import sse_client
@@ -450,7 +450,7 @@ class FunctionKernel:
         if ClientSession is None:
             raise FunctionKernelException(
                 "MCP support requires the optional 'mcp' dependency. "
-                "Install it with: pip install kavalai[common]"
+                'Install it with: pip install "kavalai[runtime]"'
             )
 
         if server_name in self.mcp_sessions:

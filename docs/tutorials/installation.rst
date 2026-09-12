@@ -27,7 +27,8 @@ Choosing an extra
 
 The bare ``kavalai`` package is deliberately small and provider-agnostic: it is
 restricted to libraries that also work under Pyodide, so the core can run in a
-browser. ``common`` on top of it is the normal install.
+browser. Everything else is grouped into four extras, and ``common`` installs
+all four; it is the normal install.
 
 .. list-table::
    :header-rows: 1
@@ -36,9 +37,21 @@ browser. ``common`` on top of it is the normal install.
    * - Extra
      - What it adds
    * - ``kavalai[common]``
-     - The normal install: the OpenAI, Gemini, Anthropic and Ollama clients,
-       embeddings and RAG, the PostgreSQL drivers, MCP, the REST/SSE servers
-       and the bundled web tools.
+     - The normal install: ``runtime``, ``webtools``, ``fastembed`` and
+       ``backoffice`` together.
+   * - ``kavalai[runtime]``
+     - What a workflow needs to run and be served: the OpenAI, Gemini,
+       Anthropic and Ollama clients, MCP, the agent server (FastAPI), the
+       asyncpg driver — which the migrations also use — and the
+       ``sqlite-vector`` extension.
+   * - ``kavalai[webtools]``
+     - The bundled ``crawl_url`` and ``web_search`` tools, through crawl4ai.
+   * - ``kavalai[fastembed]``
+     - Local embedding models (``fastembed/…``), with onnxruntime.
+   * - ``kavalai[backoffice]``
+     - The backoffice server's own packages: Authlib, itsdangerous,
+       scikit-learn and sse-starlette. The backoffice needs ``runtime`` as
+       well.
    * - ``kavalai[common_web]``
      - The browser counterpart, for running the core under Pyodide / WebLLM.
        See :doc:`run_in_browser`.
@@ -49,6 +62,25 @@ browser. ``common`` on top of it is the normal install.
      - Test tooling. Pulls in ``common``; this is what CI installs.
    * - ``kavalai[docs]``
      - Sphinx, the theme and the notebook kernel, for building these docs.
+
+The four are divided by weight, not by provider. crawl4ai (with Playwright,
+patchright and litellm), fastembed (with onnxruntime) and scikit-learn (with
+SciPy) account for most of a full install; the provider SDKs and MCP are
+small, so they share ``runtime``, and replacing one provider with another
+remains a change of one string rather than a reinstall. A service that runs a
+workflow against a hosted model needs only ``runtime``:
+
+.. code-block:: bash
+
+   pip install "kavalai[runtime]"
+
+A module that needs a package from an extra that is not installed names the
+extra when it fails to import:
+
+.. code-block:: text
+
+   ImportError: The agent server requires the optional 'fastapi' package.
+   Install it with: pip install "kavalai[runtime]"
 
 Embedding on a GPU
 ^^^^^^^^^^^^^^^^^^

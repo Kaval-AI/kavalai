@@ -2,16 +2,13 @@
 FROM python:3.12-slim
 WORKDIR /app
 
-# Install system dependencies for psycopg2 and other tools
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
-
 COPY pyproject.toml ./
-# The agent server needs the full non-browser runtime (FastAPI, the provider
-# SDKs, the database drivers), which is what the `common` extra pulls in.
-RUN pip install --no-cache-dir ".[common]"
+# `runtime` is what serving a workflow needs: the provider SDKs, MCP, FastAPI
+# and asyncpg, which also runs the migrations. A workflow that embeds locally
+# or uses the bundled web tools needs more; build it with, for example,
+# --build-arg EXTRAS=runtime,fastembed
+ARG EXTRAS=runtime
+RUN pip install --no-cache-dir ".[${EXTRAS}]"
 
 COPY . .
 

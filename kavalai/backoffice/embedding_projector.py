@@ -23,9 +23,16 @@ import os
 from typing import Optional
 from uuid import UUID
 from sqlalchemy import select
-from sklearn.decomposition import IncrementalPCA
 import numpy as np
 from loguru import logger
+
+try:
+    from sklearn.decomposition import IncrementalPCA
+except ImportError as exc:
+    raise ImportError(
+        "The backoffice embedding projector requires scikit-learn. "
+        'Install it with: pip install "kavalai[backoffice]"'
+    ) from exc
 
 from kavalai.backoffice.db import Project, ProjectCache
 from kavalai.llm_clients.streamer import ValueStreamer

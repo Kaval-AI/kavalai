@@ -28,7 +28,9 @@ dependencies = [
     "aiosqlite",
     "alembic",
     "environs",
+    "httpcore",
     "httpx",
+    "idna",
     "jinja2",
     "json-schema-to-pydantic",
     "loguru",
@@ -41,28 +43,49 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Everything the core install leaves out: the LLM provider SDKs, embeddings and
-# RAG, the PostgreSQL drivers, MCP, the REST/SSE servers and the bundled web
-# tools. One extra rather than a dozen — `pip install kavalai[common]` is the
-# normal, non-browser install.
+# What a workflow needs to run and be served outside a browser: the LLM
+# provider SDKs, MCP, the asyncpg driver (agent database, migrations, pgvector
+# RAG), the agent server and the sqlite-vector extension. It is split by
+# weight, not by provider: substituting a provider stays a change of one
+# string, never a reinstall.
 #
 # None of these are pyodide-compatible: they need native extensions, a
 # subprocess or a real socket.
-common = [
+runtime = [
     "anthropic",
     "asyncpg",
-    "authlib",
-    "crawl4ai",
     "fastapi[standard]",
-    "fastembed",
     "google-genai",
-    "itsdangerous",
     "mcp",
     "ollama",
     "openai",
-    "psycopg2-binary",
-    "scikit-learn",
     "sqliteai-vector",
+]
+
+# The bundled `crawl_url` and `web_search` tools. crawl4ai brings Playwright,
+# patchright and litellm, the largest part of a full install.
+webtools = [
+    "crawl4ai",
+]
+
+# Local embedding models (`fastembed/…`), with onnxruntime.
+fastembed = [
+    "fastembed",
+]
+
+# The backoffice server. It also needs `runtime`; scikit-learn is used only by
+# its embedding projector.
+backoffice = [
+    "authlib",
+    "itsdangerous",
+    "scikit-learn",
+    "sse-starlette",
+]
+
+# Everything above — `pip install "kavalai[common]"` is the normal,
+# non-browser install.
+common = [
+    "kavalai[runtime,webtools,fastembed,backoffice]",
 ]
 
 # The browser counterpart of `common`: what the core install additionally needs
@@ -101,6 +124,7 @@ gpu = [
 # deps, so it pulls in `common` rather than repeating that list.
 test = [
     "kavalai[common]",
+    "hypothesis",
     "pre-commit",
     "pytest",
     "pytest-asyncio",
@@ -136,11 +160,12 @@ include = ["kavalai*"]
     # installed package's `.agents` directory finds them with no install step.
     ".agents/skills/*/SKILL.md",
     ".agents/skills/*/references/*.md",
+    "*.j2",
     "migrations/*/env.py",
     "migrations/*/script.py.mako",
     "migrations/*/versions/*.py",
-    "demo_agents/**/*.yaml",
-    "demo_agents/**/*.yml",
+    "widget/*.js",
+    "widget/*.css",
 ]
 
 
