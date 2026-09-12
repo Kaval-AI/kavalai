@@ -16,6 +16,9 @@ variables instead? Those are in :doc:`../reference/index`.
    agents
    llm_clients
    functionkernel
+   net
+   text
    server
    eval
+   testing
    backoffice

@@ -187,6 +187,49 @@ SQLite index.
 Note ``{{ context.passages.context }}`` in the prompt: the retrieved passages are
 interpolated straight from the run context. See :doc:`../tutorials/rag`.
 
+A document that changes is re-indexed as a whole. Its chunks carry the document
+in their metadata, and ``replace`` exchanges them: the new texts are embedded
+first, then the old chunks are deleted and the new ones inserted in one
+transaction, so a failure at any step leaves the old chunks in place. The
+embedding call is recorded only when the call is given a ``stats_receiver``:
+
+.. code-block:: python
+
+   from kavalai.workflow import StatsBridge
+   from kavalai.workflow.tasklog import MemoryTaskLogger
+
+   page = {"page": "opening-hours"}
+   await rag.index_batch(
+       texts=[
+           "The library is open on Tuesdays and Fridays.",
+           "The Rusty Anchor opens at noon.",
+       ],
+       metadata_list=[page, page],
+   )
+
+   meter = MemoryTaskLogger()
+   await rag.replace(
+       "default",
+       texts=["The library is open on Tuesdays, Fridays and Saturdays."],
+       metadata_list=[page],
+       match=page,
+       stats_receiver=StatsBridge(meter),
+   )
+   await meter.flush()
+
+   print(await rag.count_entries("default"))
+   for call in meter.model_calls:
+       print(call.call_type, call.model, call.batch_size)
+
+.. code-block:: text
+
+   5
+   embedding fastembed/BAAI/bge-small-en-v1.5 1
+
+The four facts and the one new chunk remain. In a deployment the logger is a
+``PostgresTaskLogger``, which writes the call to ``model_call_stats`` beside
+the calls the runs make.
+
 Routing a request to the right handler
 --------------------------------------
 
@@ -293,48 +336,114 @@ In YAML, set ``allowed_tools`` on the ``agent`` node. See
 Testing a workflow without calling a model
 -------------------------------------------
 
-Inject a ``client_factory`` and the engine builds *your* client. Graph logic
-becomes deterministic and free.
+:mod:`kavalai.testing` replaces the model and nothing else. A
+:class:`~kavalai.testing.ScriptedLlmClient` answers each call with the next
+reply from its list, and the engine accepts it as its ``client_factory``. The
+test below drives the council desk workflow of the previous recipe, saved as
+``council_desk.yaml``, down its repair branch:
 
 .. code-block:: python
 
-   import pytest
-
-   from kavalai import BaseLlmClient, WorkflowEngine
-
-
-   class StubClient(BaseLlmClient):
-       """Returns canned structured output — no network, no API key."""
-
-       def __init__(self, *args, **kwargs):
-           super().__init__()
-
-       async def _run_chat_completions(self, chat_history, response_model, streamer):
-           value_streamer = streamer.get_value_streamer(
-               "response", response_model=response_model
-           )
-           canned = response_model(
-               **{
-                   name: ("repair" if name == "intent" else "Stubbed reply.")
-                   for name in response_model.model_fields
-               }
-           )
-           await value_streamer.stream_partial(canned.model_dump_json())
-           await value_streamer.stream_complete()
+   from kavalai import WorkflowEngine
+   from kavalai.testing import ScriptedLlmClient
 
 
    async def test_repair_requests_route_to_the_repair_handler():
-       engine = WorkflowEngine.from_yaml_path(
-           "council_desk.yaml", client_factory=lambda *a, **k: StubClient()
+       model = ScriptedLlmClient(
+           [
+               {"intent": "repair"},
+               {"agent_response": "A technician will visit on Monday."},
+           ]
        )
-       state = await engine.run({"user_message": "anything"})
+       engine = WorkflowEngine.from_yaml_path(
+           "council_desk.yaml", client_factory=model
+       )
 
-       assert state.trace == ["start", "classify", "route", "repair_reply", "end"]
+       state = await engine.run({"user_message": "The streetlight is out."})
 
-The engine drives clients through ``_run_chat_completions``, so that is the
-method a stub implements — not ``chat_completions``. The test is a coroutine,
-so run it with ``pytest-asyncio`` (``asyncio_mode = "auto"`` or the
-``@pytest.mark.asyncio`` marker). See :doc:`../guides/safety`.
+       assert state.trace == [
+           "start", "classify", "route", "repair_reply", "end"
+       ]
+       assert state.output_data == {
+           "agent_response": "A technician will visit on Monday."
+       }
+       assert "streetlight" in model.calls[0].prompt
+
+The replies are consumed in the order the nodes run: the first answers
+``classify``, the second ``repair_reply``. Only the provider call is replaced.
+Each reply is streamed through the base client's streamer and validated into
+the node's data type by the engine, so a reply that does not fit the type fails
+the run as a model's reply would, and every call reports a
+:class:`~kavalai.ModelCallStat` with estimated token counts. ``model.calls``
+records each request — its messages, response model and parameters — for
+assertions. The test is a coroutine, so run it with ``pytest-asyncio``
+(``asyncio_mode = "auto"`` or the ``@pytest.mark.asyncio`` marker).
+
+A reply may also be an exception, raised in place of an answer, or an
+:class:`~kavalai.testing.Interrupted`, which streams part of an answer and then
+fails; when its error is a transient provider error, the stream carries the
+``restart`` event a live retry produces. A function
+``(messages, response_model) -> reply`` takes the place of the list when the
+answer depends on the prompt.
+
+A test that does not construct the engine itself cannot pass a factory; the
+workflow names its model instead. :func:`~kavalai.testing.fake_providers`
+registers the scripted client under a provider name for the duration of a
+``with`` block and restores the registry on exit, so, registered as
+``openai``, it answers the unchanged workflow. Each block also registers a
+:class:`~kavalai.testing.FakeEmbeddingClient` under the same name. It embeds
+any text by hashing its words: the vectors are deterministic and lexical, and a
+query that shares words with a passage ranks it first, which suffices to test
+retrieval without downloading a model.
+
+.. code-block:: python
+
+   import asyncio
+
+   from kavalai import WorkflowEngine
+   from kavalai.rag import SqliteRagService
+   from kavalai.testing import ScriptedLlmClient, fake_providers
+
+   FACTS = [
+       "Green Village has 104 residents.",
+       "The village pond, Lake Miller, is 1.2 metres deep.",
+       "The bakery opens at seven on weekdays.",
+   ]
+
+
+   async def main():
+       model = ScriptedLlmClient(
+           [
+               {"intent": "permit"},
+               {"agent_response": "Apply at the parish office."},
+           ]
+       )
+       with fake_providers(llm=model, name="openai"):
+           engine = WorkflowEngine.from_yaml_path("council_desk.yaml")
+           state = await engine.run({"user_message": "May I build a shed?"})
+
+       print(state.trace)
+       print([call.model for call in model.calls])
+
+       with fake_providers() as fakes:
+           index = SqliteRagService(":memory:", model="fake/hashing")
+           await index.index_batch(FACTS, [{} for _ in FACTS])
+           hits = await index.query("How deep is the pond?", top_k=1)
+
+       print(hits[0].content, round(hits[0].similarity, 3))
+       print(fakes.embedding.calls[-1])
+
+
+   asyncio.run(main())
+
+.. code-block:: text
+
+   ['start', 'classify', 'route', 'permit_reply', 'end']
+   ['openai/gpt-5.6-luna', 'openai/gpt-5.6-luna']
+   The village pond, Lake Miller, is 1.2 metres deep. 0.886
+   ['How deep is the pond?']
+
+See :doc:`../api/testing` and :doc:`../guides/safety`.
 
 Using a provider Kaval.AI does not ship
 ---------------------------------------
@@ -880,8 +989,12 @@ Watching what a run used
 Token usage is aggregated on the returned state. The individual calls are
 written to ``model_call_stats`` by a task logger, so pass one to the engine —
 the ``AgentService`` alone records sessions, runs and chat history, not calls.
+Each row carries the run and the session that made it, so ``run_id=`` selects
+one run's calls and ``session_id=`` a whole conversation's.
 
 .. code-block:: python
+
+   from uuid import UUID
 
    from kavalai.workflow.tasklog import PostgresTaskLogger
 
@@ -901,14 +1014,14 @@ the ``AgentService`` alone records sessions, runs and chat history, not calls.
    print(state.token_usage)
 
    await tasklog.flush()
-   for call in await service.get_model_call_stats(call_type="llm", limit=5):
+   for call in await service.get_model_call_stats(run_id=UUID(state.run_id)):
        print(call.model, call.total_tokens, f"{call.duration_seconds:.2f}s")
 
 .. code-block:: text
 
    {'model_calls': 1, 'prompt_tokens': 77,
-    'completion_tokens': 76, 'total_tokens': 153}
-   openai/gpt-5.6-luna 153 3.17s
+    'completion_tokens': 39, 'total_tokens': 116}
+   openai/gpt-5.6-luna 116 3.03s
 
 The logger writes behind the run; ``flush()`` waits for the queue to drain,
 which a long-running server does in its shutdown hook instead.
@@ -916,4 +1029,6 @@ which a long-running server does in its shutdown hook instead.
 Multiply by your provider's published prices to turn tokens into money — and
 subtract ``cached_prompt_tokens`` from ``prompt_tokens`` first, because cached
 input is billed at a fraction of the rest. :doc:`../guides/observability`
-explains why the runtime records usage rather than cost.
+explains why the runtime records usage rather than cost, and gives the query
+that adds up a run or a conversation in
+:ref:`observability-cost-per-run`.

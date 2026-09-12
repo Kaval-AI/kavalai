@@ -65,12 +65,15 @@ Six tables record execution. They form a strict hierarchy, with
             │     └── chat_messages
             └── chat_messages
 
-    model_call_stats               (one provider call; references agent_id)
+    model_call_stats               (one provider call; agent, session, run by id)
 
 Deletion cascades down this hierarchy: removing an agent removes its sessions,
 and removing a session removes its runs, tasks and messages. ``tasks.agent_id``
 and ``chat_messages.run_id`` are nullable and use ``ON DELETE SET NULL``, so a
 partial deletion leaves the surviving rows readable rather than removing them.
+``model_call_stats`` stands outside the hierarchy: it names its agent, session
+and run by id, without foreign keys, so removing a session leaves the record of
+what the conversation cost in place.
 
 ``agents``
 ----------
@@ -122,6 +125,25 @@ session, and ``history:`` inputs resolve against it.
        number or thread id. Supplying the same ``external_id`` again reuses the
        existing session, which is how a stateless HTTP caller continues a
        conversation without holding a Kaval.AI identifier.
+   * - ``created_at``
+     - When the conversation began.
+   * - ``updated_at``
+     - When it was last active. ``initialize_workflow_run`` sets it on every
+       run, in the transaction that inserts the run, so it is the time of the
+       session's last run. Recent-first lists and retention sort on it.
+
+Three indexes serve the queries made on every turn and by every retention
+sweep: ``(agent_id, external_id)`` finds the conversation for a caller's key,
+``(agent_id, updated_at)`` lists one agent's conversations most recent first,
+and ``(updated_at)`` finds idle conversations across all agents.
+
+``external_id`` is not unique. Two first turns that arrive at the same moment
+with the same new ``external_id`` can each find no session and each create
+one; later turns then continue the more recently created of the two. A unique
+index would close this race, but a database that already holds such
+duplicates could not be migrated to it, so the constraint is not imposed. A
+caller that can send concurrent first turns avoids the race by waiting for the
+first reply before sending the second.
 
 ``runs``
 --------
@@ -209,15 +231,28 @@ so a transcript can be read as a conversation or attributed run by run.
 
 This table is the memory a chatbot has across turns. Nodes that declare
 ``use_history`` read it, and the engine appends to it as the run proceeds.
+``get_chat_history`` returns the newest ``limit`` messages of a session and,
+given ``max_chars``, drops whole messages from the oldest end until the rest
+fits; a message is never cut, and the first one that does not fit ends the
+window, so the history a model receives is always contiguous.
+
+Two indexes serve its readers: ``(session_id, created_at)`` the history window
+and transcripts, ``(agent_id, created_at)`` figures per agent and date.
 
 ``model_call_stats``
 --------------------
 
 One row per call to a provider (:class:`kavalai.db.ModelCallStat`), covering
-both completions and embeddings. Unlike the tables above it is not written by
-the engine but by the LLM clients themselves, through the
-``ModelStatsReceiver`` interface, which is why it records calls made outside a
-workflow as well.
+both completions and embeddings. The rows are written by the task logger.
+During a run every LLM client the engine builds reports its calls to the run's
+:class:`~kavalai.workflow.tasklog.TokenAccumulator`, which adds them to the
+run's ``token_usage`` and passes each one to the task logger together with the
+agent, session and run. A ``rag_query`` node hands the same accumulator to its
+RAG service, so the embedding of the query is recorded in the same way. With no
+task logger the calls are counted but not stored. A client or a RAG service
+used outside a run records nothing unless it is given a receiver — for an
+indexing job, ``StatsBridge(task_logger, agent_id)`` as the RAG service's
+``stats_receiver``.
 
 .. list-table::
    :header-rows: 1
@@ -227,12 +262,18 @@ workflow as well.
      - Purpose
    * - ``call_type``, ``model``
      - What kind of call it was, and against which ``provider/model``.
-   * - ``agent_id``
-     - The agent on whose behalf the call was made, where one applies. It is a
-       plain indexed column rather than a foreign key, so statistics survive
-       independently of the agent row.
+   * - ``agent_id``, ``session_id``, ``run_id``
+     - The agent, conversation and run that made the call, where one applies.
+       They are plain indexed columns rather than foreign keys: a cost record
+       outlives the conversation it belongs to. Cost per run and per
+       conversation is therefore a query on this table alone.
    * - ``request_data``, ``response_data``
-     - The payloads exchanged with the provider.
+     - The payloads exchanged with the provider. The request is the whole
+       prompt — history and retrieved passages included — so both are left
+       empty by a task logger built with ``record_payloads=False``, and both
+       are cleared when the session is purged. A payload larger than the
+       logger's ``max_payload_bytes`` is replaced by a marker carrying its size
+       and a preview.
    * - ``response_code``
      - The provider's HTTP status. Attempts that returned no completion are
        recorded with their status and error text in place of token counts, so a
@@ -258,14 +299,45 @@ itself does not have to keep current.
 Reading the store back
 ======================
 
-Everything above is queryable through ``AgentService`` without writing SQL:
+Everything above is queryable through ``AgentService`` without writing SQL.
+After three turns on PostgreSQL, the first and the last in the conversation
+``visitor-7``:
 
 .. code-block:: python
 
    from uuid import UUID
 
-   history = await service.get_chat_history(UUID(state.session_id))
-   stats = await service.get_model_call_stats(call_type="llm", limit=20)
+   history = await service.get_chat_history(
+       UUID(state.session_id), max_chars=2000
+   )
+   calls = await service.get_model_call_stats(run_id=UUID(state.run_id))
+   listing = await service.list_sessions([UUID(state.agent_id)])
+
+   for message in history:
+       print(f"{message.role:>9}: {message.content}")
+   for call in calls:
+       print(call.model, call.prompt_tokens, call.completion_tokens)
+   for row in listing["sessions"]:
+       print(row.external_id, row.runs_count, row.messages_count,
+             row.first_message)
+
+.. code-block:: text
+
+        user: Is the pub open on Sundays?
+   assistant: From noon on Sundays.
+        user: Is there a quiz night?
+   assistant: Yes, on Thursdays.
+   openai/gpt-5.6-luna 45 10
+   visitor-7 2 4 Is the pub open on Sundays?
+   None 1 2 The church bell is stuck.
+
+``get_model_call_stats`` filters by ``call_type``, ``agent_id``,
+``session_id`` and ``run_id``. ``list_sessions`` takes several agent ids at
+once, filters by message text (``search``), by ``external_id_prefix`` and
+``exclude_external_id_prefix``, and by creation date, and returns each
+conversation most recently active first with its counts and its first and last
+message; the backoffice conversation list runs the same query. An empty list
+of agent ids lists nothing.
 
 For traversals the service does not expose — the runs of a session, the tasks
 of a run — the ORM models are ordinary SQLAlchemy classes and
@@ -278,9 +350,10 @@ The retrieval store
 ===================
 
 Retrieval-augmented generation uses its own storage, provisioned by the RAG
-service rather than by the migrations. This separation is deliberate: an index
-has a different lifecycle from a run log, is frequently rebuilt, and may live
-in an entirely different database.
+service rather than by the migrations — lazily by default, or by an explicit
+call where the runtime role may not create tables. This separation is
+deliberate: an index has a different lifecycle from a run log, is frequently
+rebuilt, and may live in an entirely different database.
 
 One storage model, two databases
 --------------------------------
@@ -291,9 +364,12 @@ Both RAG services share the storage model defined in
 * ``rag_collections`` — the registry. One row per collection, holding its
   ``name``, the ``table_name`` its vectors live in, the embedding ``model``,
   the ``embedding_size`` and a ``schema_version``. It exists because the
-  dimension of a vector column is fixed at creation, so a collection's model
-  must be recorded alongside it; indexing the same collection with a different
-  dimension is rejected rather than silently corrupting the index.
+  dimension of a vector column is fixed at creation, and because a vector is
+  comparable only with vectors from the same model. The registry is therefore
+  authoritative: a service embeds every query and every new batch for a
+  collection with the model recorded here, whatever model the service was
+  itself configured with, and rejects a batch of another dimension rather
+  than corrupting the index.
 * **one table per collection**, named deterministically from the collection
   name (a readable slug plus a short hash to keep distinct names distinct).
   Each row holds ``id``, ``source_id``, ``content``, an ``embedding`` of the
@@ -316,8 +392,9 @@ index whichever database holds it. Only the column types differ:
      - ``UUID``
      - ``TEXT`` (the UUID's canonical form)
    * - ``embedding``
-     - ``vector(N)`` from ``pgvector``, with an HNSW index under cosine
-       distance
+     - ``vector(N)`` from ``pgvector``, or ``halfvec(N)`` when the collection
+       was created with ``vector_type="halfvec"``, with an HNSW index under
+       cosine distance
      - ``BLOB`` of 32-bit floats, scanned by the ``sqlite-vector`` extension
        under cosine distance
    * - ``metadata``
@@ -327,8 +404,13 @@ index whichever database holds it. Only the column types differ:
      - ``TIMESTAMPTZ``
      - ``TEXT`` in ISO 8601
 
-The PostgreSQL service creates the ``vector`` extension on first use. The
-SQLite service keeps registry and collections in one ordinary file, which
+The PostgreSQL service creates the ``vector`` extension together with the
+registry. The vector type of a collection is not stored in the registry: the
+service reads it from the ``embedding`` column when it opens the collection,
+so the table is the one source of that fact. The services write nothing
+outside these tables — the statistics of an embedding call go to the
+``stats_receiver`` the caller supplies, and to no table when there is none.
+The SQLite service keeps registry and collections in one ordinary file, which
 needs no server and can be copied wherever it is needed; the file written by
 ``kavalai`` 1.0, with a single ``rag_index`` table, is refused with a message
 asking for the index to be rebuilt.
@@ -368,6 +450,19 @@ in-browser store is created with ``create_all`` and stamped with
 ``SQLITE_SCHEMA_VERSION`` the database is discarded and recreated. Any schema
 change must therefore bump that constant, or browsers will keep using a store
 that no longer matches the models.
+
+The retrieval store is created by none of the three. Each collection's table
+has a vector column sized to its embedding model, which no migration can know
+in advance, so the RAG service creates the registry and a collection's table
+itself, on the first write into that collection. With ``provision=False`` the
+service issues no DDL at all; ``ensure_registry()`` and
+``create_collection()``, called from a job whose role owns the schema, create
+the tables instead, and the runtime role needs data privileges only — see
+:doc:`../deploy/index`. Reads create nothing under either setting: listing or
+querying a database without a registry returns empty results. A collection's
+layout carries its own ``schema_version``, and a service upgrades an outdated
+collection when it first opens it; under ``provision=False`` it raises instead
+of altering the table.
 
 Where to next
 =============

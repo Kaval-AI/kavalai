@@ -28,7 +28,11 @@ message, make one edit, reload. Do not guess-and-retry.
 | `MCP server 'x': Cannot specify both stdio … and HTTP … configurations.` | Both given | Remove one. |
 | `MCP server 'x' is already registered.` / `… not registered.` | Name collision, or a URI naming an unregistered server | Names are unique and must exist. The same pair exists for `REST server 'x'` and `Python tool 'x'`. |
 | `REST server 'x': Either 'url' or 'url_env' must be specified.` / `Only one of 'url' or 'url_env' …` | Neither or both given | Give exactly one. |
-| `Install it with: pip install kavalai[common]` | Optional SDK missing | Install the extra, not the bare SDK. |
+| `Install it with: pip install "kavalai[runtime]"` (or another extra) | Optional package missing | Install the extra the message names, not the bare package. |
+| `has unknown llm_kwargs [...]` | A key `LlmClientParameters` does not have | Use the listed keys; the output cap is `max_output_tokens`. |
+| `OutputTruncatedError` | The model reached `max_output_tokens` | Raise the cap; on reasoning models it includes reasoning tokens. Never parse the partial output. |
+| `The run exceeded its time limit of N s` (`WorkflowTimeoutError`) | `timeout` / `run_timeout` elapsed | The run was cancelled and recorded as failed. |
+| `Template(s) [...] are not declared` | A per-run `templates=` value for a template the document lacks | Declare it under `templates:` first. |
 
 ## Runtime errors
 

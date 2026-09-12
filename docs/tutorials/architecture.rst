@@ -219,7 +219,18 @@ asked and what it answered — agents, sessions, runs and chat messages. The
 ``TaskLogger`` records how it got there — per-node tasks and per-call model
 statistics, written behind the run so that logging never becomes the critical
 path. The LLM clients themselves emit ``ModelCallStat`` records, which is why
-calls made outside a workflow are recorded too.
+calls made outside a workflow are recorded too. Within a run, every call — the
+query embedding of a ``rag_query`` node included — reports to the run's token
+accumulator, so each ``model_call_stats`` row carries the agent, session and
+run that made it.
+
+Recording is the default, and recording less is an explicit choice. A task
+logger built with ``record_payloads=False`` keeps timings and token counts but
+not the prompts and answers, and an engine built with ``record_context=False``
+keeps a run's input and output but not every node's data. The options exist
+because a model call's request is the whole prompt — history and retrieved
+passages included — which is a second copy of the conversation that a deployer
+bound by data-protection rules may not be allowed to keep.
 
 Both write to a database the operator supplies. There is no hosted collector,
 and the backoffice interface is a reader of those tables rather than a
@@ -321,7 +332,16 @@ The invariants most often at issue are collected here for convenience:
      - Streaming and non-streaming behaviour cannot diverge if there is one
        implementation.
    * - Per-run state on ``RunContext``; kernel state on the engine
-     - One engine serves many concurrent runs.
+     - One engine serves many concurrent runs. A registered RAG service is
+       engine-level state too: built on first use and kept, so its caches
+       outlive a single query.
+   * - Recording less is explicit, never silent
+     - ``record_nodes``, ``record_payloads`` and ``record_context`` are
+       options a deployer sets; nothing else drops a record, and an unknown
+       ``llm_kwargs`` key fails the load instead of being ignored.
+   * - An empty filter matches nothing
+     - ``source_ids=[]`` returns no hits and ``agent_ids=[]`` lists no
+       sessions: a filter computed to be empty must never widen into all.
    * - Library code reads no environment variables
      - Only entry-point ``main()`` functions do; everything else is passed in.
    * - A workflow document names a registration, never a Python path
