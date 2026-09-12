@@ -18,7 +18,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RagService } from '../../services/rag-service';
 import { UserService } from '../../services/user-service';
-import { RagResult, RagStats, PcaData, PcaPoint } from '../../models/rag';
+import { RagCollection, RagResult, RagStats, PcaData, PcaPoint } from '../../models/rag';
 
 @Component({
   selector: 'app-rag-page',
@@ -32,9 +32,9 @@ export class RagPage implements OnInit {
   results: RagResult[] = [];
   pcaData: PcaData | null = null;
   ragStats: RagStats | null = null;
+  collections: RagCollection[] = [];
 
   queryText: string = '';
-  selectedModel: string = 'openai/text-embedding-3-small';
   collectionName: string = '';
   sourceIdsInput: string = '';
   topK: number = 10;
@@ -65,6 +65,8 @@ export class RagPage implements OnInit {
         if (newProjectId !== this.projectId) {
           this.projectId = newProjectId;
           this.results = [];
+          this.collections = [];
+          this.collectionName = '';
           this.loadRagStats();
         }
       }
@@ -82,10 +84,33 @@ export class RagPage implements OnInit {
         console.error('Error loading RAG stats', err);
       }
     });
+
+    this.ragService.getRagCollections(this.projectId).subscribe({
+      next: (collections) => {
+        this.collections = collections;
+        // There is no cross-collection search, so a query always names one.
+        if (!collections.some(c => c.name === this.collectionName)) {
+          const preferred = collections.find(c => c.name === 'default') ?? collections[0];
+          this.collectionName = preferred?.name ?? '';
+        }
+      },
+      error: (err) => {
+        console.error('Error loading RAG collections', err);
+      }
+    });
+  }
+
+  /**
+   * The model the selected collection was indexed with. The service embeds
+   * every query against the collection with it, so the page shows it rather
+   * than asking for one.
+   */
+  get collectionModel(): string | null {
+    return this.collections.find(c => c.name === this.collectionName)?.model ?? null;
   }
 
   onQuery(): void {
-    if (!this.projectId || !this.selectedModel || !this.queryText) {
+    if (!this.projectId || !this.queryText) {
       return;
     }
 
@@ -96,7 +121,6 @@ export class RagPage implements OnInit {
       : undefined;
 
     this.ragService.queryRag(this.projectId, {
-      model: this.selectedModel,
       text: this.queryText,
       collection_name: this.collectionName || undefined,
       top_k: this.topK,

@@ -3,6 +3,18 @@
     @if (callType) {
       <p class="subtitle">Filtered by type: {{ callType }}</p>
     }
+    @if (sessionId) {
+      <p class="subtitle">
+        Filtered by conversation:
+        <a class="link link-primary font-mono" [routerLink]="['/conversations', sessionId]">{{ sessionId }}</a>
+      </p>
+    }
+    @if (runId) {
+      <p class="subtitle">Filtered by run: <span class="font-mono">{{ runId }}</span></p>
+    }
+    @if (isFiltered) {
+      <a class="link link-primary text-sm" routerLink="/llm-call-stats">Show all calls</a>
+    }
   </div>
 
   @if (error) {
@@ -48,6 +60,28 @@
               <span>{{ stat.cached_prompt_tokens || 0 }} cached in / {{ stat.reasoning_tokens || 0 }} reasoning out</span>
             </div>
           }
+          @if (stat.run_id) {
+            <div class="stat-item">
+              <label>Run</label>
+              <span class="flex flex-wrap gap-x-3">
+                <a class="link link-primary font-mono run-filter-link"
+                   [routerLink]="[]" [queryParams]="{ run_id: stat.run_id }" queryParamsHandling="merge"
+                   [title]="'Show only the calls of run ' + stat.run_id">{{ stat.run_id.slice(0, 8) }}</a>
+                @if (stat.session_id) {
+                  <a class="link link-primary"
+                     [routerLink]="['/conversations', stat.session_id, 'runs', stat.run_id, 'tasks']">Tasks</a>
+                }
+              </span>
+            </div>
+          }
+          @if (stat.session_id) {
+            <div class="stat-item">
+              <label>Conversation</label>
+              <a class="link link-primary font-mono conversation-link"
+                 [routerLink]="['/conversations', stat.session_id]"
+                 [title]="stat.session_id">{{ stat.session_id.slice(0, 8) }}</a>
+            </div>
+          }
         </div>
 
         <div class="stat-details">
@@ -75,7 +109,7 @@
 
     @if (!loading && stats.length === 0) {
       <div class="empty-state">
-        <p>No LLM calls found.</p>
+        <p>No model calls found.</p>
       </div>
     }
 

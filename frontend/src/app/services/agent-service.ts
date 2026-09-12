@@ -20,7 +20,7 @@ import { Observable } from 'rxjs';
 import { Agent } from '../models/agent';
 import { SessionSummary, SessionDetails } from '../models/session';
 import { ChatMessage } from '../models/chat-message';
-import { LLMCallStat } from '../models/llm-call-stat';
+import { LLMCallStat, LLMCallStatFilters } from '../models/llm-call-stat';
 
 @Injectable({
   providedIn: 'root'
@@ -102,10 +102,25 @@ export class AgentService {
     return this.http.get<SessionDetails>(`/api/agents/sessions/${projectId}/${sessionId}/details`);
   }
 
-  getLLMCallStats(projectId: string, callType?: string, limit: number = 50, offset: number = 0): Observable<LLMCallStat[]> {
+  getLLMCallStats(
+    projectId: string,
+    callType?: string,
+    limit: number = 50,
+    offset: number = 0,
+    filters: LLMCallStatFilters = {}
+  ): Observable<LLMCallStat[]> {
     let url = `/api/projects/${projectId}/llm-call-stats?limit=${limit}&offset=${offset}`;
     if (callType) {
       url += `&call_type=${callType}`;
+    }
+    if (filters.agentId) {
+      url += `&agent_id=${filters.agentId}`;
+    }
+    if (filters.sessionId) {
+      url += `&session_id=${filters.sessionId}`;
+    }
+    if (filters.runId) {
+      url += `&run_id=${filters.runId}`;
     }
     return this.http.get<LLMCallStat[]>(url);
   }

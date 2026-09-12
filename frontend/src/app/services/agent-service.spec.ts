@@ -56,4 +56,27 @@ describe('AgentService', () => {
     expect(req.request.method).toBe('GET');
     req.flush(mockAgents);
   });
+
+  it('should fetch model calls without filters', () => {
+    service.getLLMCallStats('proj123').subscribe(calls => {
+      expect(calls).toEqual([]);
+    });
+
+    const req = httpMock.expectOne('/api/projects/proj123/llm-call-stats?limit=50&offset=0');
+    expect(req.request.method).toBe('GET');
+    req.flush([]);
+  });
+
+  it('should fetch model calls of one agent, conversation and run', () => {
+    service.getLLMCallStats('proj123', 'llm', 20, 40, { agentId: 'a1', sessionId: 's1', runId: 'r1' })
+      .subscribe(calls => {
+        expect(calls).toEqual([]);
+      });
+
+    const req = httpMock.expectOne(
+      '/api/projects/proj123/llm-call-stats?limit=20&offset=40&call_type=llm&agent_id=a1&session_id=s1&run_id=r1'
+    );
+    expect(req.request.method).toBe('GET');
+    req.flush([]);
+  });
 });
