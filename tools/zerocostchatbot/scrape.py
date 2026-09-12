@@ -47,7 +47,7 @@ from urllib.parse import urljoin, urlparse, urlunparse
 import httpx
 from loguru import logger
 
-from tools.zerocostchatbot.htmlmd import parse_html
+from kavalai.text import parse_html
 from tools.zerocostchatbot.pages_db import PagesDatabase
 
 USER_AGENTS = {
@@ -341,7 +341,7 @@ class HttpFetcher:
                 success=False, status_code=status, error=f"not HTML ({content_type})"
             )
 
-        parsed = parse_html(response.text, str(response.url))
+        parsed = parse_html(response.text, base_url=str(response.url))
         return FetchOutcome(
             success=True,
             status_code=status,
@@ -439,7 +439,7 @@ class RemoteBrowserFetcher:
             status_code=result.get("status_code"),
             title=(result.get("metadata") or {}).get("title"),
             html=html,
-            markdown=markdown or parse_html(html, url).markdown,
+            markdown=markdown or parse_html(html, base_url=url).markdown,
             links=[link for link in links if link],
         )
 

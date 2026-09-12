@@ -25,11 +25,12 @@ collection is dropped and rebuilt on every run — the pages database is the
 source of truth, and a rebuild of a small site takes seconds — so the
 script is idempotent.
 
-Each page's markdown is chunked at heading boundaries, every chunk prefixed
-with the page title and heading path ("Kaval.AI Docs › Quickstart ›
-Install") so short chunks stay retrievable on their own. Chunk metadata
-carries ``url``, ``title``, ``heading`` and ``crawled_at`` — enough to cite
-the source page in an answer.
+Each page's markdown is chunked by :func:`kavalai.text.chunk_markdown`: a
+new heading starts a new chunk, and every chunk is prefixed with the page
+title and heading path ("Kaval.AI Docs › Quickstart › Install") so short
+chunks stay retrievable on their own. Chunk metadata carries ``url``,
+``title``, ``heading`` and ``crawled_at`` — enough to cite the source page
+in an answer.
 
 ``--index`` names where the index lives: a database URI, or a SQLite file
 path — by default the ``<site>.rag.db`` beside the pages database. The
@@ -39,7 +40,6 @@ default embedding model is local fastembed — no API key, no per-page cost.
 import argparse
 import asyncio
 import os
-import re
 from dataclasses import dataclass
 from typing import Optional
 from urllib.parse import urlparse
@@ -49,6 +49,7 @@ from loguru import logger
 from kavalai.rag import rag_service_from_uri
 from kavalai.rag.base import BaseRagService
 from kavalai.settings import apply_normalizer_from_env
+from kavalai.text import MAX_CHARS, TARGET_CHARS, Chunk, chunk_markdown
 from tools.zerocostchatbot.pages_db import PagesDatabase, PageRow
 
 # Small, local and key-free — and the same model family the browser widget
@@ -57,91 +58,9 @@ from tools.zerocostchatbot.pages_db import PagesDatabase, PageRow
 # fastembed model list for alternatives.
 DEFAULT_MODEL = "fastembed/snowflake/snowflake-arctic-embed-s"
 
-# Small embedding models (arctic-embed-s, bge-small) truncate at 512 tokens,
-# so a much longer chunk would embed only its beginning anyway.
-DEFAULT_MAX_CHARS = 2000
-
 DEFAULT_BATCH_SIZE = 32
 
-HEADING = re.compile(r"^(#{1,6})\s+(\S.*)$")
 PAGES_SUFFIX = ".pages.db"
-
-
-@dataclass
-class Chunk:
-    """One indexable piece of a page."""
-
-    text: str
-    heading: str
-    position: int
-
-
-def split_to_size(text: str, max_chars: int) -> list[str]:
-    """Split text into pieces of at most ``max_chars``, at paragraph breaks.
-
-    A single paragraph longer than the cap is split mid-text — embedding it
-    whole would silently truncate instead.
-    """
-    if max_chars <= 0 or len(text) <= max_chars:
-        return [text]
-    parts: list[str] = []
-    current = ""
-    for paragraph in text.split("\n\n"):
-        candidate = f"{current}\n\n{paragraph}" if current else paragraph
-        if len(candidate) <= max_chars:
-            current = candidate
-            continue
-        if current:
-            parts.append(current)
-        while len(paragraph) > max_chars:
-            parts.append(paragraph[:max_chars])
-            paragraph = paragraph[max_chars:]
-        current = paragraph
-    if current:
-        parts.append(current)
-    return parts
-
-
-def chunk_markdown(
-    markdown: str, title: str = "", max_chars: int = DEFAULT_MAX_CHARS
-) -> list[Chunk]:
-    """Chunk a page's markdown at heading boundaries.
-
-    Each chunk is prefixed with the page title and the heading path leading
-    to it, so a chunk retrieved on its own still says what it is about.
-    """
-    sections: list[tuple[str, str]] = []
-    path: dict[int, str] = {}
-    heading = ""
-    lines: list[str] = []
-
-    def flush() -> None:
-        body = "\n".join(lines).strip()
-        if body:
-            sections.append((heading, body))
-        lines.clear()
-
-    for line in markdown.splitlines():
-        match = HEADING.match(line)
-        if match:
-            flush()
-            level = len(match[1])
-            path = {k: v for k, v in path.items() if k < level}
-            path[level] = match[2].strip()
-            heading = " › ".join(path[k] for k in sorted(path))
-        else:
-            lines.append(line)
-    flush()
-
-    chunks: list[Chunk] = []
-    for section_heading, body in sections:
-        prefix = " › ".join(p for p in (title, section_heading) if p)
-        for part in split_to_size(body, max_chars):
-            text = f"{prefix}\n\n{part}" if prefix else part
-            chunks.append(
-                Chunk(text=text, heading=section_heading, position=len(chunks))
-            )
-    return chunks
 
 
 def chunk_metadata(row: PageRow, chunk: Chunk) -> dict:
@@ -170,14 +89,16 @@ async def build_rag_index(
     rag: BaseRagService,
     collection_name: str,
     *,
-    max_chars: int = DEFAULT_MAX_CHARS,
+    target_chars: Optional[int] = TARGET_CHARS,
+    max_chars: Optional[int] = MAX_CHARS,
     batch_size: int = DEFAULT_BATCH_SIZE,
 ) -> IndexReport:
     """Rebuild ``collection_name`` from every page that holds markdown.
 
     The collection is dropped first, so the index always mirrors the pages
     database exactly; pages without content (failures, robots skips) are
-    counted as skipped.
+    counted as skipped. ``target_chars`` and ``max_chars`` are those of
+    :func:`kavalai.text.chunk_blocks`.
     """
     if any(c["name"] == collection_name for c in await rag.list_collections()):
         await rag.drop_collection(collection_name)
@@ -203,7 +124,12 @@ async def build_rag_index(
         source_ids.clear()
 
     for row in pages.iter_pages():
-        chunks = chunk_markdown(row.markdown or "", row.title or "", max_chars)
+        chunks = chunk_markdown(
+            row.markdown or "",
+            title=row.title or "",
+            target_chars=target_chars,
+            max_chars=max_chars,
+        )
         if not chunks:
             report.skipped += 1
             continue
@@ -242,12 +168,24 @@ def default_collection(pages: PagesDatabase) -> str:
     return "site"
 
 
+def chunk_sizes(args: argparse.Namespace) -> tuple[Optional[int], Optional[int]]:
+    """``(target_chars, max_chars)`` from the CLI, where 0 means no limit.
+
+    ``--max-chars 0`` keeps every heading section whole, so it lifts the
+    target as well.
+    """
+    max_chars = args.max_chars or None
+    target_chars = (args.target_chars or None) if max_chars else None
+    return target_chars, max_chars
+
+
 async def run(args: argparse.Namespace) -> IndexReport:
     """Build the index the CLI arguments describe and return what was done."""
     if not os.path.exists(args.pages):
         raise FileNotFoundError(f"Pages database not found: {args.pages}")
     index = args.index or default_index_path(args.pages)
     rag = make_rag_service(index, args.model, args.schema)
+    target_chars, max_chars = chunk_sizes(args)
     with PagesDatabase(args.pages) as pages:
         collection = args.collection or default_collection(pages)
         logger.info(
@@ -258,7 +196,8 @@ async def run(args: argparse.Namespace) -> IndexReport:
             pages,
             rag,
             collection,
-            max_chars=args.max_chars,
+            target_chars=target_chars,
+            max_chars=max_chars,
             batch_size=args.batch_size,
         )
     logger.info(
@@ -303,12 +242,21 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"Embedding model (default: {DEFAULT_MODEL})",
     )
     parser.add_argument(
+        "--target-chars",
+        type=int,
+        default=TARGET_CHARS,
+        help=(
+            "Pack chunks towards this many characters, 0 to pack up to"
+            f" --max-chars (default: {TARGET_CHARS})"
+        ),
+    )
+    parser.add_argument(
         "--max-chars",
         type=int,
-        default=DEFAULT_MAX_CHARS,
+        default=MAX_CHARS,
         help=(
             "Split chunks longer than this many characters, 0 to keep whole"
-            f" sections (default: {DEFAULT_MAX_CHARS})"
+            f" sections (default: {MAX_CHARS})"
         ),
     )
     parser.add_argument(

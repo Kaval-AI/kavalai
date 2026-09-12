@@ -34,9 +34,10 @@ together with the links it revealed, so a run killed at any moment loses at
 most the page in flight. `--refresh` re-queues every known URL for a fresh
 pass.
 
-Each page is fetched with a plain HTTP request first and reduced to
-markdown by `htmlmd.py` (stdlib only; navigation, footer and sidebar text
-is dropped, their links kept for discovery). The fetch escalates to a
+Each page is fetched with a plain HTTP request first and reduced to text
+and markdown by `kavalai.text.parse_html` (standard library only;
+navigation, footer and sidebar text is dropped, their links kept for
+discovery). The fetch escalates to a
 headless browser only when the response is not usable content — a JS-app
 shell, too little visible text, or a 403/503 bot challenge — and three
 escalations in a row memoise the site as JS-rendered. Rendering happens in
@@ -108,7 +109,7 @@ python -m http.server -d docs.kaval.ai.demo
 
 The output folder (`<host>.demo`) is self-contained static files, servable
 from any bucket: `index.html`, the viewer script, the production chat
-widget (`chatbotwidget/`), the pages database and the RAG index. Its
+widget (`kavalai/widget/`), the pages database and the RAG index. Its
 `index.html` is `archive.html` with the two database files named in
 `window.KavalArchiveDefaults`, so it opens straight into the site.
 `--index` names another SQLite index, `--collection` one inside it,

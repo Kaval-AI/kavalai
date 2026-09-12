@@ -26,11 +26,10 @@ from tools.zerocostchatbot import build_index
 from tools.zerocostchatbot.build_index import (
     build_parser,
     build_rag_index,
-    chunk_markdown,
+    chunk_sizes,
     default_collection,
     default_index_path,
     make_rag_service,
-    split_to_size,
 )
 from tools.zerocostchatbot.pages_db import PagesDatabase
 
@@ -98,42 +97,32 @@ def add_page(db, url, title, markdown):
     )
 
 
-def test_chunk_markdown_tracks_the_heading_path():
-    chunks = chunk_markdown(MARKDOWN, title="Kaval Docs")
-    texts = [chunk.text for chunk in chunks]
-    assert texts[0].startswith("Kaval Docs\n\nIntro paragraph")
-    assert texts[1].startswith("Kaval Docs › Getting started\n\n")
-    assert texts[2].startswith("Kaval Docs › Getting started › Details\n\n")
-    # A new top-level heading resets the path.
-    assert texts[3].startswith("Kaval Docs › Reference\n\n")
-    assert [chunk.position for chunk in chunks] == [0, 1, 2, 3]
-    assert chunks[2].heading == "Getting started › Details"
+def test_chunk_sizes_from_the_command_line():
+    assert chunk_sizes(build_parser().parse_args(["p.db"])) == (1200, 2000)
+    assert chunk_sizes(build_parser().parse_args(["p.db", "--target-chars", "0"])) == (
+        None,
+        2000,
+    )
+    # --max-chars 0 keeps whole sections, so it lifts the target too.
+    assert chunk_sizes(build_parser().parse_args(["p.db", "--max-chars", "0"])) == (
+        None,
+        None,
+    )
 
 
-def test_chunk_markdown_without_title_or_headings():
-    (chunk,) = chunk_markdown("Just a paragraph.")
-    assert chunk.text == "Just a paragraph."
-    assert chunk.heading == ""
-    assert chunk_markdown("") == []
-    # A heading with no body under it yields no empty chunk.
-    assert chunk_markdown("# Lonely heading") == []
-
-
-def test_chunk_markdown_splits_long_sections():
-    body = "\n\n".join(f"Paragraph {i} " + "x" * 80 for i in range(10))
-    chunks = chunk_markdown(f"# Big\n\n{body}", title="T", max_chars=300)
-    assert len(chunks) > 1
-    assert all(len(chunk.text) <= 300 + len("T › Big\n\n") for chunk in chunks)
-    assert all(chunk.text.startswith("T › Big") for chunk in chunks)
-
-
-def test_split_to_size():
-    assert split_to_size("short", 100) == ["short"]
-    assert split_to_size("a" * 50, 0) == ["a" * 50]
-    # An oversized single paragraph is hard-split rather than truncated.
-    assert split_to_size("a" * 25, 10) == ["a" * 10, "a" * 10, "a" * 5]
-    # Paragraphs pack together up to the cap, then a new part starts.
-    assert split_to_size("aaa\n\nbbb\n\nccc", 8) == ["aaa\n\nbbb", "ccc"]
+async def test_build_rag_index_passes_the_chunk_sizes(tmp_path):
+    rag = make_rag(tmp_path)
+    body = "\n\n".join(f"Paragraph {i}. " + "x" * 80 for i in range(10))
+    with make_pages(tmp_path) as pages:
+        add_page(pages, "https://docs.kaval.ai/", "T", f"# Big\n\n{body}")
+        small = await build_rag_index(
+            pages, rag, "small", target_chars=200, max_chars=300
+        )
+        whole = await build_rag_index(
+            pages, rag, "whole", target_chars=None, max_chars=None
+        )
+    assert small.chunks > 1
+    assert whole.chunks == 1
 
 
 def test_default_index_path():
