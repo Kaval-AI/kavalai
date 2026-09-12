@@ -70,12 +70,12 @@ def test_site_url_of_refuses_an_empty_database(tmp_path):
 
 def test_render_index_localises_the_widget_and_defines_defaults():
     html = (
-        '<link href="../../chatbotwidget/kaval-chatbot.css">'
-        '<script src="../../chatbotwidget/kaval-chatbot.js"></script>'
+        '<link href="../../kavalai/widget/kaval-chatbot.css">'
+        '<script src="../../kavalai/widget/kaval-chatbot.js"></script>'
         '<script src="archive.js"></script>'
     )
     out = render_index(html, {"db": "a.pages.db", "title": "Ärimees"})
-    assert "../../chatbotwidget/" not in out
+    assert "../../kavalai/widget/" not in out
     assert '<link href="kaval-chatbot.css">' in out
     assert defaults_of(out) == {"db": "a.pages.db", "title": "Ärimees"}
     assert out.index("KavalArchiveDefaults") < out.index('src="archive.js"')
@@ -111,7 +111,7 @@ def test_compile_demo_ships_the_databases_and_the_viewer(tmp_path):
     assert (out / "acme.com.rag.db").read_bytes() == b"sqlite bytes"
 
     index_html = (out / "index.html").read_text()
-    assert "../../chatbotwidget/" not in index_html
+    assert "../../kavalai/widget/" not in index_html
     assert defaults_of(index_html) == {
         "db": "acme.com.pages.db",
         "rag": "acme.com.rag.db",

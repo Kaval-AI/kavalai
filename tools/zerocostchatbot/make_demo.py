@@ -40,13 +40,12 @@ from urllib.parse import urlparse
 
 from loguru import logger
 
+from kavalai.widget import WIDGET_FILES, widget_dir
 from tools.zerocostchatbot.build_index import default_index_path
 from tools.zerocostchatbot.pages_db import PagesDatabase
 
 TOOL_DIR = os.path.dirname(os.path.abspath(__file__))
-WIDGET_DIR = os.path.normpath(os.path.join(TOOL_DIR, "..", "..", "chatbotwidget"))
-WIDGET_FILES = ("kaval-chatbot.js", "kaval-chatbot.css")
-WIDGET_PATH_PREFIX = "../../chatbotwidget/"
+WIDGET_PATH_PREFIX = "../../kavalai/widget/"
 
 
 @dataclass
@@ -109,7 +108,7 @@ def compile_demo(
     os.makedirs(out_dir, exist_ok=True)
 
     for name in WIDGET_FILES:
-        shutil.copy(os.path.join(WIDGET_DIR, name), os.path.join(out_dir, name))
+        shutil.copy(widget_dir() / name, os.path.join(out_dir, name))
     shutil.copy(
         os.path.join(TOOL_DIR, "archive.js"), os.path.join(out_dir, "archive.js")
     )

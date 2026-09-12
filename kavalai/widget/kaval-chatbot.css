@@ -17,6 +17,11 @@ Kaval.AI chat widget styles, ported from the kaval.ai website chatbot.
 Every color, font and radius is a --kcb-* token, overridable from the host
 page or through the `theme` option of KavalChatbot.mount(). The defaults are
 the kaval.ai palette.
+
+Buttons are reset below with `.kcb-chatbot button`, so every rule that
+styles one of the widget's buttons is written `.kcb-chatbot .kcb-x`: a single
+class would lose to the reset, and a host's bare `button` rule would lose to
+both. The public classes are listed in docs/reference/widget.rst.
 */
 
 .kcb-chatbot {
@@ -29,8 +34,12 @@ the kaval.ai palette.
   --kcb-link-hover: #809537;
   --kcb-radius: 0.5rem;
   --kcb-radius-small: 0.25rem;
+  /* --kcb-font is the name the token had before --kcb-font-family; setting
+     either works. */
   --kcb-font: system-ui, sans-serif;
-  --kcb-font-header: var(--kcb-font);
+  --kcb-font-family: var(--kcb-font);
+  --kcb-font-size: 16px;
+  --kcb-font-header: var(--kcb-font-family);
   --kcb-font-mono: ui-monospace, monospace;
   --kcb-shadow: rgba(39, 62, 71, 0.35);
   --kcb-z: 1100;
@@ -38,8 +47,8 @@ the kaval.ai palette.
      under it so the navigation stays reachable. */
   --kcb-top-offset: 0px;
 
-  font-family: var(--kcb-font);
-  font-size: 16px;
+  font-family: var(--kcb-font-family);
+  font-size: var(--kcb-font-size);
   line-height: 1.4;
   color: var(--kcb-text);
 }
@@ -48,6 +57,12 @@ the kaval.ai palette.
 .kcb-chatbot *::before,
 .kcb-chatbot *::after {
   box-sizing: border-box;
+}
+
+/* The widget shows and hides its parts with the `hidden` attribute, which
+   any `display` rule below would otherwise override. */
+.kcb-chatbot [hidden] {
+  display: none !important;
 }
 
 .kcb-chatbot button {
@@ -84,7 +99,7 @@ the kaval.ai palette.
   display: block;
 }
 
-.kcb-bubble {
+.kcb-chatbot .kcb-bubble {
   width: 56px;
   height: 56px;
   padding: 0;
@@ -100,7 +115,7 @@ the kaval.ai palette.
 
 /* The float bubble rolls a full turn on toggle while the logo and the X
    crossfade — both children are always rendered, stacked on each other. */
-.kcb-bubble-float {
+.kcb-chatbot .kcb-bubble-float {
   position: relative;
   transition: transform 0.35s ease;
 }
@@ -150,13 +165,13 @@ the kaval.ai palette.
 }
 
 /* The header copy of the bubble only exists on mobile. */
-.kcb-bubble-inline {
+.kcb-chatbot .kcb-bubble-inline {
   display: none;
 }
 
 /* Speech bubble inviting the first click, parked above the float bubble. The
    delay lets the page settle before it slides in. */
-.kcb-greeting {
+.kcb-chatbot .kcb-greeting {
   position: absolute;
   right: 0;
   bottom: 68px; /* the 56px bubble plus a gap */
@@ -164,7 +179,7 @@ the kaval.ai palette.
   max-width: min(240px, calc(100vw - 48px));
   padding: 8px 12px;
   text-align: left;
-  font-size: 0.85rem;
+  font-size: calc(var(--kcb-font-size) * 0.85);
   font-weight: 500;
   line-height: 1.3;
   border-radius: var(--kcb-radius);
@@ -242,8 +257,9 @@ the kaval.ai palette.
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
   font-family: var(--kcb-font-header);
-  font-size: 1.05rem;
+  font-size: calc(var(--kcb-font-size) * 1.05);
   font-weight: 600;
 }
 
@@ -255,13 +271,30 @@ the kaval.ai palette.
 .kcb-title-text {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   min-width: 0;
   line-height: 1.2;
 }
 
+/* Tells the visitor that the other party is an AI system. It takes the
+   header's own colours, so it stays legible under any theme. */
+.kcb-disclosure {
+  margin-top: 3px;
+  padding: 0 6px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-family: var(--kcb-font-family);
+  font-size: calc(var(--kcb-font-size) * 0.68);
+  font-weight: 500;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+  opacity: 0.85;
+  white-space: nowrap;
+}
+
 .kcb-status {
-  font-family: var(--kcb-font);
-  font-size: 0.72rem;
+  font-family: var(--kcb-font-family);
+  font-size: calc(var(--kcb-font-size) * 0.72);
   font-weight: 400;
   opacity: 0.8;
   max-width: 220px;
@@ -270,13 +303,17 @@ the kaval.ai palette.
   text-overflow: ellipsis;
 }
 
+.kcb-disclosure + .kcb-status {
+  margin-top: 2px;
+}
+
 .kcb-header-actions {
   display: flex;
   align-items: center;
   gap: 4px;
 }
 
-.kcb-icon-btn {
+.kcb-chatbot .kcb-icon-btn {
   width: 32px;
   height: 32px;
   padding: 0;
@@ -288,7 +325,7 @@ the kaval.ai palette.
   border-radius: var(--kcb-radius-small);
 }
 
-.kcb-icon-btn:hover {
+.kcb-chatbot .kcb-icon-btn:hover {
   background-color: rgba(0, 0, 0, 0.12);
 }
 
@@ -303,7 +340,7 @@ the kaval.ai palette.
   display: none;
 }
 
-.kcb-inline .kcb-maximize {
+.kcb-chatbot.kcb-inline .kcb-maximize {
   display: none;
 }
 
@@ -344,7 +381,7 @@ the kaval.ai palette.
   margin: auto;
   text-align: center;
   opacity: 0.6;
-  font-size: 0.95rem;
+  font-size: calc(var(--kcb-font-size) * 0.95);
 }
 
 .kcb-message {
@@ -403,6 +440,80 @@ the kaval.ai palette.
     transform: translateY(-4px);
     opacity: 0.85;
   }
+}
+
+/* Thumbs under a completed answer; rendered only when the host passes
+   `onFeedback`. The chosen one carries aria-pressed="true". */
+.kcb-feedback {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  align-self: flex-start;
+  max-width: 92%;
+  margin: -4px 0 0 4px;
+}
+
+.kcb-chatbot .kcb-feedback-btn {
+  width: 28px;
+  height: 24px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  border-radius: var(--kcb-radius-small);
+  opacity: 0.55;
+}
+
+.kcb-chatbot .kcb-feedback-btn:hover {
+  opacity: 1;
+  background-color: var(--kcb-surface-alt);
+}
+
+.kcb-chatbot .kcb-feedback-btn[aria-pressed="true"] {
+  opacity: 1;
+  background-color: var(--kcb-accent);
+  color: var(--kcb-accent-content);
+}
+
+.kcb-feedback-comment {
+  display: flex;
+  flex-basis: 100%;
+  gap: 6px;
+  margin: 4px 0 0;
+}
+
+.kcb-feedback-comment input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: calc(var(--kcb-font-size) * 0.85);
+  color: inherit;
+  background-color: var(--kcb-surface);
+  border: 1px solid var(--kcb-border);
+  border-radius: var(--kcb-radius-small);
+}
+
+.kcb-feedback-comment input:focus {
+  outline: 2px solid var(--kcb-accent);
+  outline-offset: -1px;
+  border-color: transparent;
+}
+
+.kcb-chatbot .kcb-feedback-submit {
+  padding: 4px 12px;
+  font-size: calc(var(--kcb-font-size) * 0.8);
+  font-weight: 600;
+  background-color: var(--kcb-accent);
+  color: var(--kcb-accent-content);
+  border-radius: var(--kcb-radius-small);
+}
+
+.kcb-feedback-thanks {
+  font-size: calc(var(--kcb-font-size) * 0.8);
+  opacity: 0.7;
 }
 
 /* --- Markdown rendering inside agent replies --------------------------- */
@@ -510,16 +621,16 @@ the kaval.ai palette.
   display: none;
 }
 
-.kcb-choice {
+.kcb-chatbot .kcb-choice {
   background: transparent;
   color: var(--kcb-text);
   border: 1px solid var(--kcb-accent);
   border-radius: 999px;
   padding: 4px 12px;
-  font-size: 0.8rem;
+  font-size: calc(var(--kcb-font-size) * 0.8);
 }
 
-.kcb-choice:hover:enabled {
+.kcb-chatbot .kcb-choice:hover:enabled {
   background-color: var(--kcb-accent);
   color: var(--kcb-accent-content);
 }
@@ -549,7 +660,7 @@ the kaval.ai palette.
   border-color: transparent;
 }
 
-.kcb-send {
+.kcb-chatbot .kcb-send {
   padding: 8px 20px;
   background-color: var(--kcb-accent);
   color: var(--kcb-accent-content);
@@ -557,7 +668,7 @@ the kaval.ai palette.
   font-weight: 600;
 }
 
-.kcb-send:disabled {
+.kcb-chatbot .kcb-send:disabled {
   opacity: 0.5;
   cursor: default;
 }
@@ -568,13 +679,13 @@ the kaval.ai palette.
     opacity: 0.5;
   }
 
-  .kcb-greeting {
+  .kcb-chatbot .kcb-greeting {
     animation: none;
   }
 
   .kcb-window-opening,
   .kcb-window-close,
-  .kcb-bubble-float,
+  .kcb-chatbot .kcb-bubble-float,
   .kcb-bubble-logo,
   .kcb-bubble-glyph,
   .kcb-close-icon {
@@ -598,7 +709,7 @@ the kaval.ai palette.
     border-radius: 0;
   }
 
-  .kcb-floating.kcb-open .kcb-bubble-float {
+  .kcb-chatbot.kcb-floating.kcb-open .kcb-bubble-float {
     display: none;
   }
 
@@ -607,11 +718,11 @@ the kaval.ai palette.
   }
 
   /* The window already fills the screen, so there is nothing to maximize. */
-  .kcb-floating .kcb-maximize {
+  .kcb-chatbot.kcb-floating .kcb-maximize {
     display: none;
   }
 
-  .kcb-floating .kcb-bubble-inline {
+  .kcb-chatbot.kcb-floating .kcb-bubble-inline {
     display: flex;
     width: 40px;
     height: 40px;

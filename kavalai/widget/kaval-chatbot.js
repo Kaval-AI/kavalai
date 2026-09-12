@@ -15,18 +15,23 @@ limitations under the License.
 
 Kaval.AI production chat widget: a framework-free port of the chatbot on
 kaval.ai (an Angular component there), so one implementation can serve the
-website, client demos and any page that can load a <script> tag.
+website, client demos and any page that can load a <script> tag. It ships
+inside the kavalai wheel (kavalai/widget/), so a Python host serves the
+version that speaks its SDK's protocol; docs/reference/widget.rst documents
+every option.
 
-  KavalChatbot.mount({
+  const widget = KavalChatbot.mount({
     connector: KavalChatbot.agentConnector({ url: "/api/chat/stream_agent" }),
     mode: "floating",             // or "inline" with target: el-or-selector
-    title: "Chatbot",
+    texts: { title: "Chatbot" },  // every visible string, for translation
     theme: { accent: "#acc12f" }, // any --kcb-* token, camelCased
   });
+  widget.on("reply", (reply) => console.log(reply.runId));
 
-A connector is `async (text, onPartial) => { text, choices }`; the bundled
-`agentConnector` speaks the kavalai agent-server SSE protocol, and any other
-backend (the webwidget's WebLLM bridge included) fits behind the same shape.
+A connector is `async (text, onPartial) => { text, choices, runId }`; the
+bundled `agentConnector` speaks the kavalai agent-server SSE protocol, and
+any other backend (the webwidget's WebLLM bridge included) fits behind the
+same shape.
 
 Markdown parses to data and renders through DOM nodes — never innerHTML — so
 agent output cannot introduce markup. Replies stream, so every input is
@@ -293,13 +298,109 @@ potentially truncated and renders as the block it is becoming.
   }
 
   /* ------------------------------------------------------------------ *
+   * Visible strings                                                     *
+   * ------------------------------------------------------------------ */
+
+  /* Every string the widget shows or announces, aria labels and error
+     messages included, so a host translates the widget by passing `texts`.
+     `disclosure` tells the visitor that the other party is an AI system; it
+     is on by default and hidden only by `disclosure: false`. */
+  const DEFAULT_TEXTS = Object.freeze({
+    title: "Chatbot",
+    disclosure: "AI assistant",
+    greeting: "Hello! Click here for help.",
+    emptyMessage: "Hi! Ask us anything.",
+    placeholder: "Type a message...",
+    inputLabel: "Message",
+    send: "Send",
+    openChat: "Open chat",
+    closeChat: "Close chat",
+    maximize: "Maximize chat",
+    restore: "Restore chat size",
+    typing: "Assistant is typing",
+    feedbackLabel: "Rate this answer",
+    feedbackUp: "Good answer",
+    feedbackDown: "Bad answer",
+    feedbackPlaceholder: "What could be better? (optional)",
+    feedbackSubmit: "Send",
+    feedbackThanks: "Thank you for the feedback.",
+    error: "Something went wrong. Please try again.",
+    rateLimited: "Too many messages. Please wait a moment and try again.",
+    unavailable:
+      "The chat assistant is unavailable right now. Please try again later.",
+    interrupted: "The answer was interrupted. Please try again.",
+  });
+
+  /* The top-level options that predate `texts`; each is a shorthand for the
+     `texts` entry of the same name, which wins when both are given. */
+  const LEGACY_TEXT_OPTIONS = ["title", "greeting", "emptyMessage", "placeholder"];
+
+  /* The `texts` entries a UserError's `code` may select. */
+  const ERROR_CODES = ["rateLimited", "unavailable", "interrupted"];
+
+  /* The widget's strings for `mount(options)`. An unknown `texts` key is
+     refused rather than ignored: a misspelt key is a string that silently
+     stays in English. */
+  function resolveTexts(options) {
+    options = options || {};
+    const texts = Object.assign({}, DEFAULT_TEXTS);
+    for (const key of LEGACY_TEXT_OPTIONS) {
+      if (options[key] !== undefined) {
+        texts[key] = options[key];
+      }
+    }
+    const given = options.texts || {};
+    for (const key of Object.keys(given)) {
+      if (!Object.prototype.hasOwnProperty.call(DEFAULT_TEXTS, key)) {
+        throw new Error("Unknown texts key: " + key);
+      }
+      texts[key] = given[key];
+    }
+    return texts;
+  }
+
+  /* ------------------------------------------------------------------ *
    * Agent-server SSE protocol (ported from the website's service)       *
    * ------------------------------------------------------------------ */
 
-  /* An error whose message is safe and useful to show the visitor. Everything
-     else surfaces as a generic apology so internal detail never reaches the
-     UI. */
-  class UserError extends Error {}
+  /* An error whose message is safe and useful to show the visitor; it is
+     never retried. `code`, when it names one of ERROR_CODES, selects the
+     `texts` entry shown instead of the message, so a translated widget does
+     not show the connector's English. Everything else surfaces as
+     `texts.error`, so internal detail never reaches the UI. */
+  class UserError extends Error {
+    constructor(message, code) {
+      super(message);
+      this.name = "UserError";
+      this.code = code;
+    }
+  }
+
+  /* The text the widget shows for a failed turn. */
+  function errorText(error, texts) {
+    if (error instanceof UserError) {
+      return ERROR_CODES.includes(error.code) ? texts[error.code] : error.message;
+    }
+    return texts.error;
+  }
+
+  /* Whether a failed turn may be sent again. A UserError is a deliberate
+     answer (rate limiting, maintenance), and an error marked
+     `retryable = false` belongs to a turn the server has already started:
+     its model calls are paid for, and a retry would pay for them twice. */
+  function isRetryable(error) {
+    if (error instanceof UserError) {
+      return false;
+    }
+    return !(error && error.retryable === false);
+  }
+
+  function finalError(message, code) {
+    const error = new Error(message);
+    error.code = code;
+    error.retryable = false;
+    return error;
+  }
 
   /* The server streams a JSON object, so a partial frame is a truncated JSON
      document. Pull the value of a string key out of it so the reply can be
@@ -385,76 +486,158 @@ potentially truncated and renders as the block it is becoming.
     return { events: events, rest: rest };
   }
 
-  /* Conversation ids survive within the tab where storage exists; where it
-     does not (tests, privacy modes that throw on access) an in-memory id
-     still keeps one page-load's messages in one conversation. */
-  function conversationStore(storageKey) {
+  /* `crypto.randomUUID` exists only in secure contexts; a page served over
+     plain http on a LAN address still has `getRandomValues`. */
+  function randomId() {
+    if (typeof crypto.randomUUID === "function") {
+      return crypto.randomUUID();
+    }
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  const STORAGE_AREAS = { session: "sessionStorage", local: "localStorage", none: null };
+
+  /* Where the conversation id lives. "session" keeps one conversation per
+     tab, "local" keeps it across tabs and visits, "none" keeps it in memory
+     only, so nothing is written to the visitor's device — which of these a
+     site may use is its own consent question. Where the chosen area is
+     missing or throws (tests, privacy modes), memory still keeps one page
+     load's messages in one conversation. */
+  function conversationStore(storageKey, mode) {
+    if (!Object.prototype.hasOwnProperty.call(STORAGE_AREAS, mode)) {
+      throw new Error(
+        'storage must be "session", "local" or "none", not ' + JSON.stringify(mode)
+      );
+    }
+    const areaName = STORAGE_AREAS[mode];
     let memory = null;
-    return function () {
-      try {
-        let id = sessionStorage.getItem(storageKey);
-        if (!id) {
-          id = crypto.randomUUID();
-          sessionStorage.setItem(storageKey, id);
+
+    function current() {
+      if (areaName) {
+        try {
+          const area = globalThis[areaName];
+          let id = area.getItem(storageKey);
+          if (!id) {
+            id = randomId();
+            area.setItem(storageKey, id);
+          }
+          memory = id;
+          return id;
+        } catch (_error) {
+          /* the area is missing or refuses writes: memory holds the id */
         }
-        return id;
-      } catch (_error) {
-        if (!memory) {
-          memory = crypto.randomUUID();
-        }
-        return memory;
       }
-    };
+      if (!memory) {
+        memory = randomId();
+      }
+      return memory;
+    }
+
+    function set(id) {
+      memory = id;
+      if (areaName) {
+        try {
+          globalThis[areaName].setItem(storageKey, id);
+        } catch (_error) {
+          /* kept in memory */
+        }
+      }
+    }
+
+    function reset() {
+      memory = null;
+      if (areaName) {
+        try {
+          globalThis[areaName].removeItem(storageKey);
+        } catch (_error) {
+          /* memory has been cleared above */
+        }
+      }
+    }
+
+    return { current: current, set: set, reset: reset };
   }
 
   /* A connector for the kavalai agent server (`create_agent_router`): posts
      the message and consumes the SSE response. `EventSource` cannot be used
-     here — it cannot issue a POST body.
+     here — it cannot issue a POST body. docs/reference/widget.rst lists the
+     options.
 
-     Options: `url` (the stream endpoint), `inputKey`/`replyKey`/`choicesKey`
-     for workflows whose data types name things differently, `storageKey` for
-     the sessionStorage slot of the conversation id, `fetchImpl` for tests.
-
-     The returned object has `send(text, onPartial) -> {text, choices}` and
-     `reset()`, which starts a fresh conversation. */
+     The returned object has `send(text, onPartial) -> {text, choices,
+     runId}`, `reset()` (a fresh conversation), `conversationId()` and
+     `setConversationId(id)`, which a host calls from `onResponse` to adopt
+     an id the server issued. */
   function agentConnector(options) {
     options = options || {};
     const url = options.url || "/api/chat/stream_agent";
     const inputKey = options.inputKey || "message";
     const replyKey = options.replyKey || "agent_response";
     const choicesKey = options.choicesKey || "choices";
-    const storageKey = options.storageKey || "kavalai-chat-conversation";
+    const store = conversationStore(
+      options.storageKey || "kavalai-chat-conversation",
+      options.storage || "session"
+    );
     const fetchImpl = options.fetchImpl || fetch.bind(globalThis);
-    let currentId = conversationStore(storageKey);
+    let connector = null;
+
+    /* Resolved per request, so a function can hand out a token that has
+       been refreshed since the previous message. */
+    async function requestHeaders() {
+      const extra =
+        typeof options.headers === "function"
+          ? await options.headers()
+          : options.headers;
+      return Object.assign({ "Content-Type": "application/json" }, extra || {});
+    }
 
     async function send(text, onPartial) {
       const data = {};
       data[inputKey] = text;
       const response = await fetchImpl(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ external_id: currentId(), data: data }),
+        headers: await requestHeaders(),
+        body: JSON.stringify({ external_id: store.current(), data: data }),
       });
+      if (options.onResponse) {
+        await options.onResponse(response, connector);
+      }
 
       if (response.status === 429) {
-        throw new UserError("Too many messages. Please wait a moment and try again.");
+        throw new UserError(DEFAULT_TEXTS.rateLimited, "rateLimited");
       }
       if (response.status === 503) {
-        throw new UserError(
-          "The chat assistant is unavailable right now. Please try again later."
-        );
+        throw new UserError(DEFAULT_TEXTS.unavailable, "unavailable");
       }
       if (!response.ok || !response.body) {
-        throw new Error("Chat request failed with status " + response.status);
+        const error = new Error("Chat request failed with status " + response.status);
+        error.status = response.status;
+        /* Below 500 the server has answered about the request itself, or
+           accepted it; either way sending it again cannot help. */
+        if (response.status < 500) {
+          error.retryable = false;
+        }
+        throw error;
       }
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
       let reply = null;
+      let runId = null;
+      /* Set by the first frame: from then on the run exists on the server. */
+      let started = false;
 
       while (true) {
-        const chunk = await reader.read();
+        let chunk;
+        try {
+          chunk = await reader.read();
+        } catch (error) {
+          if (started) {
+            throw new UserError(DEFAULT_TEXTS.interrupted, "interrupted");
+          }
+          throw error;
+        }
         if (chunk.done) {
           break;
         }
@@ -464,7 +647,11 @@ potentially truncated and renders as the block it is becoming.
         buffer = parsed.rest;
 
         for (const event of parsed.events) {
+          started = true;
           switch (event.type) {
+            case "workflow_started":
+              runId = event.run_id || null;
+              break;
             case "restart":
               /* The LLM call was retried; everything streamed so far for this
                  run will be re-sent, so drop it. */
@@ -482,27 +669,42 @@ potentially truncated and renders as the block it is becoming.
               reply = event.output_data || null;
               break;
             case "workflow_failed":
-              throw new Error(event.value || "The chat agent failed to respond.");
+              throw finalError(
+                event.value || "The chat agent failed to respond.",
+                "failed"
+              );
           }
         }
       }
 
       if (!reply) {
+        if (started) {
+          throw new UserError(DEFAULT_TEXTS.interrupted, "interrupted");
+        }
         throw new Error("The chat agent did not return a reply.");
       }
-      return { text: reply[replyKey], choices: reply[choicesKey] || [] };
+      return {
+        text: reply[replyKey],
+        choices: reply[choicesKey] || [],
+        runId: runId,
+      };
     }
 
-    function reset() {
-      try {
-        sessionStorage.removeItem(storageKey);
-      } catch (_error) {
-        /* memory-backed ids rotate below */
+    function setConversationId(id) {
+      if (id) {
+        store.set(String(id));
+      } else {
+        store.reset();
       }
-      currentId = conversationStore(storageKey);
     }
 
-    return { send: send, reset: reset };
+    connector = {
+      send: send,
+      reset: store.reset,
+      conversationId: store.current,
+      setConversationId: setConversationId,
+    };
+    return connector;
   }
 
   /* ------------------------------------------------------------------ *
@@ -520,12 +722,15 @@ potentially truncated and renders as the block it is becoming.
   const MAXIMIZED_MIN_WIDTH = 520;
   /* Slightly longer than the 0.25s close CSS animation */
   const CLOSE_ANIMATION_MS = 300;
-  /* A failed request is retried before the visitor is told anything went
-     wrong: a dropped stream or an instance recycling under the agent endpoint
-     is transient, and the visitor cannot do anything useful with either.
-     Delays double so a restarting instance gets time to come back. */
+  /* A turn that failed before the server started it is retried before the
+     visitor is told anything went wrong: a dropped connection or an instance
+     recycling under the agent endpoint is transient, and the visitor cannot
+     do anything useful with either. Delays double so a restarting instance
+     gets time to come back. */
   const MAX_RETRIES = 3;
   const RETRY_BASE_DELAY_MS = 500;
+
+  const EVENTS = ["open", "close", "reply", "error", "resize", "feedback"];
 
   const ICONS = {
     close:
@@ -536,6 +741,10 @@ potentially truncated and renders as the block it is becoming.
       "M4 9h5V4 M20 9h-5V4 M4 15h5v5 M20 15h-5v5",
     chat:
       "M4 5h16v11H8l-4 4z",
+    thumbUp:
+      "M7 11v9H4v-9h3zm2 0l4-8a2 2 0 0 1 2 2v4h5a2 2 0 0 1 2 2.3l-1.3 7a2 2 0 0 1-2 1.7H9v-9z",
+    thumbDown:
+      "M17 13V4h3v9h-3zm-2 0l-4 8a2 2 0 0 1-2-2v-4H4a2 2 0 0 1-2-2.3l1.3-7A2 2 0 0 1 5.3 4H15v9z",
   };
 
   function svgIcon(name) {
@@ -638,14 +847,9 @@ potentially truncated and renders as the block it is becoming.
     }
   }
 
-  /* Mount the widget. Options:
-       connector  (required) `{send}` or a bare send function
-       mode       "floating" (default) or "inline"
-       target     element or selector; body for floating, required for inline
-       title, logo, greeting, emptyMessage, placeholder, suggestions
-       theme      {accent, surface, radius, ...} → --kcb-* custom properties
-     Returns {root, open, close, toggle, send, reset, destroy, setStatus,
-     setTheme}. */
+  /* Mount the widget; docs/reference/widget.rst lists the options. Returns
+     {root, open, close, toggle, send, reset, destroy, setStatus, setTheme,
+     on}. */
   function mount(options) {
     options = options || {};
     const connector =
@@ -654,6 +858,9 @@ potentially truncated and renders as the block it is becoming.
         : options.connector;
     if (!connector || typeof connector.send !== "function") {
       throw new Error("KavalChatbot.mount needs a connector with a send function");
+    }
+    if (options.onFeedback !== undefined && typeof options.onFeedback !== "function") {
+      throw new Error("onFeedback must be a function");
     }
     const mode = options.mode || "floating";
     const doc = document;
@@ -667,17 +874,12 @@ potentially truncated and renders as the block it is becoming.
       }
       target = doc.body;
     }
-    const texts = {
-      title: options.title !== undefined ? options.title : "Chatbot",
-      greeting:
-        options.greeting !== undefined ? options.greeting : "Hello! Click here for help.",
-      empty:
-        options.emptyMessage !== undefined
-          ? options.emptyMessage
-          : "Hi! Ask us anything.",
-      placeholder:
-        options.placeholder !== undefined ? options.placeholder : "Type a message...",
-    };
+    const texts = resolveTexts(options);
+    const onFeedback = options.onFeedback || null;
+    const maxRetries = options.maxRetries !== undefined ? options.maxRetries : MAX_RETRIES;
+    const retryDelayMs =
+      options.retryDelayMs !== undefined ? options.retryDelayMs : RETRY_BASE_DELAY_MS;
+    const listeners = new Map(EVENTS.map((name) => [name, new Set()]));
 
     const state = {
       isOpen: mode === "inline",
@@ -714,6 +916,9 @@ potentially truncated and renders as the block it is becoming.
     }
     const titleText = el("div", "kcb-title-text");
     titleText.appendChild(el("span", "kcb-title-label", texts.title));
+    if (options.disclosure !== false && texts.disclosure) {
+      titleText.appendChild(el("span", "kcb-disclosure", texts.disclosure));
+    }
     const statusEl = el("span", "kcb-status");
     statusEl.hidden = true;
     titleText.appendChild(statusEl);
@@ -721,12 +926,10 @@ potentially truncated and renders as the block it is becoming.
     const actions = el("span", "kcb-header-actions");
     const maximizeBtn = el("button", "kcb-icon-btn kcb-maximize");
     maximizeBtn.type = "button";
-    maximizeBtn.setAttribute("aria-label", "Maximize chat");
-    maximizeBtn.appendChild(svgIcon("expand"));
     maximizeBtn.addEventListener("click", toggleMaximize);
     const headerCloseBtn = el("button", "kcb-bubble kcb-bubble-inline");
     headerCloseBtn.type = "button";
-    headerCloseBtn.setAttribute("aria-label", "Close chat");
+    headerCloseBtn.setAttribute("aria-label", texts.closeChat);
     headerCloseBtn.appendChild(svgIcon("close"));
     headerCloseBtn.addEventListener("click", toggle);
     actions.appendChild(maximizeBtn);
@@ -738,11 +941,11 @@ potentially truncated and renders as the block it is becoming.
     windowEl.appendChild(header);
 
     const historyEl = el("div", "kcb-history");
-    const emptyEl = el("p", "kcb-empty", texts.empty);
+    const emptyEl = el("p", "kcb-empty", texts.emptyMessage);
     historyEl.appendChild(emptyEl);
     const typingEl = el("div", "kcb-message kcb-typing");
     typingEl.setAttribute("role", "status");
-    typingEl.setAttribute("aria-label", "Assistant is typing");
+    typingEl.setAttribute("aria-label", texts.typing);
     for (let i = 0; i < 3; i++) {
       typingEl.appendChild(el("span", "kcb-dot"));
     }
@@ -759,7 +962,8 @@ potentially truncated and renders as the block it is becoming.
     input.name = "draft";
     input.placeholder = texts.placeholder;
     input.autocomplete = "off";
-    const sendBtn = el("button", "kcb-send", "Send");
+    input.setAttribute("aria-label", texts.inputLabel);
+    const sendBtn = el("button", "kcb-send", texts.send);
     sendBtn.type = "submit";
     sendBtn.disabled = true;
     form.appendChild(input);
@@ -784,7 +988,7 @@ potentially truncated and renders as the block it is becoming.
       }
       bubbleEl = el("button", "kcb-bubble kcb-bubble-float");
       bubbleEl.type = "button";
-      bubbleEl.setAttribute("aria-label", "Open chat");
+      bubbleEl.setAttribute("aria-label", texts.openChat);
       if (options.logo) {
         const logo = el("img", "kcb-bubble-logo");
         logo.src = options.logo;
@@ -804,8 +1008,39 @@ potentially truncated and renders as the block it is becoming.
 
     target.appendChild(rootEl);
     renderChoices(state.suggestions);
+    renderMaximized();
+    let lastSize = "";
     applySize();
     window.addEventListener("resize", onViewportResize);
+
+    /* --- events ------------------------------------------------------ */
+
+    /* A throwing listener is reported and skipped, so host code cannot
+       leave the widget half-updated. */
+    function emit(name, payload) {
+      for (const listener of Array.from(listeners.get(name))) {
+        try {
+          listener(payload);
+        } catch (error) {
+          console.error(error);
+        }
+      }
+    }
+
+    function on(name, listener) {
+      if (!listeners.has(name)) {
+        throw new Error(
+          "Unknown widget event: " + name + " (one of " + EVENTS.join(", ") + ")"
+        );
+      }
+      if (typeof listener !== "function") {
+        throw new Error("A widget event listener must be a function");
+      }
+      listeners.get(name).add(listener);
+      return function unsubscribe() {
+        listeners.get(name).delete(listener);
+      };
+    }
 
     /* --- behaviour -------------------------------------------------- */
 
@@ -824,12 +1059,24 @@ potentially truncated and renders as the block it is becoming.
       );
     }
 
+    /* The single place the floating window's size changes, so `resize`
+       fires once per actual change — which is what a host sizing an iframe
+       around the widget needs. */
     function applySize() {
       if (mode !== "floating") {
         return;
       }
       windowEl.style.width = state.width + "px";
       windowEl.style.height = state.height + "px";
+      const size = state.width + "x" + state.height + ":" + state.isMaximized;
+      if (size !== lastSize) {
+        lastSize = size;
+        emit("resize", {
+          width: state.width,
+          height: state.height,
+          maximized: state.isMaximized,
+        });
+      }
     }
 
     function fitToViewport() {
@@ -844,6 +1091,16 @@ potentially truncated and renders as the block it is becoming.
       applySize();
     }
 
+    function renderMaximized() {
+      rootEl.classList.toggle("kcb-maximized", state.isMaximized);
+      maximizeBtn.setAttribute(
+        "aria-label",
+        state.isMaximized ? texts.restore : texts.maximize
+      );
+      maximizeBtn.setAttribute("aria-pressed", String(state.isMaximized));
+      maximizeBtn.replaceChildren(svgIcon(state.isMaximized ? "compress" : "expand"));
+    }
+
     function toggleMaximize() {
       if (state.isMaximized) {
         state.isMaximized = false;
@@ -855,13 +1112,7 @@ potentially truncated and renders as the block it is becoming.
         state.isMaximized = true;
         applyMaximizedSize();
       }
-      rootEl.classList.toggle("kcb-maximized", state.isMaximized);
-      maximizeBtn.setAttribute(
-        "aria-label",
-        state.isMaximized ? "Restore chat size" : "Maximize chat"
-      );
-      maximizeBtn.setAttribute("aria-pressed", String(state.isMaximized));
-      maximizeBtn.replaceChildren(svgIcon(state.isMaximized ? "compress" : "expand"));
+      renderMaximized();
     }
 
     /* A maximized window follows the viewport; a manually sized one is only
@@ -881,8 +1132,10 @@ potentially truncated and renders as the block it is becoming.
        left/top edges (or the corner) grows it leftwards/upwards. */
     function startResize(event, edge) {
       event.preventDefault();
-      state.isMaximized = false;
-      rootEl.classList.remove("kcb-maximized");
+      if (state.isMaximized) {
+        state.isMaximized = false;
+        renderMaximized();
+      }
       const handle = event.target;
       const startX = event.clientX;
       const startY = event.clientY;
@@ -944,9 +1197,10 @@ potentially truncated and renders as the block it is becoming.
       windowEl.classList.add("kcb-window-opening");
       rootEl.classList.add("kcb-open");
       if (bubbleEl) {
-        bubbleEl.setAttribute("aria-label", "Close chat");
+        bubbleEl.setAttribute("aria-label", texts.closeChat);
       }
       input.focus();
+      emit("open");
     }
 
     function close() {
@@ -958,13 +1212,14 @@ potentially truncated and renders as the block it is becoming.
       windowEl.classList.remove("kcb-window-opening");
       windowEl.classList.add("kcb-window-close");
       if (bubbleEl) {
-        bubbleEl.setAttribute("aria-label", "Open chat");
+        bubbleEl.setAttribute("aria-label", texts.openChat);
       }
       setTimeout(() => {
         if (!state.isOpen) {
           windowEl.hidden = true;
         }
       }, CLOSE_ANIMATION_MS);
+      emit("close");
     }
 
     function toggle() {
@@ -1006,7 +1261,7 @@ potentially truncated and renders as the block it is becoming.
     }
 
     function addAgentMessage() {
-      const bubble = el("div", "kcb-message");
+      const bubble = el("div", "kcb-message kcb-from-agent");
       /* An agent entry starts empty and fills as the reply streams in; the
          typing indicator stands in for it until then, so an empty bubble is
          never shown. */
@@ -1022,28 +1277,107 @@ potentially truncated and renders as the block it is becoming.
       scrollHistory();
     }
 
+    /* Feedback belongs to the host: the widget renders the controls and
+       reports each choice, and the host stores it wherever it keeps
+       feedback. A rejected promise is reported, not retried. */
+    function deliverFeedback(runId, vote, comment) {
+      emit("feedback", { runId: runId, vote: vote, comment: comment });
+      try {
+        const result = onFeedback(runId, vote, comment);
+        if (result && typeof result.then === "function") {
+          result.then(null, (error) => console.error(error));
+        }
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    function commentForm(submit) {
+      const commentEl = el("form", "kcb-feedback-comment");
+      const field = el("input");
+      field.type = "text";
+      field.name = "comment";
+      field.autocomplete = "off";
+      field.placeholder = texts.feedbackPlaceholder;
+      field.setAttribute("aria-label", texts.feedbackPlaceholder);
+      const submitBtn = el("button", "kcb-feedback-submit", texts.feedbackSubmit);
+      submitBtn.type = "submit";
+      commentEl.appendChild(field);
+      commentEl.appendChild(submitBtn);
+      commentEl.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const comment = field.value.trim();
+        if (!comment) {
+          return;
+        }
+        submit(comment);
+        commentEl.replaceChildren(
+          el("span", "kcb-feedback-thanks", texts.feedbackThanks)
+        );
+      });
+      return commentEl;
+    }
+
+    /* Thumbs under a completed answer. A vote is delivered at once; with
+       `feedbackComment` a comment box follows the first vote, and its text
+       arrives in a second call carrying the same run and the current vote. */
+    function addFeedback(runId) {
+      const row = el("div", "kcb-feedback");
+      row.setAttribute("role", "group");
+      row.setAttribute("aria-label", texts.feedbackLabel);
+      const buttons = new Map();
+      let vote = null;
+      let commentEl = null;
+      const thumbs = [
+        ["up", "kcb-feedback-up", texts.feedbackUp, "thumbUp"],
+        ["down", "kcb-feedback-down", texts.feedbackDown, "thumbDown"],
+      ];
+      for (const [choice, className, label, icon] of thumbs) {
+        const button = el("button", "kcb-feedback-btn " + className);
+        button.type = "button";
+        button.title = label;
+        button.setAttribute("aria-label", label);
+        button.setAttribute("aria-pressed", "false");
+        button.appendChild(svgIcon(icon));
+        button.addEventListener("click", () => {
+          vote = choice;
+          for (const [name, other] of buttons) {
+            other.setAttribute("aria-pressed", String(name === choice));
+          }
+          deliverFeedback(runId, choice, null);
+          if (options.feedbackComment && !commentEl) {
+            commentEl = commentForm((comment) => deliverFeedback(runId, vote, comment));
+            row.appendChild(commentEl);
+            scrollHistory();
+          }
+        });
+        buttons.set(choice, button);
+        row.appendChild(button);
+      }
+      historyEl.insertBefore(row, typingEl);
+    }
+
     function delay(ms) {
       return new Promise((resolve) => setTimeout(resolve, ms));
     }
 
-    /* Sends the message, retrying a failed attempt with exponential backoff.
-       A UserError is terminal: rate limiting and "unavailable" are deliberate
-       answers from the backend, and retrying would only walk further into the
-       per-IP limiter. The typing dots stay up throughout, so a retried
-       request looks to the visitor like a slow one. */
+    /* Sends the message, retrying with exponential backoff only a turn the
+       server never started (see isRetryable). The typing dots stay up
+       throughout, so a retried request looks to the visitor like a slow
+       one. */
     async function request(text, bubble) {
       for (let attempt = 0; ; attempt++) {
         try {
           return await connector.send(text, (partial) => setAgentText(bubble, partial));
         } catch (error) {
-          if (error instanceof UserError || attempt >= MAX_RETRIES) {
+          if (!isRetryable(error) || attempt >= maxRetries || state.destroyed) {
             throw error;
           }
           /* Whatever streamed before the failure belongs to a reply that will
              never finish. Dropping it brings the dots back and keeps the next
              attempt's partials from being read as a continuation. */
           setAgentText(bubble, "");
-          await delay(RETRY_BASE_DELAY_MS * Math.pow(2, attempt));
+          await delay(retryDelayMs * Math.pow(2, attempt));
         }
       }
     }
@@ -1065,15 +1399,19 @@ potentially truncated and renders as the block it is becoming.
       const bubble = addAgentMessage();
       try {
         const reply = await request(text, bubble);
-        setAgentText(bubble, reply.text);
-        renderChoices(reply.choices || []);
+        const choices = reply.choices || [];
+        const runId = reply.runId || null;
+        setAgentText(bubble, reply.text || "");
+        renderChoices(choices);
+        if (onFeedback && runId) {
+          addFeedback(runId);
+        }
+        emit("reply", { message: text, text: reply.text, choices: choices, runId: runId });
       } catch (error) {
-        setAgentText(
-          bubble,
-          error instanceof UserError
-            ? error.message
-            : "Something went wrong. Please try again."
-        );
+        const shown = errorText(error, texts);
+        bubble.classList.add("kcb-error");
+        setAgentText(bubble, shown);
+        emit("error", { error: error, message: text, text: shown });
       } finally {
         state.isSending = false;
         typingEl.hidden = true;
@@ -1099,6 +1437,9 @@ potentially truncated and renders as the block it is becoming.
       state.destroyed = true;
       window.removeEventListener("resize", onViewportResize);
       rootEl.remove();
+      for (const set of listeners.values()) {
+        set.clear();
+      }
     }
 
     /* A short line under the title — model loading progress, "Ready",
@@ -1129,6 +1470,7 @@ potentially truncated and renders as the block it is becoming.
       destroy: destroy,
       setStatus: setStatus,
       setTheme: setTheme,
+      on: on,
     };
   }
 
@@ -1136,6 +1478,11 @@ potentially truncated and renders as the block it is becoming.
     mount: mount,
     agentConnector: agentConnector,
     UserError: UserError,
+    DEFAULT_TEXTS: DEFAULT_TEXTS,
+    EVENTS: EVENTS,
+    resolveTexts: resolveTexts,
+    errorText: errorText,
+    isRetryable: isRetryable,
     parseMarkdown: parseMarkdown,
     parseInline: parseInline,
     safeHref: safeHref,
