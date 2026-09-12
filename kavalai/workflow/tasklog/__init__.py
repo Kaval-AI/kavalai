@@ -23,6 +23,7 @@ from kavalai.workflow.tasklog.base import (
 )
 from kavalai.workflow.tasklog.memory import (
     MemoryTaskLogger,
+    ModelCallRecord,
     TaskRecord,
     TeeTaskLogger,
 )
@@ -36,6 +37,7 @@ __all__ = [
     "TokenAccumulator",
     "truncate_payload",
     "MemoryTaskLogger",
+    "ModelCallRecord",
     "TaskRecord",
     "TeeTaskLogger",
     "SqliteTaskLogger",

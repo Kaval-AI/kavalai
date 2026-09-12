@@ -69,7 +69,9 @@ finished run's conversation back:
 Per-model-call statistics come from the LLM clients themselves: every call
 produces a ``ModelCallStat`` with token usage and timing, delivered through the
 ``ModelStatsReceiver`` callback interface (``ModelStatsLogger`` merely logs
-them). See :doc:`../tutorials/llm_clients`.
+them). During a run the receiver is the run's ``TokenAccumulator``, which adds
+each call to ``state.token_usage`` and passes it to the task logger with the
+agent, session and run that made it. See :doc:`../tutorials/llm_clients`.
 
 Attempts that never produced a response are recorded too, with the provider's
 status code and the error text in place of token counts — so a rate-limit storm
@@ -166,14 +168,15 @@ them, and a branch as *expr = value → target*.
    ``tasks`` is the biggest table you will own, and tool payloads are exactly
    where personal data lives. It grows without bound by design — the assumption
    is that you export it to a warehouse and do not retain it indefinitely, so
-   schedule a ``DELETE FROM tasks WHERE created_at < …`` job on day one rather
-   than discovering the need later.
+   schedule a retention job on day one (see :ref:`observability-retention`)
+   rather than discovering the need later.
 
    ``max_payload_bytes`` on the task logger (256 KiB by default) replaces an
-   oversized payload with a marker carrying its real size and a preview. It is
-   there so one four-megabyte crawl result does not break the writer, the row
-   and the backoffice task list — an operational limit, not a compliance
-   control.
+   oversized payload — of a node or of a model call — with a marker carrying
+   its real size and a preview. It is there so one four-megabyte crawl result
+   does not break the writer, the row and the backoffice task list — an
+   operational limit, not a compliance control. The compliance controls are
+   described in :ref:`observability-recording-less`.
 
 
 Reading a trajectory without a database
@@ -235,6 +238,255 @@ test or a batch), await them explicitly:
 .. code-block:: python
 
    await tasklog.flush()
+
+.. _observability-recording-less:
+
+Recording less
+--------------
+
+Everything above is recorded by default, and two parts of it are copies of the
+conversation: a node's ``inputs``, ``output`` and ``prompt``, and a model
+call's ``request_data``, which is the whole prompt — chat history and retrieved
+passages included. A deployer who must not keep a second copy of the
+transcript, under the GDPR for example, can leave those copies out. Every task
+logger takes the same options:
+
+``record_nodes``
+   When ``False``, node executions are not recorded at all. Model calls still
+   are.
+
+``record_payloads``
+   When ``False``, a node's ``inputs``, ``output`` and ``prompt`` and a model
+   call's ``request_data`` and ``response_data`` are not stored. Names,
+   timings, errors and token counts are.
+
+``max_payload_bytes``
+   The size cap described above, which applies to model-call payloads as it
+   does to node payloads.
+
+The engine adds one more: ``record_context=False`` keeps only the input and
+the output in ``runs.context``, instead of every value each node produced.
+Each option is stated where the logger or the engine is built, so what a
+deployment leaves out can be read from the code that builds it; nothing is
+left out silently.
+
+In the example below a scripted client stands in for the model, so it runs
+without a provider key; its token counts are estimates (see
+:mod:`kavalai.testing`).
+
+.. code-block:: python
+
+   from uuid import UUID
+
+   from pydantic import BaseModel
+
+   from kavalai.agent_service import AgentService
+   from kavalai.db import Run, db_manager
+   from kavalai.testing import ScriptedLlmClient
+   from kavalai.workflow import WorkflowBuilder
+   from kavalai.workflow.tasklog import SqliteTaskLogger
+
+
+   class Message(BaseModel):
+       user_message: str
+
+
+   class Topic(BaseModel):
+       topic: str
+
+
+   class Reply(BaseModel):
+       agent_response: str
+
+
+   await db_manager.init_sqlite()
+   service = AgentService(db_manager.get_sqlite_sessionmaker())
+   tasklog = SqliteTaskLogger("tasklog.db", record_payloads=False)
+   scripted = ScriptedLlmClient([
+       {"topic": "opening hours"}, {"agent_response": "From noon."},
+       {"topic": "opening hours"}, {"agent_response": "Closed on Mondays."},
+   ])
+
+   engine = (
+       WorkflowBuilder("Village guide", llm_model="openai/gpt-5.6-luna")
+       .data_model("input", Message)
+       .data_model("topic", Topic)
+       .data_model("output", Reply)
+       .start("classify")
+       .llm("classify", prompt="Name the topic of the question.",
+            inputs={"message": "input"}, output="topic", next="reply")
+       .llm("reply", prompt="You are a concise guide to Green Village.",
+            inputs={"message": "input"}, output="output", next="end")
+       .end()
+       .build_engine(agent_service=service, task_logger=tasklog,
+                     record_context=False, client_factory=scripted)
+   )
+   state = await engine.run({"user_message": "Is the pub open on Sundays?"})
+
+   for task in await tasklog.get_tasks(state.run_id):
+       print(task["seq"], task["name"], task["inputs"], task["output"])
+   for call in await tasklog.get_model_calls(state.run_id):
+       print(call["model"], call["request_data"], call["total_tokens"])
+
+   async with service.session_maker() as db:
+       run = await db.get(Run, UUID(state.run_id))
+   print(sorted(run.context))
+
+.. code-block:: text
+
+   0 start None None
+   1 classify None None
+   2 reply None None
+   3 end None None
+   openai/gpt-5.6-luna None 39
+   openai/gpt-5.6-luna None 43
+   ['input', 'output']
+
+The path, the timings and the token counts remain; the prompts and the answers
+do not, and ``runs.context`` no longer holds the topic the first node produced.
+In production the same options go to
+``PostgresTaskLogger(service, record_payloads=False)``.
+
+.. _observability-custom-loggers:
+
+Custom loggers and composition
+------------------------------
+
+A task logger is a subclass of ``TaskLogger`` with two hooks, ``write_node``
+and ``write_model_call``. The base class calls them in the background, after
+the recording options and the payload cap have been applied, and passes
+``write_model_call`` the Pydantic ``ModelCallStat`` together with the
+``agent_id``, ``session_id`` and ``run_id`` of the call. A logger with a
+purpose of its own does not subclass the database logger. It sits beside it,
+through ``TeeTaskLogger``, which hands every record to each of its loggers;
+each keeps its own options. A meter that counts each conversation's tokens for
+billing, beside the logger of the example above, for a second turn:
+
+.. code-block:: python
+
+   from collections import Counter
+
+   from kavalai.workflow.tasklog import TaskLogger, TeeTaskLogger
+
+
+   class Meter(TaskLogger):
+       """Counts the tokens each conversation used, for billing."""
+
+       def __init__(self):
+           super().__init__(record_nodes=False, record_payloads=False)
+           self.tokens = Counter()
+
+       async def write_node(self, **record):
+           """Not called: the meter records no nodes."""
+
+       async def write_model_call(self, stats, *, agent_id, session_id,
+                                  run_id):
+           self.tokens[session_id] += stats.total_tokens or 0
+
+
+   meter = Meter()
+   both = TeeTaskLogger(tasklog, meter)
+   later = await engine.run({"user_message": "And on Mondays?"},
+                            session_id=state.session_id, task_logger=both)
+   await both.flush()
+   print(meter.tokens[later.session_id], later.token_usage["total_tokens"])
+
+.. code-block:: text
+
+   91 91
+
+The meter's count equals the second run's ``token_usage``: ``task_logger=`` on
+``run`` replaces the engine's logger for that run only, so the meter saw the
+second turn and not the first.
+
+.. _observability-cost-per-run:
+
+Cost per run and per conversation
+---------------------------------
+
+Every model call row carries the ``agent_id``, ``session_id`` and ``run_id``
+of the run that made it. The engine gives the run's ``TokenAccumulator`` those
+ids as soon as the run is recorded, and a ``rag_query`` node hands the same
+accumulator to its RAG service, so the embedding of a query is attributed in
+the same way. What a run used is then one query:
+
+.. code-block:: sql
+
+   SELECT model,
+          count(*)                               AS calls,
+          sum(prompt_tokens)                     AS prompt_tokens,
+          coalesce(sum(cached_prompt_tokens), 0) AS cached_tokens,
+          sum(completion_tokens)                 AS completion_tokens
+   FROM model_call_stats
+   WHERE run_id = :run_id
+   GROUP BY model;
+
+For the first run above, and — with ``session_id = :session_id`` in the
+``WHERE`` clause — for the whole conversation after the second turn:
+
+.. code-block:: text
+
+   model                calls  prompt_tokens  cached_tokens  completion_tokens
+   openai/gpt-5.6-luna      2             67              0                 15
+
+   model                calls  prompt_tokens  cached_tokens  completion_tokens
+   openai/gpt-5.6-luna      4            141              0                 32
+
+The query reads the same columns in the file of a ``SqliteTaskLogger``, as
+here, and in the agent database that ``PostgresTaskLogger`` writes to, where
+``service.get_model_call_stats(run_id=…)`` and ``session_id=…`` return the rows
+themselves. None of the three ids is a foreign key, so the rows outlive the
+conversation they belong to. Pricing the four columns remains outside the
+library, for the reasons given above.
+
+.. _observability-retention:
+
+Retention
+---------
+
+Nothing in the runtime store is deleted on its own, and ``tasks`` and
+``chat_messages`` grow with every turn.
+:meth:`~kavalai.agent_service.AgentService.purge_sessions` deletes the
+sessions whose last activity — ``sessions.updated_at``, the time of the last
+run — is older than a cutoff:
+
+.. code-block:: python
+
+   from datetime import datetime, timedelta, timezone
+
+   cutoff = datetime.now(timezone.utc) - timedelta(days=90)
+   async for batch in service.purge_sessions(cutoff, batch_size=500):
+       print(f"deleted {len(batch)} sessions")
+
+Against a database holding 1,200 sessions idle for 100 days, it prints:
+
+.. code-block:: text
+
+   deleted 500 sessions
+   deleted 500 sessions
+   deleted 200 sessions
+
+Each batch is one transaction, oldest sessions first, and its session ids are
+yielded once it is committed, so a caller can delete rows of its own keyed by
+session in step. A session's runs, tasks and chat messages go with it through
+the foreign keys. Its model calls stay: the token counts are a cost record,
+while the payloads are the conversation again, so a purge sets
+``request_data`` and ``response_data`` to ``NULL`` and keeps the rest.
+
+.. code-block:: python
+
+   (call,) = await service.get_model_call_stats(limit=1)
+   print(call.total_tokens, call.request_data)
+
+.. code-block:: text
+
+   27 None
+
+``agent_ids`` restricts a purge to some agents — the agents of one tenant, for
+example. ``None`` means every agent, and an empty list purges nothing, so a
+list computed from an empty selection cannot purge the whole database.
+``delete_history_for_session`` treats a single session's model calls in the
+same way, while keeping the session and its runs.
 
 The backoffice UI
 -----------------

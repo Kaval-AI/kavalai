@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
+    Index,
     JSON,
     MetaData,
     TEXT,
@@ -190,7 +191,8 @@ def build_db_uri(
 # to ``PRAGMA user_version``). Bump on any ORM schema change: SQLite stores
 # created with a different version are dropped and recreated on init.
 # 2: rag_index left the shared metadata (RAG backends self-provision).
-SQLITE_SCHEMA_VERSION = 4
+# 5: model_call_stats.session_id / run_id and the composite indexes.
+SQLITE_SCHEMA_VERSION = 5
 
 
 def _drop_all_sqlite_tables(connection):
@@ -599,14 +601,25 @@ class ModelCallStat(Base):
     multiple. ``cached_prompt_tokens`` and ``reasoning_tokens`` are stored
     instead, which is what makes cost computable downstream (e.g. with
     ``genai-prices``) from a row like this one.
+
+    ``agent_id``, ``session_id`` and ``run_id`` attribute the call to the run
+    that made it, so cost per run and per conversation is a query. None of
+    them is a foreign key: a cost record outlives the conversation it belongs
+    to. Purging a session blanks its calls' payloads — the prompt is the
+    conversation again — and keeps the token counts.
     """
 
     __tablename__ = "model_call_stats"
+    __table_args__ = (
+        Index("ix_model_call_stats_agent_id_created_at", "agent_id", "created_at"),
+    )
 
     id: Mapped[UUID] = mapped_column(uuid_column(), primary_key=True, default=uuid4)
     call_type: Mapped[str] = mapped_column(TEXT, nullable=False, index=True)
     model: Mapped[str] = mapped_column(TEXT, nullable=False, index=True)
-    agent_id: Mapped[UUID | None] = mapped_column(uuid_column(), index=True)
+    agent_id: Mapped[UUID | None] = mapped_column(uuid_column())
+    session_id: Mapped[UUID | None] = mapped_column(uuid_column(), index=True)
+    run_id: Mapped[UUID | None] = mapped_column(uuid_column(), index=True)
     request_data: Mapped[dict | None] = mapped_column(json_column())
     response_data: Mapped[dict | None] = mapped_column(json_column())
     response_code: Mapped[int | None] = mapped_column(Integer)
@@ -638,13 +651,21 @@ class Session(Base):
     A session groups together everything exchanged with one agent over a
     conversation: its runs, tasks and chat messages. ``external_id`` lets a
     caller correlate the session with an identifier in their own system.
+
+    ``updated_at`` is the time of the session's last run: every run moves it.
+    Retention and the recent-first lists sort on it, which is why it is
+    indexed.
     """
 
     __tablename__ = "sessions"
+    __table_args__ = (
+        Index("ix_sessions_agent_id_external_id", "agent_id", "external_id"),
+        Index("ix_sessions_agent_id_updated_at", "agent_id", "updated_at"),
+    )
 
     id: Mapped[UUID] = mapped_column(uuid_column(), primary_key=True, default=uuid4)
     agent_id: Mapped[UUID] = mapped_column(
-        ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, index=True
+        ForeignKey("agents.id", ondelete="CASCADE"), nullable=False
     )
     external_id: Mapped[str | None] = mapped_column(TEXT)
     created_at: Mapped[datetime] = mapped_column(
@@ -654,6 +675,7 @@ class Session(Base):
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
+        index=True,
     )
 
     agent: Mapped["Agent"] = relationship(back_populates="sessions")
@@ -763,13 +785,17 @@ class ChatMessage(Base):
     """
 
     __tablename__ = "chat_messages"
+    __table_args__ = (
+        Index("ix_chat_messages_session_id_created_at", "session_id", "created_at"),
+        Index("ix_chat_messages_agent_id_created_at", "agent_id", "created_at"),
+    )
 
     id: Mapped[UUID] = mapped_column(uuid_column(), primary_key=True, default=uuid4)
     agent_id: Mapped[UUID] = mapped_column(
-        ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, index=True
+        ForeignKey("agents.id", ondelete="CASCADE"), nullable=False
     )
     session_id: Mapped[UUID] = mapped_column(
-        ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False, index=True
+        ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False
     )
     run_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("runs.id", ondelete="SET NULL"), index=True

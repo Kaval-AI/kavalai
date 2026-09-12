@@ -1,8 +1,11 @@
+import sqlite3
+
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kavalai.db import (
+    SQLITE_SCHEMA_VERSION,
     Agent,
     Session,
     Run,
@@ -215,6 +218,52 @@ async def test_sqlite_compat_sessionmaker_runs_agent_service():
 
     updated = await service.update_run(run.id, output_data={"a": 1})
     assert updated.output_data == {"a": 1}
+
+
+def _stale_browser_store(path) -> None:
+    """A SQLite store stamped by the previous schema version, with a row."""
+    connection = sqlite3.connect(path)
+    with connection:
+        connection.execute(
+            "CREATE TABLE model_call_stats (id TEXT PRIMARY KEY, call_type TEXT)"
+        )
+        connection.execute("INSERT INTO model_call_stats VALUES ('old', 'llm')")
+        connection.execute(f"PRAGMA user_version = {SQLITE_SCHEMA_VERSION - 1}")
+    connection.close()
+
+
+def _store_layout(path) -> tuple[int, set[str], int]:
+    connection = sqlite3.connect(path)
+    try:
+        (version,) = connection.execute("PRAGMA user_version").fetchone()
+        columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(model_call_stats)")
+        }
+        (rows,) = connection.execute("SELECT count(*) FROM model_call_stats").fetchone()
+    finally:
+        connection.close()
+    return version, columns, rows
+
+
+@pytest.mark.parametrize("flavour", ["async", "compat"])
+async def test_a_stale_browser_store_is_recreated(tmp_path, flavour):
+    """Browser stores have no migrations: an older stamp means start again."""
+    from kavalai.db import DatabaseManager
+
+    path = str(tmp_path / "browser.db")
+    _stale_browser_store(path)
+    manager = DatabaseManager()
+    if flavour == "async":
+        await manager.init_sqlite(db_path=path)
+        await manager.get_sqlite_engine(db_path=path).dispose()
+    else:
+        manager.get_sqlite_compat_sessionmaker(db_path=path)
+        manager.get_sqlite_sync_engine(db_path=path).dispose()
+
+    version, columns, rows = _store_layout(path)
+    assert version == SQLITE_SCHEMA_VERSION
+    assert {"agent_id", "session_id", "run_id"} <= columns
+    assert rows == 0
 
 
 @pytest.mark.asyncio

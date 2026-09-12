@@ -3,6 +3,7 @@ import pytest_asyncio
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 from kavalai.db import Agent, Session, Run, Task, ChatMessage, db_manager
+from kavalai.backoffice import sessions as sessions_module
 from kavalai.backoffice.sessions import get_sessions_summary, get_session_details
 
 
@@ -399,3 +400,99 @@ async def test_session_details_returns_the_trajectory_in_execution_order(session
     # This is what the run-tasks view indents under its node.
     assert crawl.parent_task_name == "research"
     assert crawl.tool_uri == "python://crawl"
+
+
+@pytest.mark.asyncio
+async def test_sessions_are_listed_by_last_activity(sessions_db):
+    """``updated_at`` is the last run, so a long conversation stays on top."""
+    agent = Agent(id=uuid4(), name="Agent")
+    sessions_db.add(agent)
+    await sessions_db.commit()
+
+    now = datetime.now(timezone.utc)
+    long_running = Session(
+        id=uuid4(),
+        agent_id=agent.id,
+        created_at=now - timedelta(days=30),
+        updated_at=now - timedelta(minutes=1),
+    )
+    one_off = Session(
+        id=uuid4(),
+        agent_id=agent.id,
+        created_at=now - timedelta(hours=2),
+        updated_at=now - timedelta(hours=2),
+    )
+    tied = [
+        Session(
+            id=uuid4(),
+            agent_id=agent.id,
+            created_at=now - timedelta(days=1),
+            updated_at=now - timedelta(hours=5),
+        )
+        for _ in range(2)
+    ]
+    sessions_db.add_all([long_running, one_off, *tied])
+    await sessions_db.commit()
+
+    result = await get_sessions_summary(sessions_db)
+    ids = [summary.session_id for summary in result["sessions"]]
+    # Equal times are ordered by id, so consecutive pages never overlap.
+    tied_ids = sorted((session.id for session in tied), reverse=True)
+    assert ids == [long_running.id, one_off.id, *tied_ids]
+
+    page = await get_sessions_summary(sessions_db, limit=2, offset=2)
+    assert [summary.session_id for summary in page["sessions"]] == tied_ids
+    assert page["total_count"] == 4
+
+
+@pytest.mark.asyncio
+async def test_get_sessions_summary_delegates_to_the_service_query(monkeypatch):
+    calls = []
+
+    async def summarise(db_session, agent_ids, **filters):
+        calls.append((db_session, agent_ids, filters))
+        return {"sessions": [], "total_count": 0}
+
+    monkeypatch.setattr(sessions_module, "summarise_sessions", summarise)
+    agent_id = uuid4()
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 2, 1, tzinfo=timezone.utc)
+
+    await get_sessions_summary(
+        "db",
+        agent_id=agent_id,
+        search="needle",
+        external_id="eval:",
+        start_date=start,
+        end_date=end,
+        limit=5,
+        offset=10,
+    )
+    await get_sessions_summary("db")
+
+    assert calls == [
+        (
+            "db",
+            [agent_id],
+            dict(
+                search="needle",
+                external_id_prefix="eval:",
+                start=start,
+                end=end,
+                limit=5,
+                offset=10,
+            ),
+        ),
+        (
+            "db",
+            None,
+            dict(
+                search=None,
+                external_id_prefix=None,
+                start=None,
+                end=None,
+                limit=50,
+                offset=0,
+            ),
+        ),
+    ]

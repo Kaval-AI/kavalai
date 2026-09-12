@@ -1,8 +1,59 @@
+import json
+import sqlite3
+
 import pytest
 
 from kavalai.workflow.tasklog.base import StatsBridge, TokenAccumulator
 from kavalai.workflow.tasklog.sqlite import SqliteTaskLogger
 from kavalai.llm_clients.base_client import ModelCallStat
+
+_OLD_MODEL_CALL_STATS = """
+CREATE TABLE model_call_stats (
+    id TEXT PRIMARY KEY,
+    call_type TEXT NOT NULL,
+    model TEXT,
+    agent_id TEXT,
+    request_data TEXT,
+    response_data TEXT,
+    response_code INTEGER,
+    prompt_tokens INTEGER,
+    completion_tokens INTEGER,
+    total_tokens INTEGER,
+    cached_prompt_tokens INTEGER,
+    reasoning_tokens INTEGER,
+    batch_size INTEGER,
+    duration_seconds REAL
+)
+"""
+"""The logger's own ``model_call_stats`` before it carried a session and a run."""
+
+
+def a_model_call(**overrides):
+    values = dict(
+        call_type="llm",
+        model="fake/scripted",
+        request_data=json.dumps({"messages": ["the whole transcript"]}),
+        response_data=json.dumps({"text": "noted"}),
+        prompt_tokens=11,
+        completion_tokens=4,
+        total_tokens=15,
+    )
+    values.update(overrides)
+    return ModelCallStat(**values)
+
+
+def log_one_node(task_logger, run_id="r1"):
+    task_logger.log_node(
+        run_id=run_id,
+        session_id="s1",
+        agent_id="a1",
+        node_name="answer",
+        node_type="llm",
+        inputs={"user_message": "hei"},
+        output={"agent_response": "tere"},
+        prompt="Answer the visitor.",
+        duration=0.25,
+    )
 
 
 @pytest.fixture
@@ -129,10 +180,10 @@ async def test_flush_without_tasks_is_safe(task_logger):
 async def test_base_close_default_flushes():
     # A minimal TaskLogger using the ABC's default close()/flush().
     class MinimalLogger(SqliteTaskLogger.__bases__[0]):
-        async def _log_node_impl(self, **kwargs):
+        async def write_node(self, **kwargs):
             return None
 
-        async def _log_model_call_impl(self, stats, agent_id):
+        async def write_model_call(self, stats, **ids):
             return None
 
     logger = MinimalLogger()
@@ -219,3 +270,104 @@ async def test_logged_rows_can_be_read_back_without_sql():
         assert call["response_code"] == 200
     finally:
         await logger.close()
+
+
+async def test_record_nodes_false_keeps_the_model_calls():
+    logger = SqliteTaskLogger(record_nodes=False)
+    try:
+        log_one_node(logger)
+        logger.log_model_call(a_model_call(), "a1", session_id="s1", run_id="r1")
+        assert await logger.get_tasks() == []
+        (call,) = await logger.get_model_calls()
+        assert call["total_tokens"] == 15
+    finally:
+        await logger.close()
+
+
+async def test_record_payloads_false_stores_no_payloads():
+    logger = SqliteTaskLogger(record_payloads=False)
+    try:
+        log_one_node(logger)
+        logger.log_model_call(a_model_call(), "a1")
+
+        (task,) = await logger.get_tasks()
+        assert (task["inputs"], task["output"], task["prompt"]) == (None, None, None)
+        assert task["name"] == "answer"
+        assert task["duration_seconds"] == 0.25
+
+        (call,) = await logger.get_model_calls()
+        assert call["request_data"] is None
+        assert call["response_data"] is None
+        assert (call["prompt_tokens"], call["completion_tokens"]) == (11, 4)
+    finally:
+        await logger.close()
+
+
+async def test_the_payload_cap_covers_model_calls():
+    logger = SqliteTaskLogger(max_payload_bytes=256)
+    try:
+        logger.log_model_call(
+            a_model_call(response_data=json.dumps({"page": "x" * 5000}))
+        )
+        (call,) = await logger.get_model_calls()
+        marker = json.loads(call["response_data"])
+        assert marker["truncated"] is True
+        assert marker["bytes"] > 5000
+        # The request was under the cap and is stored as it came.
+        assert json.loads(call["request_data"]) == {
+            "messages": ["the whole transcript"]
+        }
+    finally:
+        await logger.close()
+
+
+async def test_model_calls_carry_their_session_and_run(task_logger):
+    bridge = StatsBridge(task_logger, "a1", session_id="s1", run_id="r1")
+    bridge.receive_model_stats(a_model_call())
+    accumulator = TokenAccumulator(task_logger, "a1", session_id="s1", run_id="r2")
+    accumulator.receive_model_stats(a_model_call(total_tokens=3))
+    task_logger.log_model_call(a_model_call(total_tokens=1))
+
+    (first,) = await task_logger.get_model_calls("r1")
+    assert (first["agent_id"], first["session_id"], first["run_id"]) == (
+        "a1",
+        "s1",
+        "r1",
+    )
+    (second,) = await task_logger.get_model_calls(run_id="r2")
+    assert second["total_tokens"] == 3
+    assert len(await task_logger.get_model_calls()) == 3
+    assert await task_logger.get_model_calls("r3") == []
+
+
+async def test_a_file_from_an_older_version_gains_the_new_columns(tmp_path):
+    path = str(tmp_path / "tasklog.db")
+    connection = sqlite3.connect(path)
+    with connection:
+        connection.execute(_OLD_MODEL_CALL_STATS)
+        connection.execute(
+            "INSERT INTO model_call_stats (id, call_type, model, agent_id, "
+            "total_tokens) VALUES ('old', 'llm', 'm', 'a1', 9)"
+        )
+    connection.close()
+
+    logger = SqliteTaskLogger(path)
+    try:
+        logger.log_model_call(a_model_call(), "a1", session_id="s1", run_id="r1")
+        rows = {row["id"]: row for row in await logger.get_model_calls()}
+    finally:
+        await logger.close()
+
+    old = rows.pop("old")
+    assert (old["session_id"], old["run_id"], old["total_tokens"]) == (None, None, 9)
+    ((_, new),) = rows.items()
+    assert (new["session_id"], new["run_id"]) == ("s1", "r1")
+
+    # Opened again, the file has nothing left to add.
+    reopened = SqliteTaskLogger(path)
+    try:
+        assert len(await reopened.get_model_calls()) == 2
+        (again,) = await reopened.get_model_calls("r1")
+        assert again["session_id"] == "s1"
+    finally:
+        await reopened.close()

@@ -1,7 +1,61 @@
-import pytest
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
-from kavalai.agent_service import AgentService
-from kavalai.db import DatabaseManager, ModelCallStat
+
+import pytest
+from sqlalchemy import func, select, update
+
+from kavalai.agent_service import AgentService, _orm_stat
+from kavalai.db import (
+    ChatMessage,
+    DatabaseManager,
+    ModelCallStat,
+    Run,
+    Session,
+    Task,
+)
+from kavalai.llm_clients.base_client import ModelCallStat as PydModelCallStat
+
+
+def _utc(moment: datetime) -> datetime:
+    """SQLite returns naive UTC timestamps, Postgres aware ones."""
+    return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
+
+
+async def _set_last_activity(session_maker, session_id, when: datetime) -> None:
+    async with session_maker() as db:
+        await db.execute(
+            update(Session).where(Session.id == session_id).values(updated_at=when)
+        )
+        await db.commit()
+
+
+async def _count(session_maker, model, *where) -> int:
+    async with session_maker() as db:
+        stmt = select(func.count()).select_from(model).where(*where)
+        return (await db.execute(stmt)).scalar()
+
+
+async def _session_with_history(service, session_maker, agent, last_activity):
+    """A session with one run, task, message and model call, last active then."""
+    _, session, run = await service.initialize_workflow_run(agent_name=agent.name)
+    await service.add_chat_message(
+        agent.id, session.id, "user", "My card number is 4111.", run_id=run.id
+    )
+    await service.add_task(session_id=session.id, run_id=run.id, name="answer")
+    await service.add_model_call_stats(
+        PydModelCallStat(
+            call_type="llm",
+            model="fake/scripted",
+            request_data='{"messages": ["My card number is 4111."]}',
+            response_data='"Noted."',
+            total_tokens=5,
+        ),
+        agent.id,
+        session_id=session.id,
+        run_id=run.id,
+    )
+    await _set_last_activity(session_maker, session.id, last_activity)
+    return session
 
 
 @pytest.fixture(params=["postgres", "sqlite-compat"])
@@ -348,6 +402,45 @@ class TestAgentService:
         assert await service.get_chat_history(session.id) == []
         assert len(await service.get_chat_history(other_session.id)) == 1
 
+    async def test_delete_history_for_session_blanks_model_call_payloads(
+        self, session_maker
+    ):
+        service = AgentService(session_maker)
+        agent = await service.get_or_create_agent(name=f"Blank-{uuid4()}")
+        now = datetime.now(timezone.utc)
+        session = await _session_with_history(service, session_maker, agent, now)
+        kept = await _session_with_history(service, session_maker, agent, now)
+
+        await service.delete_history_for_session(session.id)
+
+        (call,) = await service.get_model_call_stats(session_id=session.id)
+        assert call.total_tokens == 5
+        blank = (
+            ModelCallStat.request_data.is_(None),
+            ModelCallStat.response_data.is_(None),
+        )
+        assert (
+            await _count(
+                session_maker,
+                ModelCallStat,
+                ModelCallStat.session_id == session.id,
+                *blank,
+            )
+            == 1
+        )
+        assert (
+            await _count(
+                session_maker,
+                ModelCallStat,
+                ModelCallStat.session_id == kept.id,
+                *blank,
+            )
+            == 0
+        )
+        assert await _count(session_maker, Task, Task.session_id == session.id) == 0
+        # The session and its run stay; only the history goes.
+        assert await _count(session_maker, Run, Run.session_id == session.id) == 1
+
     async def test_delete_history_for_agent(self, session_maker):
         service = AgentService(session_maker)
         agent = await service.get_or_create_agent(name="DeleteAgentTest")
@@ -415,3 +508,262 @@ class TestAgentService:
         await service.create_run(session_id=session.id)
 
         assert await service.get_history_value(session.id, "answer") == "kept"
+
+    async def test_a_continued_session_records_its_last_activity(self, session_maker):
+        service = AgentService(session_maker)
+        name = f"Activity-{uuid4()}"
+        _, session, _ = await service.initialize_workflow_run(
+            agent_name=name, external_id="visitor-1"
+        )
+        long_ago = datetime(2020, 1, 1, tzinfo=timezone.utc)
+
+        await _set_last_activity(session_maker, session.id, long_ago)
+        _, by_key, _ = await service.initialize_workflow_run(
+            agent_name=name, external_id="visitor-1"
+        )
+        assert by_key.id == session.id
+        assert _utc(by_key.updated_at) > long_ago
+
+        await _set_last_activity(session_maker, session.id, long_ago)
+        _, by_id, _ = await service.initialize_workflow_run(
+            agent_name=name, session_id=session.id
+        )
+        assert _utc(by_id.updated_at) > long_ago
+
+    async def test_chat_history_character_budget(self, session_maker):
+        service = AgentService(session_maker)
+        agent = await service.get_or_create_agent(name=f"Budget-{uuid4()}")
+        session = await service.get_or_create_session(agent_id=agent.id)
+        for content in ("aaaa", "bb", "cccccc", "d"):
+            await service.add_chat_message(agent.id, session.id, "user", content)
+
+        async def window(**kwargs):
+            messages = await service.get_chat_history(session.id, **kwargs)
+            return [message.content for message in messages]
+
+        assert await window(max_chars=7) == ["cccccc", "d"]
+        # "bb" would fit in what is left, but the window stays contiguous: the
+        # first message that does not fit ends it.
+        assert await window(max_chars=6) == ["d"]
+        assert await window(max_chars=0) == []
+        assert await window(max_chars=100) == ["aaaa", "bb", "cccccc", "d"]
+        assert await window(limit=2, max_chars=100) == ["cccccc", "d"]
+
+    async def test_model_calls_carry_their_run(self, session_maker):
+        service = AgentService(session_maker)
+        agent, session, run = await service.initialize_workflow_run(
+            agent_name=f"Calls-{uuid4()}"
+        )
+        _, _, later = await service.initialize_workflow_run(
+            agent_name=agent.name, session_id=session.id
+        )
+
+        row = await service.add_model_call_stats(
+            PydModelCallStat(
+                call_type="llm", model="fake/x", total_tokens=7, cached_prompt_tokens=2
+            ),
+            agent.id,
+            session_id=session.id,
+            run_id=run.id,
+        )
+        assert isinstance(row, ModelCallStat)
+        assert (row.agent_id, row.session_id, row.run_id) == (
+            agent.id,
+            session.id,
+            run.id,
+        )
+        assert row.cached_prompt_tokens == 2
+        await service.add_model_call_stats(
+            PydModelCallStat(call_type="embedding", model="fake/e", total_tokens=3),
+            agent.id,
+            session_id=session.id,
+            run_id=later.id,
+        )
+
+        by_run = await service.get_model_call_stats(run_id=run.id)
+        assert [call.total_tokens for call in by_run] == [7]
+        by_session = await service.get_model_call_stats(session_id=session.id)
+        assert sorted(call.total_tokens for call in by_session) == [3, 7]
+        embeddings = await service.get_model_call_stats(
+            call_type="embedding", agent_id=agent.id
+        )
+        assert [call.total_tokens for call in embeddings] == [3]
+
+    async def test_list_sessions_across_agents(self, session_maker):
+        service = AgentService(session_maker)
+        tenant_a, tenant_b, elsewhere = [
+            await service.get_or_create_agent(name=f"List-{i}-{uuid4()}")
+            for i in range(3)
+        ]
+        now = datetime.now(timezone.utc)
+
+        async def session_for(agent, external_id, minutes_ago):
+            _, session, run = await service.initialize_workflow_run(
+                agent_name=agent.name, external_id=external_id
+            )
+            await service.add_chat_message(
+                agent.id, session.id, "user", f"hello from {external_id}", run.id
+            )
+            await _set_last_activity(
+                session_maker, session.id, now - timedelta(minutes=minutes_ago)
+            )
+            return session
+
+        user = await session_for(tenant_a, "user-1", 40)
+        preview = await session_for(tenant_a, "pre_view:1", 30)
+        lookalike = await session_for(tenant_b, "prexview:2", 20)
+        anonymous = await session_for(tenant_b, None, 10)
+        await session_for(elsewhere, "user-2", 0)
+        tenant = [tenant_a.id, tenant_b.id]
+
+        def ids(listing):
+            return [summary.session_id for summary in listing["sessions"]]
+
+        listed = await service.list_sessions(tenant)
+        assert ids(listed) == [anonymous.id, lookalike.id, preview.id, user.id]
+        assert listed["total_count"] == 4
+        assert listed["sessions"][-1].first_message == "hello from user-1"
+        assert listed["sessions"][-1].messages_count == 1
+
+        # The prefix is literal: "_" is not a wildcard, and a session without
+        # an external id is not excluded by one.
+        kept = await service.list_sessions(
+            tenant, exclude_external_id_prefix="pre_view:"
+        )
+        assert ids(kept) == [anonymous.id, lookalike.id, user.id]
+
+        only = await service.list_sessions(tenant, external_id_prefix="USER-")
+        assert ids(only) == [user.id]
+
+        page = await service.list_sessions(tenant, limit=1, offset=1)
+        assert ids(page) == [lookalike.id]
+        assert page["total_count"] == 4
+
+        assert await service.list_sessions([]) == {"sessions": [], "total_count": 0}
+
+        # Continuing a conversation moves it to the top.
+        await service.initialize_workflow_run(
+            agent_name=tenant_a.name, external_id="user-1"
+        )
+        listed = await service.list_sessions(tenant)
+        assert listed["sessions"][0].session_id == user.id
+        assert listed["sessions"][0].runs_count == 2
+
+    async def test_purge_sessions_in_batches(self, session_maker):
+        service = AgentService(session_maker)
+        agent = await service.get_or_create_agent(name=f"Purge-{uuid4()}")
+        other = await service.get_or_create_agent(name=f"Kept-{uuid4()}")
+        now = datetime.now(timezone.utc)
+        old = [
+            await _session_with_history(
+                service, session_maker, agent, now - timedelta(days=days)
+            )
+            for days in (90, 60, 40)
+        ]
+        recent = await _session_with_history(service, session_maker, agent, now)
+        other_old = await _session_with_history(
+            service, session_maker, other, now - timedelta(days=90)
+        )
+
+        batches = [
+            batch
+            async for batch in service.purge_sessions(
+                now - timedelta(days=30), [agent.id], batch_size=2
+            )
+        ]
+
+        # Oldest first, one transaction per batch.
+        assert batches == [[old[0].id, old[1].id], [old[2].id]]
+        purged = [session.id for session in old]
+        remaining = await _count(
+            session_maker, Session, Session.agent_id.in_([agent.id, other.id])
+        )
+        assert remaining == 2
+        assert await _count(session_maker, Session, Session.id == recent.id) == 1
+        assert await _count(session_maker, Session, Session.id == other_old.id) == 1
+        for model in (Run, Task, ChatMessage):
+            assert await _count(session_maker, model, model.session_id.in_(purged)) == 0
+
+        # The cost record stays; the conversation in its payloads does not.
+        calls = await service.get_model_call_stats(agent_id=agent.id, limit=10)
+        assert sorted(call.total_tokens for call in calls) == [5, 5, 5, 5]
+        blank = (
+            ModelCallStat.request_data.is_(None),
+            ModelCallStat.response_data.is_(None),
+        )
+        in_purged = ModelCallStat.session_id.in_(purged)
+        assert await _count(session_maker, ModelCallStat, in_purged, *blank) == 3
+        assert (
+            await _count(
+                session_maker,
+                ModelCallStat,
+                ModelCallStat.session_id == recent.id,
+                *blank,
+            )
+            == 0
+        )
+
+    async def test_purge_sessions_scope(self, session_maker):
+        service = AgentService(session_maker)
+        agent = await service.get_or_create_agent(name=f"Scope-{uuid4()}")
+        ancient = await _session_with_history(
+            service,
+            session_maker,
+            agent,
+            datetime(2000, 1, 1, tzinfo=timezone.utc),
+        )
+        far_future = datetime.now(timezone.utc) + timedelta(days=1)
+
+        # An empty list of agents purges nothing, however late the cutoff.
+        assert [batch async for batch in service.purge_sessions(far_future, [])] == []
+        assert await _count(session_maker, Session, Session.id == ancient.id) == 1
+
+        # ``None`` means every agent.
+        cutoff = datetime(2001, 1, 1, tzinfo=timezone.utc)
+        batches = [batch async for batch in service.purge_sessions(cutoff)]
+        assert batches == [[ancient.id]]
+        assert await _count(session_maker, Session, Session.id == ancient.id) == 0
+
+
+def test_orm_stat_converts_and_passes_through():
+    pyd = PydModelCallStat(
+        call_type="llm",
+        model="openai/x",
+        prompt_tokens=3,
+        completion_tokens=2,
+        total_tokens=5,
+        cached_prompt_tokens=1,
+        reasoning_tokens=1,
+    )
+    orm = _orm_stat(pyd)
+    assert isinstance(orm, ModelCallStat)
+    assert orm.model == "openai/x" and orm.total_tokens == 5
+    # The token-detail columns must survive the conversion too.
+    assert orm.cached_prompt_tokens == 1 and orm.reasoning_tokens == 1
+    # An ORM stat is returned unchanged.
+    assert _orm_stat(orm) is orm
+
+
+def test_orm_stat_fills_a_missing_model_name():
+    # The column is NOT NULL; a failed call may not know its model yet.
+    assert _orm_stat(PydModelCallStat(call_type="llm")).model == ""
+
+
+async def test_a_call_without_payloads_stores_sql_null(session_maker):
+    """``IS NULL`` finds a call recorded without payloads, as it finds a purged one."""
+    service = AgentService(session_maker)
+    model = f"fake/{uuid4()}"
+    await service.add_model_call_stats(
+        PydModelCallStat(call_type="llm", model=model, total_tokens=1)
+    )
+
+    assert (
+        await _count(
+            session_maker,
+            ModelCallStat,
+            ModelCallStat.model == model,
+            ModelCallStat.request_data.is_(None),
+            ModelCallStat.response_data.is_(None),
+        )
+        == 1
+    )
