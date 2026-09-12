@@ -203,12 +203,46 @@ python_functions:
   `docker-compose.yml` includes a `crawl4ai` service to run the crawler as a
   container.
 - `http_request(...)` is the escape hatch for an endpoint that does not deserve
-  a full `rest://` registration; `use_proxy=True` routes through the Tor proxy
-  at `KAVALAI_TOR_PROXY_HOST` / `KAVALAI_TOR_PROXY_PORT`.
+  a full `rest://` registration. It is a coroutine function — `await` a direct
+  call — and does not follow redirects. `use_proxy=True` routes through the Tor
+  proxy at `KAVALAI_TOR_PROXY_HOST` / `KAVALAI_TOR_PROXY_PORT`.
 
-**Security**: handing an agent a general HTTP tool lets it call any URL it can
-compose, internal addresses included. Prefer specific `rest://` tools, or pin
-the node with `allowed_tools`, whenever the model chooses the target.
+**Private addresses are refused by default.** `http_request` and `crawl_url`
+refuse a URL whose host is, or resolves to, a private, loopback, link-local or
+cloud-metadata address: `http_request` raises `kavalai.net.UnsafeUrlError`
+(a `ValueError`), `crawl_url` returns `success=False` with an `error_message`
+starting `Refused:`. Another spelling of the address does not get through —
+`2130706433`, `0x7f.1`, `[::ffff:127.0.0.1]` and fullwidth `ｌｏｃａｌｈｏｓｔ`
+are all caught. An agent that must reach an intranet gets a tool *built* for
+it; the switch is a factory argument, never a tool argument, so the model
+cannot flip it:
+
+```python
+from kavalai.tools.webtools.http_client import make_http_request
+from kavalai.tools.webtools.crawl4ai import make_crawl_url
+
+kernel.register_python_tool(
+    "intranet.request", make_http_request(allow_private_networks=True))
+kernel.register_python_tool(
+    "intranet.crawl", make_crawl_url(allow_private_networks=True))
+```
+
+In a workflow, assign the built tool to a module attribute and name that under
+`python_functions` (`path: myapp.tools.intranet_request`).
+
+- `http_request` connects to the address it checked, so DNS rebinding cannot
+  redirect it, and it ignores `HTTP_PROXY`/`HTTPS_PROXY`. With
+  `use_proxy=True` the proxy resolves the name and only a URL pre-check
+  applies.
+- `crawl_url` drives a browser in another process: only the requested and the
+  final URL are checked. Real protection there is network egress control.
+- For an httpx client in your own tool, pass
+  `transport=kavalai.net.PublicOnlyTransport()`; `kavalai.net` is not
+  re-exported from `kavalai`.
+
+**Security**: the guard decides where a request may go, not what it does
+there. Prefer specific `rest://` tools, or pin the node with `allowed_tools`,
+whenever the model chooses the target.
 
 ## Introspection
 
