@@ -76,7 +76,21 @@ def _maybe_normalize(
 
 
 class OpenAIEmbeddingClient(BaseEmbeddingClient):
-    """OpenAI embeddings (e.g. ``text-embedding-3-small``)."""
+    """OpenAI embeddings (e.g. ``text-embedding-3-small``).
+
+    ``dimensions`` shortens the returned vectors on models that support it
+    (``text-embedding-3-*``); ``None`` keeps the model's native size. Bound at
+    registration, it makes a provider name stand for the reduced model::
+
+        register_embedding_provider(
+            "openai-512", OpenAIEmbeddingClient, dimensions=512
+        )
+        make_embedding_client("openai-512/text-embedding-3-small")
+
+    The recorded model call keeps the response's ``model`` and ``usage`` only.
+    The vectors are the call's result, returned to the caller; stored in the
+    statistics row as well, they duplicated every indexed vector.
+    """
 
     def __init__(
         self,
@@ -84,11 +98,13 @@ class OpenAIEmbeddingClient(BaseEmbeddingClient):
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         timeout: float = 30.0,
+        dimensions: Optional[int] = None,
     ):
         super().__init__(model)
         from openai import AsyncOpenAI
 
         self.timeout = timeout
+        self.dimensions = dimensions
         self.client = AsyncOpenAI(
             api_key=api_key or os.getenv("OPENAI_API_KEY"),
             base_url=base_url,
@@ -103,6 +119,8 @@ class OpenAIEmbeddingClient(BaseEmbeddingClient):
         **kwargs,
     ) -> Tuple[Embeddings, ModelCallStat]:
         start_time = time.perf_counter()
+        if self.dimensions is not None:
+            kwargs = {"dimensions": self.dimensions, **kwargs}
         response = await self.client.embeddings.create(
             input=texts, model=self.model, timeout=self.timeout, **kwargs
         )
@@ -119,20 +137,30 @@ class OpenAIEmbeddingClient(BaseEmbeddingClient):
             duration_seconds=duration,
             batch_size=len(texts),
             total_tokens=total_tokens,
-            response_data=response.model_dump()
-            if hasattr(response, "model_dump")
-            else response,
+            response_data={"model": response.model, "usage": response.usage},
         )
         return embeddings, stats
 
 
 class GeminiEmbeddingClient(BaseEmbeddingClient):
-    """Google Gemini embeddings."""
+    """Google Gemini embeddings.
 
-    def __init__(self, model: str, api_key: Optional[str] = None):
+    ``dimensions`` is sent as ``output_dimensionality``, which shortens the
+    vectors on models that support it; ``None`` keeps the native size. As with
+    :class:`OpenAIEmbeddingClient`, binding it at registration gives the
+    reduced model a name of its own.
+    """
+
+    def __init__(
+        self,
+        model: str,
+        api_key: Optional[str] = None,
+        dimensions: Optional[int] = None,
+    ):
         super().__init__(model)
         from google import genai
 
+        self.dimensions = dimensions
         self.client = genai.Client(api_key=api_key or os.getenv("GEMINI_API_KEY"))
 
     async def compute_embeddings(
@@ -146,6 +174,8 @@ class GeminiEmbeddingClient(BaseEmbeddingClient):
 
         start_time = time.perf_counter()
         model_name = get_model_name(self.model)
+        if self.dimensions is not None:
+            kwargs = {"output_dimensionality": self.dimensions, **kwargs}
         response = await self.client.aio.models.embed_content(
             model=model_name,
             contents=texts,
@@ -245,7 +275,13 @@ class FastEmbedClient(BaseEmbeddingClient):
 
     def _get_model(self):
         if self._embedding_model is None:
-            from fastembed import TextEmbedding
+            try:
+                from fastembed import TextEmbedding
+            except ImportError as error:
+                raise ImportError(
+                    "The 'fastembed/' embedding provider needs FastEmbed, "
+                    'which is not installed: pip install "kavalai[fastembed]"'
+                ) from error
 
             self._embedding_model = TextEmbedding(
                 model_name=self.model,

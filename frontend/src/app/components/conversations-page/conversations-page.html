@@ -123,8 +123,9 @@
                     }
                   </div>
                 </div>
-                <div class="text-xs opacity-60 bg-base-200 px-2 py-1 rounded font-body">
-                  <i class="far fa-clock mr-1"></i> {{ formatDate(session.updated_at) }}
+                <div class="text-xs opacity-60 bg-base-200 px-2 py-1 rounded font-body last-activity"
+                     title="Time of the latest run; conversations are listed by it">
+                  <i class="far fa-clock mr-1"></i> Last activity {{ formatDate(session.updated_at) }}
                 </div>
               </div>
 

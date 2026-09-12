@@ -210,7 +210,8 @@ identical tables — so a run looks identical wherever it lives:
        the workflow definition.
    * - ``sessions``
      - One row per conversation, linked to an agent. An optional ``external_id``
-       ties it to your own user, ticket or thread id.
+       ties it to your own user, ticket or thread id, and ``updated_at`` is the
+       time of the conversation's last run.
    * - ``runs``
      - One row per workflow invocation: the ``input_data``, the ``output_data``
        and the resolved run ``context`` (what each step saw).
@@ -220,17 +221,20 @@ identical tables — so a run looks identical wherever it lives:
      - Per-node debug data: each node's inputs and output, for drilling into what a
        step actually did.
    * - ``model_call_stats``
-     - One row per LLM or embedding call: model, token counts, duration and the
-       provider's status code. Failed attempts are recorded too, so a rate-limit
-       storm shows up here rather than only in the logs. Where the provider
-       reports them, ``cached_prompt_tokens`` and ``reasoning_tokens`` break out
-       the parts of the totals that are billed differently. There is no ``cost``
-       column: see :doc:`../guides/observability`.
+     - One row per LLM or embedding call: model, token counts, duration, the
+       provider's status code, and the agent, session and run that made the
+       call. Failed attempts are recorded too, so a rate-limit storm shows up
+       here rather than only in the logs. Where the provider reports them,
+       ``cached_prompt_tokens`` and ``reasoning_tokens`` break out the parts of
+       the totals that are billed differently. There is no ``cost`` column: see
+       :doc:`../guides/observability`.
 
 The first four are written by ``AgentService``; ``tasks`` and
-``model_call_stats`` come from ``TaskLogger``. The relationship is a simple
-hierarchy:
-**agent → sessions → runs → (chat_messages, tasks, model_call_stats)**.
+``model_call_stats`` come from ``TaskLogger``. The first five form a
+hierarchy, **agent → sessions → runs → (chat_messages, tasks)**, in which
+deleting a row deletes what lies beneath it. ``model_call_stats`` refers to
+its agent, session and run by id only, without foreign keys, so the record of
+what a conversation cost outlives the conversation.
 
 Every column of every table, the reasoning behind the schema, the retrieval
 tables the RAG services provision, and how the schema is created and migrated
@@ -245,6 +249,17 @@ store — subclass ``AgentService`` and override the methods to be redirected
 ``initialize_workflow_run`` / ``update_run`` for runs), then pass your instance
 to the engine. The engine only ever talks to the service's public methods, so
 no engine changes are required.
+
+Node records and model calls travel a separate path, through the
+``TaskLogger``. A backend of your own subclasses it and implements two hooks,
+``write_node`` and ``write_model_call``. Both are called in the background,
+after the logger's recording options and payload cap have been applied, and a
+model call arrives as the Pydantic
+:class:`~kavalai.llm_clients.base_client.ModelCallStat` together with the
+``agent_id``, ``session_id`` and ``run_id`` that made it. To keep the database
+rows as well, combine loggers with ``TeeTaskLogger`` instead of subclassing
+``PostgresTaskLogger``; :ref:`observability-custom-loggers` shows a metering
+logger built that way.
 
 Browsing it in the backoffice
 -----------------------------

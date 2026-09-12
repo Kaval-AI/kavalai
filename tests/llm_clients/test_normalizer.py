@@ -128,7 +128,9 @@ async def test_rag_service_learn_normalizer(agents_db):
         session_maker=session_factory, model=model, schema="test_agents"
     )
 
-    async def fake_compute_embeddings(texts, normalizer=None):
+    async def fake_compute_embeddings(
+        texts, normalize=False, normalizer=None, **kwargs
+    ):
         stats = ModelCallStat(call_type="embedding", model=model)
         return [[1.0, 1.0], [3.0, 3.0]][: len(texts)], stats
 

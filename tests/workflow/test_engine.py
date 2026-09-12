@@ -1767,3 +1767,465 @@ async def test_per_run_logger_isolates_concurrent_runs():
 
     assert [r.name for r in first.records] == ["s", "answer", "e"]
     assert [r.name for r in second.records] == ["s", "answer", "e"]
+
+
+class _SlowClient(BaseLlmClient):
+    """Does not answer within any test's patience, so a run can time out."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+
+    async def _run_chat_completions(self, chat_history, response_model, streamer):
+        import asyncio
+
+        await asyncio.sleep(5)
+
+
+class _RestartingAgentClient(FakeLLMClient):
+    """An agent-step client that signals one restart before it answers."""
+
+    async def _run_chat_completions(self, chat_history, response_model, streamer):
+        streamer.reset_active()
+        await streamer.stream_restart("attempt 1: transient")
+        await super()._run_chat_completions(chat_history, response_model, streamer)
+
+
+def _llm_nodes(**llm_extra):
+    return [
+        {"name": "s", "type": "start", "next": "answer"},
+        {
+            "name": "answer",
+            "type": "llm",
+            "prompt": "p",
+            "output": "output",
+            "next": "e",
+            **llm_extra,
+        },
+        {"name": "e", "type": "end", "output": "output"},
+    ]
+
+
+async def _seeded_session(service, *contents):
+    agent, session, run = await service.initialize_workflow_run(agent_name="wf")
+    for content in contents:
+        await service.add_chat_message(
+            agent_id=agent.id,
+            session_id=session.id,
+            run_id=run.id,
+            role="user",
+            content=content,
+        )
+    return session
+
+
+def _history_seen(factory) -> list[str]:
+    """The messages after the system prompt that the first client received."""
+    return [m.content for m in factory.created[0].calls[0].messages[1:]]
+
+
+async def _only_run(service) -> Run:
+    async with service.session_maker() as db:
+        return (await db.execute(select(Run))).scalars().one()
+
+
+async def test_history_limit_keeps_the_most_recent_messages():
+    service = make_agent_service()
+    factory = make_factory({"agent_response": "r"})
+    engine = WorkflowEngine.from_dict(
+        graph_dict(_llm_nodes(history_limit=2)),
+        agent_service=service,
+        client_factory=factory,
+    )
+    session = await _seeded_session(service, "one", "two", "three")
+
+    await engine.run({"user_message": "now"}, session_id=str(session.id))
+
+    assert _history_seen(factory) == ["three", "now"]
+
+
+async def test_history_max_chars_drops_whole_messages_from_the_oldest_end():
+    service = make_agent_service()
+    factory = make_factory({"agent_response": "r"})
+    engine = WorkflowEngine.from_dict(
+        graph_dict(_llm_nodes(history_max_chars=5)),
+        agent_service=service,
+        client_factory=factory,
+    )
+    session = await _seeded_session(service, "aaaa", "bb")
+
+    await engine.run({"user_message": "now"}, session_id=str(session.id))
+
+    assert _history_seen(factory) == ["bb", "now"]
+
+
+async def test_history_limit_zero_sends_no_history():
+    service = make_agent_service()
+    factory = make_factory({"agent_response": "r"})
+    engine = WorkflowEngine.from_dict(
+        graph_dict(_llm_nodes(history_limit=0)),
+        agent_service=service,
+        client_factory=factory,
+    )
+    session = await _seeded_session(service, "earlier")
+
+    await engine.run({"user_message": "now"}, session_id=str(session.id))
+
+    assert _history_seen(factory) == []
+
+
+async def test_a_node_that_does_not_stream_emits_no_restart():
+    nodes = [dict(n) for n in STREAM_NODES]
+    nodes[1] = {**nodes[1], "stream_output": False, "stream_delta": True}
+    engine = WorkflowEngine.from_dict(
+        graph_dict(nodes), client_factory=lambda *a, **k: _RestartingClient()
+    )
+
+    events = await collect_stream(engine, {"user_message": "x"})
+
+    assert [e for e in events if e.type == "restart"] == []
+    # The delta buffer is still reset, so only the re-sent value survives.
+    assert events[-1].output_data == {"agent_response": "ok"}
+
+
+async def test_an_agent_node_that_streams_nothing_emits_no_restart():
+    nodes = [
+        {"name": "s", "type": "start", "next": "do"},
+        {
+            "name": "do",
+            "type": "agent",
+            "prompt": "do the thing",
+            "output": "output",
+            "max_steps": 2,
+            "next": "e",
+        },
+        {"name": "e", "type": "end", "output": "output"},
+    ]
+
+    def factory(model, parameters=None, stats_receiver=None):
+        return _RestartingAgentClient(
+            model, parameters, stats_receiver, value_map={"agent_response": "done"}
+        )
+
+    engine = WorkflowEngine.from_dict(graph_dict(nodes), client_factory=factory)
+
+    events = await collect_stream(engine, {"user_message": "x"})
+
+    assert [e for e in events if e.type == "restart"] == []
+    assert events[-1].output_data == {"agent_response": "done"}
+
+
+TONE = [{"name": "tone", "value": "formal"}]
+
+
+def _tone_engine(**engine_options):
+    return WorkflowEngine.from_dict(
+        graph_dict(_llm_nodes(prompt="Be {{ templates.tone }}."), templates=TONE),
+        **engine_options,
+    )
+
+
+async def test_per_run_templates_override_the_documents_values():
+    factory = make_factory({"agent_response": "r"})
+    engine = _tone_engine(client_factory=factory)
+
+    await engine.run({"user_message": "x"})
+    await engine.run({"user_message": "x"}, templates={"tone": "casual"})
+
+    first, second = (c.calls[0].messages[0].content for c in factory.created)
+    assert "Be formal." in first
+    assert "Be casual." in second
+
+
+async def test_a_per_run_template_value_is_never_rendered_again():
+    """Rendering is one pass, so text passed per run needs no escaping."""
+    factory = make_factory({"agent_response": "r"})
+    engine = _tone_engine(client_factory=factory)
+
+    await engine.run(
+        {"user_message": "secret"},
+        templates={"tone": "{{ context.input.user_message }}"},
+    )
+
+    system = factory.created[0].calls[0].messages[0].content
+    assert "Be {{ context.input.user_message }}." in system
+
+
+async def test_an_undeclared_or_non_text_template_is_refused():
+    engine = _tone_engine(client_factory=make_factory({"agent_response": "r"}))
+
+    with pytest.raises(WorkflowException, match="not declared"):
+        await engine.run({"user_message": "x"}, templates={"mood": "calm"})
+    with pytest.raises(WorkflowException, match="not strings"):
+        await engine.run({"user_message": "x"}, templates={"tone": 3})
+
+
+async def test_per_run_templates_are_recorded_with_the_run():
+    service = make_agent_service()
+    engine = _tone_engine(
+        agent_service=service, client_factory=make_factory({"agent_response": "r"})
+    )
+
+    await engine.run({"user_message": "x"}, templates={"tone": "casual"})
+
+    assert (await _only_run(service)).context["run_templates"] == {"tone": "casual"}
+
+
+async def test_a_run_past_its_timeout_is_cancelled_and_recorded():
+    from kavalai.workflow.models import WorkflowTimeoutError
+
+    service = make_agent_service()
+    engine = WorkflowEngine.from_dict(
+        graph_dict(STREAM_NODES),
+        agent_service=service,
+        client_factory=lambda *a, **k: _SlowClient(),
+    )
+    events = []
+
+    with pytest.raises(WorkflowTimeoutError, match="time limit of 0.05 s"):
+        async for event in engine.run_stream({"user_message": "x"}, timeout=0.05):
+            events.append(event)
+
+    assert events[-1].type == "workflow_failed"
+    assert events[-1].run_id == events[0].run_id
+    run = await _only_run(service)
+    assert run.context["status"] == "failed"
+    assert "time limit" in run.context["error"]
+
+
+async def test_the_engine_run_timeout_is_the_default():
+    from kavalai.workflow.models import WorkflowTimeoutError
+
+    engine = WorkflowEngine.from_dict(
+        graph_dict(STREAM_NODES),
+        client_factory=lambda *a, **k: _SlowClient(),
+        run_timeout=0.05,
+    )
+
+    with pytest.raises(WorkflowTimeoutError):
+        await engine.run({"user_message": "x"})
+
+
+async def test_a_run_within_its_timeout_completes():
+    engine = WorkflowEngine.from_dict(
+        graph_dict(STREAM_NODES),
+        client_factory=make_factory({"agent_response": "hi"}),
+        run_timeout=5,
+    )
+
+    state = await engine.run({"user_message": "x"})
+
+    assert state.output_data == {"agent_response": "hi"}
+
+
+async def test_a_failure_inside_a_timed_run_keeps_its_own_error():
+    engine = WorkflowEngine.from_dict(
+        graph_dict(STREAM_NODES), client_factory=make_factory(raises=True)
+    )
+
+    with pytest.raises(WorkflowException, match="llm boom"):
+        await engine.run({"user_message": "x"}, timeout=5)
+
+
+async def test_closing_a_timed_stream_cancels_its_walk():
+    engine = WorkflowEngine.from_dict(
+        graph_dict(STREAM_NODES), client_factory=lambda *a, **k: _SlowClient()
+    )
+    stream = engine.run_stream({"user_message": "x"}, timeout=5)
+    seen = [await stream.__anext__() for _ in range(4)]
+    assert (seen[-1].type, seen[-1].name) == ("node_started", "answer")
+
+    await stream.aclose()
+
+
+async def test_a_workflow_exception_is_recorded_on_the_run():
+    nodes = [
+        {"name": "s", "type": "start", "next": "route"},
+        {
+            "name": "route",
+            "type": "switch",
+            "expr": "input.user_message",
+            "cases": {"yes": "e"},
+        },
+        {"name": "e", "type": "end", "output": "output"},
+    ]
+    service = make_agent_service()
+    engine = WorkflowEngine.from_dict(graph_dict(nodes), agent_service=service)
+
+    with pytest.raises(WorkflowException, match="halted"):
+        await engine.run({"user_message": "no"})
+
+    run = await _only_run(service)
+    assert run.context["status"] == "failed"
+    assert "halted" in run.context["error"]
+
+
+async def test_record_context_false_keeps_only_the_input_and_the_output():
+    service = make_agent_service()
+    engine = _tone_engine(
+        agent_service=service,
+        client_factory=make_factory({"agent_response": "r"}),
+        record_context=False,
+    )
+
+    await engine.run({"user_message": "x"}, templates={"tone": "casual"})
+
+    assert (await _only_run(service)).context == {
+        "input": {"user_message": "x"},
+        "output": {"agent_response": "r"},
+        "run_templates": {"tone": "casual"},
+    }
+
+
+async def test_record_context_false_records_a_failure_without_its_data():
+    service = make_agent_service()
+    engine = _tone_engine(
+        agent_service=service,
+        client_factory=make_factory(raises=True),
+        record_context=False,
+    )
+
+    with pytest.raises(WorkflowException):
+        await engine.run({"user_message": "x"}, templates={"tone": "casual"})
+
+    context = (await _only_run(service)).context
+    assert set(context) == {"status", "error", "run_templates"}
+
+
+async def test_min_similarity_drops_weak_hits():
+    service = RecordingRagService(
+        [rag_hit("strong", similarity=0.9), rag_hit("weak", similarity=0.2)]
+    )
+    engine = WorkflowEngine.from_dict(
+        rag_graph(min_similarity=0.5), rag_services=service
+    )
+
+    state = await engine.run({"user_message": "q"})
+
+    assert [hit["content"] for hit in state.data["docs"]] == ["strong"]
+
+
+async def test_rag_query_reports_its_hits_on_node_completed():
+    hit = rag_hit("a fact", source_id="doc-1", similarity=0.8)
+    engine = WorkflowEngine.from_dict(
+        rag_graph(store="content"), rag_services=RecordingRagService([hit])
+    )
+
+    events = await collect_stream(engine, {"user_message": "q"})
+
+    completed = {e.name: e for e in events if e.type == "node_completed"}
+    assert completed["retrieve"].output_data == {
+        "hits": [
+            {"id": str(hit.id), "source_id": "doc-1", "similarity": 0.8, "metadata": {}}
+        ]
+    }
+    assert completed["s"].output_data is None
+
+
+async def test_a_content_rag_query_still_records_its_hits_on_the_task_row():
+    hit = rag_hit("a fact", source_id="doc-1")
+    engine = WorkflowEngine.from_dict(
+        rag_graph(store="content"), rag_services=RecordingRagService([hit])
+    )
+
+    _, records = await _trajectory(engine, {"user_message": "q"})
+
+    row = next(r for r in records if r.name == "retrieve")
+    assert row.output["content"] == "a fact"
+    assert [h["source_id"] for h in row.output["hits"]] == ["doc-1"]
+    assert row.inputs["top_k"] == 5
+    assert row.inputs["source_ids"] is None
+    assert row.inputs["min_similarity"] is None
+
+
+async def test_rag_query_hands_the_runs_accumulator_to_the_service():
+    from kavalai.workflow.tasklog.base import TokenAccumulator
+
+    service = RecordingRagService([rag_hit("x")])
+    engine = WorkflowEngine.from_dict(rag_graph(), rag_services=service)
+
+    await engine.run({"user_message": "q"})
+
+    assert isinstance(service.calls[0]["stats_receiver"], TokenAccumulator)
+
+
+class _PlainRagService:
+    """A service written against the interface before stats receivers."""
+
+    def __init__(self):
+        self.calls = []
+
+    async def query(
+        self,
+        text,
+        top_k=5,
+        collection_name=None,
+        source_ids=None,
+        keep_best=False,
+        include_content=True,
+    ):
+        self.calls.append(text)
+        return []
+
+
+async def test_a_service_without_a_stats_receiver_parameter_still_works():
+    service = _PlainRagService()
+    engine = WorkflowEngine.from_dict(rag_graph(), rag_services=service)
+
+    await engine.run({"user_message": "q"})
+
+    assert service.calls == ["q"]
+
+
+async def test_a_registered_service_is_built_once_per_engine():
+    from kavalai.llm_clients import registry
+
+    built = []
+
+    def build():
+        service = RecordingRagService()
+        built.append(service)
+        return service
+
+    registry.register_rag_service("default", build)
+    try:
+        engine = WorkflowEngine.from_dict(rag_graph())
+        await engine.run({"user_message": "a"})
+        await engine.run({"user_message": "b"})
+
+        assert len(built) == 1
+        assert len(built[0].calls) == 2
+    finally:
+        registry.rag_services.unregister("default")
+
+
+async def test_model_calls_carry_the_run_and_session_they_belong_to():
+    from kavalai.workflow.tasklog import MemoryTaskLogger
+
+    engine = WorkflowEngine.from_dict(
+        graph_dict(_llm_nodes()),
+        agent_service=make_agent_service(),
+        client_factory=make_factory({"agent_response": "r"}),
+    )
+    task_logger = MemoryTaskLogger()
+
+    state = await engine.run({"user_message": "x"}, task_logger=task_logger)
+
+    (call,) = task_logger.model_calls
+    assert (call.agent_id, call.session_id, call.run_id) == (
+        state.agent_id,
+        state.session_id,
+        state.run_id,
+    )
+
+
+async def test_the_completed_event_carries_the_run_id():
+    engine = WorkflowEngine.from_dict(
+        graph_dict(STREAM_NODES),
+        agent_service=make_agent_service(),
+        client_factory=make_factory({"agent_response": "r"}),
+    )
+
+    events = await collect_stream(engine, {"user_message": "x"})
+
+    assert events[-1].type == "workflow_completed"
+    assert events[-1].run_id == events[0].run_id is not None

@@ -1,0 +1,791 @@
+"""
+Copyright 2026 OÜ KAVAL AI (registry code 17393877)
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+Scrape a website into a pages database (see ``pages_db.PagesDatabase``).
+
+Scrape the Kaval.AI docs into ``docs.kaval.ai.pages.db``::
+
+    python -m tools.zerocostchatbot.scrape https://docs.kaval.ai --max-pages 50
+
+Resume is automatic: the pages database is the crawl state, so re-running
+the same command continues where a killed run stopped. ``--refresh``
+re-queues every known URL for a fresh crawl.
+
+Each page is fetched with a plain HTTP request first and escalated to a
+headless browser only when the response is not usable content — a JS-app
+shell, a bot challenge, or too little visible text. After a few
+consecutive escalations the site is treated as JS-rendered and later pages
+go straight to the browser. Rendering runs in the crawl4ai REST container
+from ``docker-compose.yml`` (``--crawl4ai-url``, default
+``http://localhost:11235``) — nothing browser-related is installed here,
+and a server-side-rendered site never contacts the container at all.
+``--force-http`` / ``--force-browser`` override the heuristic.
+"""
+
+import argparse
+import asyncio
+import base64
+import html
+import re
+from dataclasses import dataclass, field
+from typing import Awaitable, Callable, Optional
+from urllib import robotparser
+from urllib.parse import urljoin, urlparse, urlunparse
+
+import httpx
+from loguru import logger
+
+from kavalai.text import parse_html
+from tools.zerocostchatbot.pages_db import PagesDatabase
+
+USER_AGENTS = {
+    "kavalai": ("KavalaiBot/1.0 (+https://kaval.ai/bot)", "KavalaiBot"),
+    "browser": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        " (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        "*",
+    ),
+    "googlebot": (
+        "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible;"
+        " Googlebot/2.1; +http://www.google.com/bot.html)",
+        "Googlebot",
+    ),
+}
+
+SKIP_EXTENSIONS = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".svg",
+    ".ico",
+    ".css",
+    ".js",
+    ".mjs",
+    ".map",
+    ".json",
+    ".xml",
+    ".rss",
+    ".atom",
+    ".pdf",
+    ".doc",
+    ".docx",
+    ".xls",
+    ".xlsx",
+    ".ppt",
+    ".pptx",
+    ".zip",
+    ".gz",
+    ".tar",
+    ".rar",
+    ".7z",
+    ".whl",
+    ".exe",
+    ".dmg",
+    ".mp3",
+    ".mp4",
+    ".avi",
+    ".mov",
+    ".webm",
+    ".wav",
+    ".woff",
+    ".woff2",
+    ".ttf",
+    ".eot",
+}
+
+# Below this much extracted text a 200 response is treated as a JS-app shell
+# and escalated to the browser. A false positive only costs one browser fetch.
+MIN_CONTENT_CHARS = 200
+
+JS_WARNINGS = (
+    "enable javascript",
+    "javascript is required",
+    "javascript to run this app",
+    "turn on javascript",
+)
+
+# Bot walls answer these while still serving real content to a browser.
+CHALLENGE_STATUSES = {403, 503}
+
+# After this many consecutive escalations the site is JS-rendered: skip the
+# doomed HTTP attempt on every later page.
+ESCALATION_MEMO = 3
+
+DEFAULT_MAX_PAGES = 200
+DEFAULT_DELAY = 0.5
+DEFAULT_CONCURRENCY = 4
+DEFAULT_CRAWL4AI_URL = "http://localhost:11235"
+DEFAULT_TIMEOUT = 30.0
+DEFAULT_MAX_ATTEMPTS = 3
+SITEMAP_FILE_LIMIT = 10
+
+
+def resolve_user_agent(value: str) -> tuple[str, str]:
+    """The header string and robots.txt token for a ``--user-agent`` value.
+
+    A known preset name maps to its pair; anything else is used verbatim as
+    the header and matched as ``*`` in robots.txt.
+    """
+    if value in USER_AGENTS:
+        return USER_AGENTS[value]
+    return value, "*"
+
+
+def normalize_url(href: str, base: Optional[str] = None) -> Optional[str]:
+    """A canonical absolute URL, or None for links that cannot be crawled.
+
+    Fragments are dropped, the host is lowercased and an empty path becomes
+    ``/`` so the same page cannot enter the frontier twice.
+    """
+    href = (href or "").strip()
+    if not href:
+        return None
+    absolute = urljoin(base, href) if base else href
+    parsed = urlparse(absolute)
+    if parsed.scheme not in ("http", "https"):
+        return None
+    return urlunparse(
+        (
+            parsed.scheme,
+            parsed.netloc.lower(),
+            parsed.path or "/",
+            parsed.params,
+            parsed.query,
+            "",
+        )
+    )
+
+
+def site_host(url: str) -> str:
+    """The host a crawl is confined to, with any ``www.`` prefix dropped."""
+    host = urlparse(url).netloc.lower()
+    return host.removeprefix("www.")
+
+
+def same_site(url: str, host: str) -> bool:
+    """Whether a URL belongs to the crawled site (``www.`` ignored)."""
+    return site_host(url) == host
+
+
+def is_crawlable_path(url: str) -> bool:
+    """Whether the URL's path looks like a page rather than an asset."""
+    path = urlparse(url).path.lower()
+    dot = path.rfind(".")
+    return dot == -1 or path[dot:] not in SKIP_EXTENSIONS
+
+
+def page_links(links: list[str], base: str, host: str) -> list[str]:
+    """The frontier-worthy subset of a page's links, normalized and deduplicated."""
+    urls = (normalize_url(href, base) for href in links)
+    return list(
+        dict.fromkeys(
+            url
+            for url in urls
+            if url and same_site(url, host) and is_crawlable_path(url)
+        )
+    )
+
+
+SITEMAP_LOC = re.compile(
+    r"<(?:\w+:)?loc\b[^>]*>\s*(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?\s*</(?:\w+:)?loc\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+SITEMAP_INDEX = re.compile(r"<(?:\w+:)?sitemapindex\b", re.IGNORECASE)
+
+
+def parse_sitemap(xml_text: str) -> tuple[list[str], list[str]]:
+    """The page URLs and nested sitemap URLs a sitemap file lists.
+
+    A sitemap is untrusted input from the crawled site, and all it has to
+    yield is its ``<loc>`` values and whether it is an index, so they are
+    extracted with a pattern rather than an XML parser — nothing here
+    expands entities or resolves a DTD. Anything without a ``<loc>``, XML or
+    not, is an empty sitemap.
+    """
+    locations = [
+        html.unescape(text).strip()
+        for text in SITEMAP_LOC.findall(xml_text)
+        if text.strip()
+    ]
+    if SITEMAP_INDEX.search(xml_text):
+        return [], locations
+    return locations, []
+
+
+async def sitemap_urls(
+    client: httpx.AsyncClient, start_url: str, limit: int
+) -> list[str]:
+    """Page URLs from the site's ``sitemap.xml``, empty when there is none.
+
+    A sitemap index is followed one level deep, a few files at most — the
+    sitemap only seeds the frontier, link discovery finds the rest.
+    """
+    parsed = urlparse(start_url)
+    queue = [f"{parsed.scheme}://{parsed.netloc}/sitemap.xml"]
+    pages: list[str] = []
+    fetched = 0
+    while queue and len(pages) < limit and fetched < SITEMAP_FILE_LIMIT:
+        sitemap_url = queue.pop(0)
+        fetched += 1
+        try:
+            response = await client.get(sitemap_url)
+            if response.status_code != 200:
+                continue
+            found, nested = parse_sitemap(response.text)
+        except httpx.HTTPError as error:
+            logger.debug(f"Sitemap {sitemap_url} unusable: {error}")
+            continue
+        pages.extend(found)
+        queue.extend(nested)
+    if pages:
+        logger.info(f"Sitemap seeded {len(pages)} URLs")
+    return pages[:limit]
+
+
+async def load_robots(
+    client: httpx.AsyncClient, start_url: str
+) -> robotparser.RobotFileParser:
+    """The site's parsed ``robots.txt``; everything is allowed when it is absent."""
+    parsed = urlparse(start_url)
+    robots = robotparser.RobotFileParser()
+    try:
+        response = await client.get(f"{parsed.scheme}://{parsed.netloc}/robots.txt")
+    except httpx.HTTPError as error:
+        logger.debug(f"robots.txt unreachable ({error}); allowing everything")
+        response = None
+    if response is not None and response.status_code == 200:
+        robots.parse(response.text.splitlines())
+    else:
+        # A parser that never saw rules answers False to everything; an
+        # absent robots.txt means the opposite.
+        robots.allow_all = True
+    return robots
+
+
+async def robots_filter(
+    client: httpx.AsyncClient, start_url: str, token: str, ignore: bool
+) -> Callable[[str], bool]:
+    """The ``allowed(url)`` predicate a crawl consults before each fetch."""
+    if ignore:
+        return lambda url: True
+    robots = await load_robots(client, start_url)
+    return lambda url: robots.can_fetch(token, url)
+
+
+@dataclass
+class FetchOutcome:
+    """What one fetch attempt produced."""
+
+    success: bool
+    status_code: Optional[int] = None
+    title: Optional[str] = None
+    html: Optional[str] = None
+    markdown: Optional[str] = None
+    links: list[str] = field(default_factory=list)
+    error: Optional[str] = None
+    needs_browser: bool = False
+
+
+Fetch = Callable[[str], Awaitable[FetchOutcome]]
+
+
+def looks_like_shell(html: str, markdown: str) -> bool:
+    """Whether a 200 response is a JS-app shell rather than rendered content."""
+    if len(markdown) < MIN_CONTENT_CHARS:
+        return True
+    lowered = html.lower()
+    return any(warning in lowered for warning in JS_WARNINGS)
+
+
+class HttpFetcher:
+    """The cheap path: a plain HTTP request plus stdlib HTML extraction."""
+
+    def __init__(self, client: httpx.AsyncClient):
+        self.client = client
+
+    async def fetch(self, url: str) -> FetchOutcome:
+        try:
+            response = await self.client.get(url)
+        except httpx.HTTPError as error:
+            return FetchOutcome(success=False, error=f"{type(error).__name__}: {error}")
+
+        status = response.status_code
+        if status in CHALLENGE_STATUSES:
+            return FetchOutcome(
+                success=False,
+                status_code=status,
+                error=f"HTTP {status} (possible bot challenge)",
+                needs_browser=True,
+            )
+        if status != 200:
+            return FetchOutcome(
+                success=False, status_code=status, error=f"HTTP {status}"
+            )
+        content_type = response.headers.get("content-type", "")
+        if "html" not in content_type:
+            return FetchOutcome(
+                success=False, status_code=status, error=f"not HTML ({content_type})"
+            )
+
+        parsed = parse_html(response.text, base_url=str(response.url))
+        return FetchOutcome(
+            success=True,
+            status_code=status,
+            title=parsed.title or None,
+            html=response.text,
+            markdown=parsed.markdown,
+            links=parsed.links,
+            needs_browser=looks_like_shell(response.text, parsed.markdown),
+        )
+
+
+class RemoteBrowserFetcher:
+    """The rendering path via a crawl4ai REST container instead of a local browser.
+
+    Points at the ``crawl4ai`` service from ``docker-compose.yml`` (port
+    11235). The container owns the browser pool, so this machine needs no
+    Playwright install, and parallel workers render in parallel server-side.
+    """
+
+    def __init__(
+        self,
+        base_url: str,
+        client: httpx.AsyncClient,
+        user_agent: str,
+        timeout: float = DEFAULT_TIMEOUT,
+    ):
+        self.base_url = base_url.rstrip("/")
+        self.client = client
+        self.user_agent = user_agent
+        self.timeout = timeout
+
+    async def _crawl(self, url: str, **run_params) -> dict:
+        payload = {
+            "urls": [url],
+            "browser_config": {
+                "type": "BrowserConfig",
+                "params": {"headless": True, "user_agent": self.user_agent},
+            },
+            "crawler_config": {
+                "type": "CrawlerRunConfig",
+                "params": {
+                    "cache_mode": "bypass",
+                    "page_timeout": int(self.timeout * 1000),
+                    **run_params,
+                },
+            },
+        }
+        response = await self.client.post(
+            f"{self.base_url}/crawl",
+            json=payload,
+            # The server holds the request while the page renders, so give it
+            # headroom beyond the page timeout itself.
+            timeout=self.timeout + 30,
+        )
+        response.raise_for_status()
+        body = response.json()
+        results = body.get("results") or []
+        if not body.get("success") or not results:
+            raise ValueError(f"crawl4ai server returned no result for {url}")
+        return results[0]
+
+    async def fetch(self, url: str) -> FetchOutcome:
+        try:
+            result = await self._crawl(url)
+        except httpx.ConnectError as error:
+            return FetchOutcome(
+                success=False,
+                error=(
+                    f"cannot reach crawl4ai at {self.base_url} ({error}) — is"
+                    " the container running? (docker compose up crawl4ai)"
+                ),
+            )
+        except (httpx.HTTPError, ValueError) as error:
+            return FetchOutcome(success=False, error=f"{type(error).__name__}: {error}")
+        if not result.get("success"):
+            return FetchOutcome(
+                success=False,
+                status_code=result.get("status_code"),
+                error=result.get("error_message") or "browser fetch failed",
+            )
+        markdown = result.get("markdown")
+        if isinstance(markdown, dict):
+            markdown = markdown.get("raw_markdown")
+        # The rendered DOM, stylesheets and scripts included, so the archive
+        # viewer can show the page as the browser did; ``cleaned_html`` has
+        # them stripped and is only a fallback for the markdown.
+        html = result.get("html") or result.get("cleaned_html") or ""
+        links = [
+            item.get("href") if isinstance(item, dict) else item
+            for group in (result.get("links") or {}).values()
+            for item in group
+        ]
+        return FetchOutcome(
+            success=True,
+            status_code=result.get("status_code"),
+            title=(result.get("metadata") or {}).get("title"),
+            html=html,
+            markdown=markdown or parse_html(html, base_url=url).markdown,
+            links=[link for link in links if link],
+        )
+
+    async def screenshot(self, url: str) -> Optional[bytes]:
+        """A PNG capture of the page, None when the server cannot provide one."""
+        try:
+            result = await self._crawl(url, screenshot=True)
+        except (httpx.HTTPError, ValueError) as error:
+            logger.error(f"Screenshot of {url} failed: {error}")
+            return None
+        image = result.get("screenshot")
+        if not result.get("success") or not image:
+            return None
+        return base64.b64decode(image)
+
+
+@dataclass
+class CrawlReport:
+    """What one crawl run did."""
+
+    fetched: int = 0
+    failed: int = 0
+    disallowed: int = 0
+    escalated: int = 0
+
+
+class RequestSpacer:
+    """Site-wide spacing between fetch starts, shared by every worker.
+
+    Keeps ``--delay`` meaning what it meant when the crawl was sequential —
+    at most one request per ``interval`` seconds against the site — no matter
+    how many workers run. Concurrency then overlaps the *waiting* (server
+    latency, page rendering), not the request rate.
+    """
+
+    def __init__(self, interval: float):
+        self.interval = interval
+        self._lock = asyncio.Lock()
+        self._next_start = 0.0
+
+    async def wait(self) -> None:
+        if self.interval <= 0:
+            return
+        async with self._lock:
+            now = asyncio.get_running_loop().time()
+            pause = max(0.0, self._next_start - now)
+            self._next_start = max(now, self._next_start) + self.interval
+        if pause:
+            await asyncio.sleep(pause)
+
+
+async def crawl_site(
+    db: PagesDatabase,
+    start_url: str,
+    http_fetch: Optional[Fetch],
+    browser_fetch: Optional[Fetch],
+    *,
+    allowed: Callable[[str], bool] = lambda url: True,
+    max_pages: int = DEFAULT_MAX_PAGES,
+    max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+    delay: float = DEFAULT_DELAY,
+    concurrency: int = DEFAULT_CONCURRENCY,
+) -> CrawlReport:
+    """Crawl pending URLs until the page budget or the frontier is exhausted.
+
+    ``http_fetch`` is tried first and ``browser_fetch`` is the escalation;
+    passing one of them as None forces the other mode. Every completed page is
+    committed together with its discovered links before its worker picks the
+    next URL, so the crawl can be killed and resumed at any point.
+
+    ``concurrency`` workers fetch in parallel; the request *rate* stays
+    capped by ``delay`` site-wide (see :class:`RequestSpacer`), and a worker
+    with nothing to claim waits for the others — their commits may enqueue
+    new links or free budget — before giving up.
+
+    ``max_pages`` caps the pages *holding content in the database*, not the
+    pages fetched by this run — a resumed crawl keeps the original budget.
+    """
+    host = site_host(start_url)
+    report = CrawlReport()
+    tried: set[str] = set()
+    in_flight: set[str] = set()
+    spacer = RequestSpacer(delay)
+    page_done = asyncio.Event()
+    consecutive_escalations = 0
+
+    async def fetch_with_escalation(url: str) -> tuple[Optional[FetchOutcome], str]:
+        """HTTP first, the browser when the response is not usable content.
+
+        Returns the outcome to record and the mode that produced it. A failed
+        escalation keeps the (thin but real) HTTP content rather than losing
+        the page entirely; once the site has escalated ``ESCALATION_MEMO``
+        times in a row the HTTP attempt is skipped as doomed.
+        """
+        nonlocal consecutive_escalations
+        outcome: Optional[FetchOutcome] = None
+        mode = "browser"
+        if http_fetch is not None and consecutive_escalations < ESCALATION_MEMO:
+            await spacer.wait()
+            outcome = await http_fetch(url)
+            mode = "http"
+        if browser_fetch is not None and (outcome is None or outcome.needs_browser):
+            await spacer.wait()
+            browser_outcome = await browser_fetch(url)
+            if outcome is not None:
+                report.escalated += 1
+                consecutive_escalations += 1
+            if browser_outcome.success or outcome is None or not outcome.success:
+                outcome, mode = browser_outcome, "browser"
+        if outcome is not None and outcome.success and mode == "http":
+            consecutive_escalations = 0
+        return outcome, mode
+
+    async def process(url: str) -> None:
+        if not allowed(url):
+            db.record_skipped(url, "disallowed by robots.txt")
+            report.disallowed += 1
+            return
+        outcome, mode = await fetch_with_escalation(url)
+        if outcome is not None and outcome.success:
+            links = page_links(outcome.links, url, host)
+            db.record_success(
+                url,
+                status_code=outcome.status_code,
+                fetch_mode=mode,
+                title=outcome.title,
+                html=outcome.html,
+                markdown=outcome.markdown,
+                links=links,
+            )
+            report.fetched += 1
+            logger.info(
+                f"[{db.fetched_count()}/{max_pages}] {url} ({mode}, {len(links)} links)"
+            )
+        else:
+            error = outcome.error if outcome else "no fetcher available"
+            status = outcome.status_code if outcome else None
+            db.record_failure(url, status_code=status, fetch_error=error)
+            report.failed += 1
+            logger.warning(f"Failed {url}: {error}")
+
+    async def worker() -> None:
+        while True:
+            url = None
+            if db.fetched_count() + len(in_flight) < max_pages:
+                url = db.next_pending(skip=tried | in_flight, max_attempts=max_attempts)
+            if url is None:
+                if not in_flight:
+                    return
+                page_done.clear()
+                try:
+                    await asyncio.wait_for(page_done.wait(), timeout=0.2)
+                except TimeoutError:
+                    pass
+                continue
+            # No await between claiming and marking, so two workers cannot
+            # pick the same URL.
+            tried.add(url)
+            in_flight.add(url)
+            try:
+                await process(url)
+            finally:
+                in_flight.discard(url)
+                page_done.set()
+
+    await asyncio.gather(*(worker() for _ in range(max(1, concurrency))))
+    return report
+
+
+async def run(
+    args: argparse.Namespace,
+    *,
+    transport: Optional[httpx.AsyncBaseTransport] = None,
+    browser_fetcher: Optional[RemoteBrowserFetcher] = None,
+) -> dict:
+    """Scrape as the CLI arguments describe; returns the final database stats.
+
+    ``transport`` and ``browser_fetcher`` exist for tests, which substitute
+    an ``httpx.MockTransport`` and a stub browser for the real network.
+    """
+    start_url = normalize_url(args.url if "://" in args.url else f"https://{args.url}")
+    if start_url is None:
+        raise ValueError(f"Not a crawlable URL: {args.url!r}")
+    host = site_host(start_url)
+    pages_path = args.pages or f"{host}.pages.db"
+    user_agent, robots_token = resolve_user_agent(args.user_agent)
+
+    with PagesDatabase(pages_path) as db:
+        if args.refresh:
+            logger.info(f"Re-queued {db.requeue_all()} known URLs")
+
+        async with httpx.AsyncClient(
+            headers={"User-Agent": user_agent},
+            follow_redirects=True,
+            timeout=args.timeout,
+            transport=transport,
+        ) as client:
+            seeds = [start_url] + await sitemap_urls(client, start_url, args.max_pages)
+            db.add_urls(page_links(seeds, start_url, host))
+
+            allowed = await robots_filter(
+                client, start_url, robots_token, args.ignore_robots
+            )
+            browser = browser_fetcher
+            if browser is None and not args.force_http:
+                browser = RemoteBrowserFetcher(
+                    args.crawl4ai_url, client, user_agent, timeout=args.timeout
+                )
+            http_fetcher = HttpFetcher(client) if not args.force_browser else None
+
+            report = await crawl_site(
+                db,
+                start_url,
+                http_fetcher.fetch if http_fetcher else None,
+                browser.fetch if browser else None,
+                allowed=allowed,
+                max_pages=args.max_pages,
+                max_attempts=args.max_attempts,
+                delay=args.delay,
+                concurrency=args.concurrency,
+            )
+            if args.screenshot and browser:
+                image = await browser.screenshot(start_url)
+                if image:
+                    db.save_screenshot(start_url, image)
+                    logger.info(f"Screenshot of {start_url} stored in {pages_path}")
+            elif args.screenshot:
+                logger.warning("--screenshot needs the browser; skipped")
+
+        stats = db.stats()
+    logger.info(
+        f"Run: {report.fetched} fetched, {report.failed} failed,"
+        f" {report.disallowed} disallowed, {report.escalated} escalated."
+        f" Database {pages_path}: {stats['fetched']} pages,"
+        f" {stats['pending']} pending."
+    )
+    return stats
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Command line of the scraper."""
+    parser = argparse.ArgumentParser(
+        description="Scrape a website into a pages database.",
+        epilog=(
+            "Example: python -m tools.zerocostchatbot.scrape"
+            " https://docs.kaval.ai --max-pages 50"
+        ),
+    )
+    parser.add_argument("url", help="Site to scrape, e.g. https://docs.kaval.ai")
+    parser.add_argument(
+        "--pages",
+        default=None,
+        help=(
+            "Pages database file to write to and resume from"
+            " (default: <host>.pages.db, e.g. docs.kaval.ai.pages.db)"
+        ),
+    )
+    parser.add_argument(
+        "--max-pages",
+        type=int,
+        default=DEFAULT_MAX_PAGES,
+        help=f"Stop once this many pages hold content (default: {DEFAULT_MAX_PAGES})",
+    )
+    parser.add_argument(
+        "--delay",
+        type=float,
+        default=DEFAULT_DELAY,
+        help=f"Seconds between fetches (default: {DEFAULT_DELAY})",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=DEFAULT_TIMEOUT,
+        help=f"Per-request timeout in seconds (default: {DEFAULT_TIMEOUT})",
+    )
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=DEFAULT_CONCURRENCY,
+        help=(
+            "Pages fetched in parallel; the request rate stays capped by"
+            f" --delay site-wide (default: {DEFAULT_CONCURRENCY})"
+        ),
+    )
+    parser.add_argument(
+        "--max-attempts",
+        type=int,
+        default=DEFAULT_MAX_ATTEMPTS,
+        help=f"Park a URL after this many failed fetches (default: {DEFAULT_MAX_ATTEMPTS})",
+    )
+    parser.add_argument(
+        "--user-agent",
+        default="kavalai",
+        help=(
+            "'kavalai' (default), 'browser', 'googlebot', or a verbatim"
+            " User-Agent string; robots.txt is matched with the same identity"
+        ),
+    )
+    parser.add_argument(
+        "--ignore-robots",
+        action="store_true",
+        help="Do not honour the site's robots.txt",
+    )
+    parser.add_argument(
+        "--crawl4ai-url",
+        default=DEFAULT_CRAWL4AI_URL,
+        metavar="URL",
+        help=(
+            "Base URL of the crawl4ai REST container that renders pages"
+            f" (default: {DEFAULT_CRAWL4AI_URL}, the docker-compose service)"
+        ),
+    )
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--force-http",
+        action="store_true",
+        help="Never start the headless browser",
+    )
+    mode.add_argument(
+        "--force-browser",
+        action="store_true",
+        help="Fetch every page with the headless browser",
+    )
+    parser.add_argument(
+        "--refresh",
+        action="store_true",
+        help="Re-queue every known URL before crawling (a fresh pass)",
+    )
+    parser.add_argument(
+        "--screenshot",
+        action="store_true",
+        help="Store a PNG of the start page on its row (needs the crawl4ai container)",
+    )
+    return parser
+
+
+def main() -> int:
+    """Entry point. Returns a process exit code."""
+    args = build_parser().parse_args()
+    try:
+        stats = asyncio.run(run(args))
+    except ValueError as error:
+        logger.error(error)
+        return 2
+    return 0 if stats["fetched"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

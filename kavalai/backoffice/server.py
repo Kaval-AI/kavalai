@@ -24,16 +24,23 @@ from datetime import datetime
 from uuid import UUID
 
 import numpy as np
-import uvicorn
-from authlib.integrations.starlette_client import OAuth
-from fastapi import Body, FastAPI, HTTPException, Request, status
 from loguru import logger
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-from sse_starlette.sse import EventSourceResponse
-from starlette.middleware.sessions import SessionMiddleware
-from starlette.responses import JSONResponse, RedirectResponse, Response
-from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+
+try:
+    import uvicorn
+    from authlib.integrations.starlette_client import OAuth
+    from fastapi import Body, FastAPI, HTTPException, Request, status
+    from sse_starlette.sse import EventSourceResponse
+    from starlette.middleware.sessions import SessionMiddleware
+    from starlette.responses import JSONResponse, RedirectResponse, Response
+    from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+except ImportError as exc:
+    raise ImportError(
+        f"The backoffice requires the optional '{exc.name}' package. "
+        'Install it with: pip install "kavalai[runtime,backoffice]"'
+    ) from exc
 
 from kavalai import stats as agent_stats
 from kavalai.agent_service import AgentService
@@ -41,11 +48,11 @@ from kavalai.backoffice import db
 from kavalai.backoffice import sessions as agent_sessions
 from kavalai.backoffice.db import is_member, is_owner
 from kavalai.backoffice.embedding_projector import train_pca
-from kavalai.backoffice.project_service import ProjectService
+from kavalai.backoffice.project_service import ProjectService, project_sessionmaker
 from kavalai.crud import delete, get_all, get_one, insert, select, update
 from kavalai.db import Agent, db_manager
 from kavalai.llm_clients.streamer import StreamContent, Streamer
-from kavalai.rag import PostgresRagService
+from kavalai.rag import CollectionRagService, PostgresRagService, SqliteRagService
 
 app = FastAPI()
 
@@ -69,18 +76,6 @@ async def get_backoffice_session():
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Backoffice database is not connected. Please check your database settings.",
         )
-
-
-def project_sessionmaker(project: db.Project) -> async_sessionmaker[AsyncSession]:
-    """A sessionmaker for the agent database the project points at."""
-    return db_manager.get_sessionmaker(
-        user=project.db_user,
-        password=project.db_password,
-        host=project.db_host,
-        port=project.db_port,
-        db_name=project.db_name,
-        schema=project.db_schema,
-    )
 
 
 @asynccontextmanager
@@ -513,8 +508,16 @@ async def projects_get_llm_call_stats(
     call_type: str | None = None,
     limit: int = 50,
     offset: int = 0,
+    agent_id: UUID | None = None,
+    session_id: UUID | None = None,
+    run_id: UUID | None = None,
 ):
-    """Fetch paginated LLM call stats for a specific project."""
+    """Fetch paginated model call stats for a specific project.
+
+    ``agent_id``, ``session_id`` and ``run_id`` narrow the list to the calls
+    attributed to that agent, conversation or run — the run's own calls are
+    what the task debugger shows beside its tasks.
+    """
     assert_logged_in(request)
     project = await get_project_and_assert_access(request, project_id)
 
@@ -522,7 +525,12 @@ async def projects_get_llm_call_stats(
     try:
         service = AgentService(project_sessionmaker(project))
         return await service.get_model_call_stats(
-            call_type=call_type, limit=limit, offset=offset
+            call_type=call_type,
+            limit=limit,
+            offset=offset,
+            agent_id=agent_id,
+            session_id=session_id,
+            run_id=run_id,
         )
     except Exception as e:
         logger.error(f"Failed to connect to project database for {project.name}: {e}")
@@ -542,6 +550,30 @@ def _reuse_session(session: AsyncSession):
     return factory
 
 
+def rag_service_for_project(
+    project: db.Project,
+    model: str | None = None,
+    normalizer=None,
+    session_factory=None,
+) -> CollectionRagService:
+    """The RAG service over the project's agent database.
+
+    Both backends share one storage model, so the explorer endpoints only
+    differ in how they reach the database: a SQLite project's index lives in
+    the same file as its agent tables, a PostgreSQL project's in the same
+    schema, reached through ``session_factory`` (the project's sessionmaker
+    unless one is given).
+    """
+    if project.db_type == "sqlite":
+        return SqliteRagService(project.db_name, model=model, normalizer=normalizer)
+    return PostgresRagService(
+        session_factory or project_sessionmaker(project),
+        model,
+        normalizer=normalizer,
+        schema=project.db_schema,
+    )
+
+
 async def _cache_value(
     bo_session: db.AsyncSession, project_id: UUID, name: str
 ) -> str | None:
@@ -552,10 +584,25 @@ async def _cache_value(
     return entry.value if entry else None
 
 
+async def _collection_model(
+    rag_service: CollectionRagService, collection_name: str, results
+) -> str | None:
+    """The embedding model the collection was indexed with.
+
+    Every hit carries it, so only a query without hits consults the registry.
+    """
+    if results:
+        return results[0].model
+    for collection in await rag_service.list_collections():
+        if collection["name"] == collection_name:
+            return collection["model"]
+    return None
+
+
 async def _pca_projection(
     project_id: UUID,
     collection_name: str,
-    rag_service: PostgresRagService,
+    rag_service: CollectionRagService,
     text: str,
     normalizer,
     results,
@@ -575,8 +622,15 @@ async def _pca_projection(
         try:
             ipca = pickle.loads(base64.b64decode(model_data))  # nosec B301
 
+            # The PCA was fitted on the stored embeddings, so the query is
+            # projected from the collection's model whatever the request
+            # named; the service's embedding client follows its ``model``.
+            rag_service.model = (
+                await _collection_model(rag_service, collection_name, results)
+                or rag_service.model
+            )
             embeddings, _ = await rag_service.embedding_client.compute_embeddings(
-                texts=[text], normalizer=normalizer
+                texts=[text], normalize=normalizer is not None, normalizer=normalizer
             )
             query_point = ipca.transform(np.array(embeddings))[0]
 
@@ -624,15 +678,19 @@ async def projects_rag_query(
     request: Request,
     query_data: dict = Body(...),
 ):
-    """Execute a RAG query for a specific project."""
+    """Execute a RAG query for a specific project.
+
+    ``model`` is optional: an existing collection is embedded with the model
+    recorded for it, so a query needs only ``text``.
+    """
     assert_logged_in(request)
     project = await get_project_and_assert_access(request, project_id)
 
-    model = query_data.get("model")
+    model = query_data.get("model") or None
     text = query_data.get("text")
     collection_name = query_data.get("collection_name")
-    if not model or not text:
-        raise HTTPException(status_code=400, detail="model and text are required")
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
 
     normalizer = None
     if normalizer_yaml := query_data.get("normalizer_yaml"):
@@ -646,11 +704,8 @@ async def projects_rag_query(
             )
 
     async with get_project_session(project) as session:
-        rag_service = PostgresRagService(
-            _reuse_session(session),
-            model,
-            normalizer=normalizer,
-            schema=project.db_schema,
+        rag_service = rag_service_for_project(
+            project, model, normalizer, session_factory=_reuse_session(session)
         )
         results = await rag_service.query(
             text=text,
@@ -677,10 +732,26 @@ async def projects_rag_stats(project_id: UUID, request: Request):
 
     # Stats come from the collection registry, so no embedding model is needed.
     async with get_project_session(project) as session:
-        rag_service = PostgresRagService(
-            _reuse_session(session), model=None, schema=project.db_schema
+        rag_service = rag_service_for_project(
+            project, session_factory=_reuse_session(session)
         )
         return await rag_service.get_stats()
+
+
+@app.get("/projects/{project_id}/rag/collections")
+async def projects_rag_collections(project_id: UUID, request: Request):
+    """List a project's RAG collections with their model, dimension and size.
+
+    The explorer takes the model a query is embedded with from here.
+    """
+    assert_logged_in(request)
+    project = await get_project_and_assert_access(request, project_id)
+
+    async with get_project_session(project) as session:
+        rag_service = rag_service_for_project(
+            project, session_factory=_reuse_session(session)
+        )
+        return await rag_service.list_collections()
 
 
 @app.get("/projects/{project_id}/rag/train-pca")
@@ -691,10 +762,9 @@ async def projects_train_pca(project_id: UUID, collection_name: str, request: Re
 
     streamer = Streamer(stream_delta=True)
 
-    rag_service = PostgresRagService(
-        lambda: get_project_session(project),
-        model=None,  # export-only: PCA training never computes embeddings
-        schema=project.db_schema,
+    # Export-only: PCA training never computes embeddings, so no model.
+    rag_service = rag_service_for_project(
+        project, session_factory=lambda: get_project_session(project)
     )
 
     async def run_training():

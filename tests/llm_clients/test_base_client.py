@@ -1,16 +1,20 @@
+import json
+
 import pytest
 from unittest.mock import patch
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from kavalai.llm_clients.base_client import (
     BaseLlmClient,
     ChatHistory,
     ChatMessage,
+    LlmClientException,
     LlmClientParameters,
     ModelStatsLogger,
     ModelStatsReceiver,
     ModelCallStat,
+    OutputTruncatedError,
 )
 import openai
 
@@ -346,3 +350,152 @@ async def test_failed_calls_are_recorded_with_their_status_code():
     assert stat.model == "fake/m"
     assert stat.total_tokens is None
     assert "slow down" in stat.response_data
+
+
+def test_max_output_tokens_defaults_to_unset_and_must_be_positive():
+    assert LlmClientParameters().max_output_tokens is None
+    assert LlmClientParameters(max_output_tokens=256).max_output_tokens == 256
+    with pytest.raises(ValidationError):
+        LlmClientParameters(max_output_tokens=0)
+
+
+def test_truncation_error_names_the_cap_and_the_remedy():
+    error = OutputTruncatedError(
+        model="openai/gpt-5-mini",
+        reason="max_output_tokens",
+        max_output_tokens=64,
+        partial_output='{"title": "The Ke',
+        completion_tokens=64,
+        reasoning_tokens=40,
+    )
+
+    assert isinstance(error, LlmClientException)
+    assert str(error) == (
+        "The output of 'openai/gpt-5-mini' was cut off at the output cap of 64 "
+        "tokens after 64 output tokens, 40 of them reasoning (stop reason "
+        "'max_output_tokens'). The partial output is not returned. Raise "
+        "max_output_tokens (LlmClientParameters, or llm_kwargs in a workflow) "
+        "or ask for a shorter answer."
+    )
+
+
+def test_truncation_error_without_a_cap_or_visible_output():
+    error = OutputTruncatedError(model="gemini/gemini-3.5-flash", reason="MAX_TOKENS")
+
+    message = str(error)
+    assert "the provider's default output limit" in message
+    assert "after" not in message
+    assert "No visible output was produced before the cut." in message
+
+
+class Collector(ModelStatsReceiver):
+    def __init__(self):
+        self.stats = []
+
+    def receive_model_stats(self, stats):
+        self.stats.append(stats)
+
+
+class TruncatingClient(BaseLlmClient):
+    """Streams a partial answer, then reports that the cap cut it off."""
+
+    provider = "fake"
+
+    def __init__(self, receiver, partial='{"answer": "Par', **usage):
+        super().__init__(LlmClientParameters(max_output_tokens=8), receiver)
+        self.model = "m"
+        self.partial = partial
+        self.usage = usage
+        self.attempts = 0
+
+    async def _run_chat_completions(self, chat_history, response_model, streamer):
+        self.attempts += 1
+        value_streamer = streamer.get_value_streamer("response")
+        await value_streamer.stream_partial(self.partial)
+        raise self._output_truncated(
+            "length", self.partial, request_data={"model": self.model}, **self.usage
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_truncated_structured_call_raises_instead_of_returning():
+    class Answer(BaseModel):
+        answer: str
+
+    client = TruncatingClient(Collector(), prompt_tokens=5, completion_tokens=8)
+
+    with pytest.raises(OutputTruncatedError) as caught:
+        await client.chat_completions(chat_history=USER_HISTORY, response_model=Answer)
+
+    assert client.attempts == 1
+    assert caught.value.max_output_tokens == 8
+    assert caught.value.partial_output == '{"answer": "Par'
+
+
+@pytest.mark.asyncio
+async def test_a_truncated_stream_delivers_its_partials_then_raises():
+    client = TruncatingClient(Collector(), partial="Once upon")
+    streamer = await client.stream_chat_completions(chat_history=USER_HISTORY)
+
+    seen = []
+    with pytest.raises(OutputTruncatedError):
+        async for chunk in streamer:
+            seen.append(chunk)
+
+    assert [(c.type, c.value) for c in seen] == [("partial", "Once upon")]
+
+
+@pytest.mark.asyncio
+async def test_a_truncated_call_is_recorded_with_its_tokens():
+    """The call was billed, so its row carries what it cost."""
+    collector = Collector()
+    client = TruncatingClient(
+        collector,
+        prompt_tokens=5,
+        completion_tokens=8,
+        cached_prompt_tokens=2,
+        reasoning_tokens=3,
+    )
+
+    with pytest.raises(OutputTruncatedError):
+        await client.chat_completions(chat_history=USER_HISTORY)
+
+    (stat,) = collector.stats
+    assert stat.model == "fake/m"
+    assert stat.response_code is None
+    assert json.loads(stat.request_data) == {"model": "m"}
+    assert (stat.prompt_tokens, stat.completion_tokens, stat.total_tokens) == (
+        5,
+        8,
+        13,
+    )
+    assert (stat.cached_prompt_tokens, stat.reasoning_tokens) == (2, 3)
+    assert stat.response_data.startswith("The output of 'fake/m' was cut off")
+    assert stat.response_data.endswith('\n\n{"answer": "Par')
+
+
+@pytest.mark.asyncio
+async def test_a_truncated_call_without_counts_or_output_is_still_recorded():
+    collector = Collector()
+    client = TruncatingClient(collector, partial="")
+
+    with pytest.raises(OutputTruncatedError):
+        await client.chat_completions(chat_history=USER_HISTORY)
+
+    (stat,) = collector.stats
+    assert stat.total_tokens is None
+    assert stat.response_data.endswith(
+        "No visible output was produced before the "
+        "cut. The partial output is not returned. "
+        "Raise max_output_tokens (LlmClientParameters, "
+        "or llm_kwargs in a workflow) or ask for a "
+        "shorter answer."
+    )
+
+
+def test_output_truncated_prefers_an_explicit_cap():
+    client = TruncatingClient(Collector())
+    assert (
+        client._output_truncated("x", "", max_output_tokens=99).max_output_tokens == 99
+    )
+    assert client._output_truncated("x", "").max_output_tokens == 8

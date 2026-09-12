@@ -47,4 +47,46 @@
       }
     </div>
   </div>
+
+  @if (modelCalls.length > 0) {
+    <div class="card bg-base-100 shadow-xl border border-base-200 run-model-calls">
+      <div class="card-body p-4 sm:p-6">
+        <div class="flex flex-wrap justify-between items-center gap-2 mb-2">
+          <h2 class="text-lg font-bold">Model Calls ({{ modelCalls.length }})</h2>
+          <div class="flex flex-wrap items-center gap-4 text-sm">
+            <span class="opacity-70">{{ modelCallTokens }} tokens in total</span>
+            <a class="link link-primary" routerLink="/llm-call-stats" [queryParams]="{ run_id: runId }">Open in Model calls</a>
+          </div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="table table-zebra table-sm w-full">
+            <thead>
+              <tr class="bg-base-200/50">
+                <th>Time</th>
+                <th>Model</th>
+                <th>Type</th>
+                <th class="text-right">In</th>
+                <th class="text-right">Out</th>
+                <th class="text-right">Total</th>
+                <th class="text-right">Duration</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (call of modelCalls; track call.id) {
+                <tr>
+                  <td class="whitespace-nowrap text-xs">{{ formatTime(call.created_at) }}</td>
+                  <td class="font-mono text-xs">{{ call.model }}</td>
+                  <td><span class="badge badge-ghost badge-sm">{{ call.call_type }}</span></td>
+                  <td class="text-right">{{ call.prompt_tokens ?? '-' }}</td>
+                  <td class="text-right">{{ call.completion_tokens ?? '-' }}</td>
+                  <td class="text-right font-bold">{{ call.total_tokens ?? '-' }}</td>
+                  <td class="text-right whitespace-nowrap">{{ formatDuration(call.duration_seconds) }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  }
 </div>

@@ -10,17 +10,16 @@ RUN npm run build -- --configuration production
 FROM python:3.12-slim
 WORKDIR /app
 
-# Install Nginx and system dependencies
+# Install Nginx
 RUN apt-get update && apt-get install -y --no-install-recommends \
     nginx \
-    build-essential \
-    libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy backend dependencies and install. The backoffice needs the full
-# non-browser runtime (FastAPI, Authlib, the database drivers) from `common`.
+# Copy backend dependencies and install. The backoffice server needs `runtime`
+# (FastAPI, the provider SDKs for the RAG explorer, asyncpg, which also runs the
+# migrations) and `backoffice` (Authlib, scikit-learn, sse-starlette).
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir ".[common]"
+RUN pip install --no-cache-dir ".[runtime,backoffice]"
 
 # Copy the rest of the application
 COPY . .

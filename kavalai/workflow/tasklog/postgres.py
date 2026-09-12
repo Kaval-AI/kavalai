@@ -20,8 +20,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from kavalai.agent_service import AgentService
-from kavalai.db import ModelCallStat as DbModelCallStat
-from kavalai.workflow.tasklog.base import TaskLogger
+from kavalai.workflow.tasklog.base import DEFAULT_MAX_PAYLOAD_BYTES, TaskLogger
 from kavalai.llm_clients.base_client import ModelCallStat
 
 
@@ -29,45 +28,41 @@ def _uuid(value: Optional[str]) -> Optional[UUID]:
     return UUID(value) if value else None
 
 
-def _to_orm_stat(stats: ModelCallStat) -> DbModelCallStat:
-    """Convert a Pydantic ModelCallStat into the persistable ORM row."""
-    if isinstance(stats, DbModelCallStat):
-        return stats
-    return DbModelCallStat(
-        call_type=stats.call_type,
-        model=stats.model or "",
-        request_data=stats.request_data,
-        response_data=stats.response_data,
-        response_code=stats.response_code,
-        prompt_tokens=stats.prompt_tokens,
-        completion_tokens=stats.completion_tokens,
-        total_tokens=stats.total_tokens,
-        cached_prompt_tokens=stats.cached_prompt_tokens,
-        reasoning_tokens=stats.reasoning_tokens,
-        batch_size=stats.batch_size,
-        duration_seconds=stats.duration_seconds,
-    )
-
-
 class PostgresTaskLogger(TaskLogger):
-    """Postgres-backed :class:`TaskLogger` delegating to :class:`AgentService`.
+    """Database-backed :class:`TaskLogger` delegating to :class:`AgentService`.
 
     Node executions become ``tasks`` rows (with their ``node_type``) and model
-    calls become ``model_call_stats`` rows, which is what the backoffice
-    dashboards read.
+    calls become ``model_call_stats`` rows carrying the agent, session and run
+    that made them, which is what the backoffice dashboards read. Despite the
+    name it writes to whatever database the service's sessionmaker points at,
+    SQLite included.
+
+    ``record_nodes``, ``record_payloads`` and ``max_payload_bytes`` are the
+    :class:`TaskLogger` options.
     """
 
-    def __init__(self, agent_service: AgentService):
-        super().__init__()
+    def __init__(
+        self,
+        agent_service: AgentService,
+        *,
+        max_payload_bytes: int = DEFAULT_MAX_PAYLOAD_BYTES,
+        record_nodes: bool = True,
+        record_payloads: bool = True,
+    ):
+        super().__init__(
+            max_payload_bytes,
+            record_nodes=record_nodes,
+            record_payloads=record_payloads,
+        )
         self.agent_service = agent_service
 
     @classmethod
     def from_session_maker(
-        cls, session_maker: async_sessionmaker[AsyncSession]
+        cls, session_maker: async_sessionmaker[AsyncSession], **options: Any
     ) -> "PostgresTaskLogger":
-        return cls(AgentService(session_maker))
+        return cls(AgentService(session_maker), **options)
 
-    async def _log_node_impl(
+    async def write_node(
         self,
         *,
         run_id: Optional[str],
@@ -87,6 +82,8 @@ class PostgresTaskLogger(TaskLogger):
         # A task row requires a run + session; skip if the engine ran without them.
         if not run_id or not session_id:
             return
+        if output is not None and not isinstance(output, dict):
+            output = {"result": output}
         await self.agent_service.add_task(
             session_id=UUID(session_id),
             run_id=UUID(run_id),
@@ -94,7 +91,7 @@ class PostgresTaskLogger(TaskLogger):
             name=node_name,
             node_type=node_type,
             inputs=inputs,
-            output=output if isinstance(output, dict) else {"result": output},
+            output=output,
             prompt=prompt,
             errors=errors,
             duration_seconds=duration,
@@ -103,9 +100,17 @@ class PostgresTaskLogger(TaskLogger):
             tool_uri=tool_uri,
         )
 
-    async def _log_model_call_impl(
-        self, stats: ModelCallStat, agent_id: Optional[str]
+    async def write_model_call(
+        self,
+        stats: ModelCallStat,
+        *,
+        agent_id: Optional[str],
+        session_id: Optional[str],
+        run_id: Optional[str],
     ) -> None:
         await self.agent_service.add_model_call_stats(
-            _to_orm_stat(stats), agent_id=_uuid(agent_id)
+            stats,
+            agent_id=_uuid(agent_id),
+            session_id=_uuid(session_id),
+            run_id=_uuid(run_id),
         )

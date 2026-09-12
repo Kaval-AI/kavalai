@@ -40,16 +40,18 @@ SONGS_CSV = "examples/ragindex/songs.csv"
 class FakeRag:
     """A RAG service that records calls instead of embedding anything."""
 
-    def __init__(self, results=None, existing=(), can_iter=True):
+    def __init__(self, results=None, existing=(), can_iter=True, can_replace=True):
         self.batches = []
-        self.deleted = []
+        self.replaced = []
         self.queries = []
         self._results = results or []
         self._existing = list(existing)
-        self._can_iter = can_iter
+        self._capabilities = {"iter_entries"} if can_iter else set()
+        if can_replace:
+            self._capabilities.add("replace")
 
     def supports(self, capability):
-        return capability == "iter_entries" and self._can_iter
+        return capability in self._capabilities
 
     async def iter_entries(self, collection_name, batch_size=500):
         for source_id in self._existing:
@@ -59,8 +61,11 @@ class FakeRag:
         self.batches.append((texts, metadata_list, source_ids, collection_name))
         return [{} for _ in texts]
 
-    async def delete_by_source_id(self, collection_name, source_id):
-        self.deleted.append((collection_name, list(source_id)))
+    async def replace(
+        self, collection_name, texts, metadata_list, source_ids=None, *, source_id
+    ):
+        self.replaced.append((collection_name, texts, source_ids, source_id))
+        return [{} for _ in texts]
 
     async def query(self, text, top_k, collection_name, source_ids, keep_best):
         self.queries.append((text, top_k, collection_name, source_ids, keep_best))
@@ -187,50 +192,18 @@ def test_make_rag_service_returns_sqlite_for_a_path(tmp_path):
     service.close()
 
 
-@pytest.mark.parametrize(
-    "index_arg, env, schema_arg, expected",
-    [
-        (
-            "postgres",
-            {"KAVALAI_DB_URI": "postgresql://db/x", "KAVALAI_DB_SCHEMA": "agents"},
-            None,
-            ("postgresql://db/x", "agents"),
-        ),
-        (
-            "postgres",
-            {"KAVALAI_DB_URI": "postgresql://db/x", "KAVALAI_DB_SCHEMA": "agents"},
-            "other",
-            ("postgresql://db/x", "other"),
-        ),
-        ("postgresql://elsewhere/db", {}, None, ("postgresql://elsewhere/db", None)),
-        ("postgres", {}, None, KeyError),
-    ],
-    ids=["env-uri-and-schema", "explicit-schema-wins", "uri-directly", "uri-unset"],
-)
-def test_make_rag_service_resolves_the_postgres_target(
-    monkeypatch, index_arg, env, schema_arg, expected
-):
-    """``--index postgres`` reads the server's environment, an explicit
-    ``--schema`` beats it, and a URI is taken as given."""
+def test_make_rag_service_passes_a_uri_and_schema_through(monkeypatch):
     captured = {}
 
-    def fake_from_uri(uri, model, schema=None):
+    def fake_from_uri(uri, model=None, schema=None, normalizer=None):
         captured.update(uri=uri, schema=schema)
         return "service"
 
     monkeypatch.setattr(PostgresRagService, "from_uri", fake_from_uri)
-    for name in ("KAVALAI_DB_URI", "KAVALAI_DB_SCHEMA"):
-        monkeypatch.delenv(name, raising=False)
-    for name, value in env.items():
-        monkeypatch.setenv(name, value)
-
-    if expected is KeyError:
-        with pytest.raises(KeyError):
-            make_rag_service(index_arg, "fastembed/model", schema_arg)
-        return
-
-    assert make_rag_service(index_arg, "fastembed/model", schema_arg) == "service"
-    assert (captured["uri"], captured["schema"]) == expected
+    assert (
+        make_rag_service("postgresql://db/x", "fastembed/model", "agents") == "service"
+    )
+    assert (captured["uri"], captured["schema"]) == ("postgresql://db/x", "agents")
 
 
 async def test_index_rows_batches_and_counts():
@@ -242,15 +215,57 @@ async def test_index_rows_batches_and_counts():
     assert [len(batch[0]) for batch in rag.batches] == [2, 2, 1]
     assert rag.batches[0][2] == ["0", "1"]
     assert rag.batches[0][3] == "songs"
-    assert rag.deleted == []
+    assert rag.replaced == []
 
 
-async def test_index_rows_replaces_the_same_source_ids_first():
+async def test_index_rows_replaces_each_source_in_one_call():
     rag = FakeRag()
-    rows = [IndexRow("7", "text", {})]
+    rows = [IndexRow("7", "a", {}), IndexRow("8", "b", {}), IndexRow("7", "c", {})]
+
+    report = await index_rows(rag, iter(rows), "songs", batch_size=3, replace=True)
+    assert report.indexed == 3
+    assert rag.replaced == [
+        ("songs", ["a", "c"], ["7", "7"], "7"),
+        ("songs", ["b"], ["8"], "8"),
+    ]
+    assert rag.batches == []
+
+
+async def test_a_source_spanning_two_batches_is_replaced_once():
+    """The second batch appends: replacing again would delete the first."""
+    rag = FakeRag()
+    rows = [IndexRow("7", "a", {}), IndexRow("8", "b", {}), IndexRow("7", "c", {})]
 
     await index_rows(rag, iter(rows), "songs", batch_size=2, replace=True)
-    assert rag.deleted == [("songs", ["7"])]
+    assert rag.replaced == [
+        ("songs", ["a"], ["7"], "7"),
+        ("songs", ["b"], ["8"], "8"),
+    ]
+    assert rag.batches == [(["c"], [{}], ["7"], "songs")]
+
+
+async def test_replace_needs_a_backend_that_can_replace():
+    with pytest.raises(ValueError, match="--replace is unavailable"):
+        await index_rows(FakeRag(can_replace=False), iter([]), "songs", replace=True)
+
+
+async def test_replace_on_a_real_index_is_idempotent(tmp_path):
+    """Re-running with --replace leaves one entry per row, not two."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    async def compute_embeddings(texts, *args, **kwargs):
+        return [[1.0, float(len(text)), 0.5] for text in texts], None
+
+    rag = make_rag_service(str(tmp_path / "index.db"), "fastembed/model", None)
+    rag.embedding_client = MagicMock()
+    rag.embedding_client.compute_embeddings = AsyncMock(side_effect=compute_embeddings)
+    rows = [IndexRow(str(i), f"text {i}", {"n": str(i)}) for i in range(5)]
+
+    for _ in range(2):
+        await index_rows(rag, iter(rows), "songs", batch_size=2, replace=True)
+
+    assert await rag.count_entries("songs") == 5
+    rag.close()
 
 
 async def test_index_rows_on_an_empty_file_indexes_nothing():
@@ -279,7 +294,7 @@ def test_index_parser_reads_repeated_where_clauses():
 async def test_run_indexes_the_file_through_the_selected_backend(csv_file, monkeypatch):
     rag = FakeRag()
     monkeypatch.setattr(
-        "examples.ragindex.index_csv.make_rag_service", lambda *a, **k: rag
+        "examples.ragindex.index_csv.rag_service_from_uri", lambda *a, **k: rag
     )
     args = build_parser().parse_args([csv_file, "--batch-size", "10"])
 
@@ -290,7 +305,7 @@ async def test_run_indexes_the_file_through_the_selected_backend(csv_file, monke
 
 def test_main_returns_zero_when_rows_were_indexed(csv_file, monkeypatch):
     monkeypatch.setattr(
-        "examples.ragindex.index_csv.make_rag_service", lambda *a, **k: FakeRag()
+        "examples.ragindex.index_csv.rag_service_from_uri", lambda *a, **k: FakeRag()
     )
     monkeypatch.setattr("sys.argv", ["index_csv", csv_file])
     assert main() == 0
@@ -308,7 +323,7 @@ def test_main_installs_the_normalizer_from_the_environment(
     monkeypatch.setenv("KAVALAI_EMBEDDING_NORMALIZER_YAML", str(path))
     monkeypatch.setattr(kavalai.normalizer, "_default_normalizer", None)
     monkeypatch.setattr(
-        "examples.ragindex.index_csv.make_rag_service", lambda *a, **k: FakeRag()
+        "examples.ragindex.index_csv.rag_service_from_uri", lambda *a, **k: FakeRag()
     )
     monkeypatch.setattr("sys.argv", ["index_csv", csv_file])
 
@@ -318,7 +333,7 @@ def test_main_installs_the_normalizer_from_the_environment(
 
 def test_main_returns_one_when_nothing_matched(csv_file, monkeypatch):
     monkeypatch.setattr(
-        "examples.ragindex.index_csv.make_rag_service", lambda *a, **k: FakeRag()
+        "examples.ragindex.index_csv.rag_service_from_uri", lambda *a, **k: FakeRag()
     )
     monkeypatch.setattr("sys.argv", ["index_csv", csv_file, "--where", "language=xx"])
     assert main() == 1
@@ -326,7 +341,7 @@ def test_main_returns_one_when_nothing_matched(csv_file, monkeypatch):
 
 def test_main_reports_a_bad_column_instead_of_raising(csv_file, monkeypatch):
     monkeypatch.setattr(
-        "examples.ragindex.index_csv.make_rag_service", lambda *a, **k: FakeRag()
+        "examples.ragindex.index_csv.rag_service_from_uri", lambda *a, **k: FakeRag()
     )
     monkeypatch.setattr("sys.argv", ["index_csv", csv_file, "--text-columns", "nope"])
     assert main() == 2
@@ -361,7 +376,7 @@ def test_query_parser_defaults():
 async def test_query_run_passes_the_arguments_through(monkeypatch, capsys):
     rag = FakeRag(results=[make_result()])
     monkeypatch.setattr(
-        "examples.ragindex.query_index.make_rag_service", lambda *a, **k: rag
+        "examples.ragindex.index_csv.rag_service_from_uri", lambda *a, **k: rag
     )
     args = build_query_parser().parse_args(
         ["bees", "--top-k", "3", "--source-ids", "1,2", "--keep-best"]
@@ -375,7 +390,7 @@ async def test_query_run_passes_the_arguments_through(monkeypatch, capsys):
 
 async def test_query_run_says_so_when_there_are_no_hits(monkeypatch, capsys):
     monkeypatch.setattr(
-        "examples.ragindex.query_index.make_rag_service", lambda *a, **k: FakeRag()
+        "examples.ragindex.index_csv.rag_service_from_uri", lambda *a, **k: FakeRag()
     )
     args = build_query_parser().parse_args(["bees"])
 
@@ -385,7 +400,7 @@ async def test_query_run_says_so_when_there_are_no_hits(monkeypatch, capsys):
 
 def test_query_main_returns_one_when_nothing_was_found(monkeypatch):
     monkeypatch.setattr(
-        "examples.ragindex.query_index.make_rag_service", lambda *a, **k: FakeRag()
+        "examples.ragindex.index_csv.rag_service_from_uri", lambda *a, **k: FakeRag()
     )
     monkeypatch.setattr("sys.argv", ["query_index", "bees"])
     assert query_main() == 1
@@ -393,17 +408,11 @@ def test_query_main_returns_one_when_nothing_was_found(monkeypatch):
 
 def test_query_main_returns_zero_on_a_hit(monkeypatch):
     monkeypatch.setattr(
-        "examples.ragindex.query_index.make_rag_service",
+        "examples.ragindex.index_csv.rag_service_from_uri",
         lambda *a, **k: FakeRag(results=[make_result()]),
     )
     monkeypatch.setattr("sys.argv", ["query_index", "bees"])
     assert query_main() == 0
-
-
-def test_query_main_reports_a_missing_environment_variable(monkeypatch):
-    monkeypatch.delenv("KAVALAI_DB_URI", raising=False)
-    monkeypatch.setattr("sys.argv", ["query_index", "bees", "--index", "postgres"])
-    assert query_main() == 2
 
 
 def test_bundled_csv_has_a_hundred_invented_songs():
@@ -454,7 +463,7 @@ async def test_index_rows_never_embeds_a_skipped_row():
 async def test_run_skips_rows_already_in_the_collection(csv_file, monkeypatch):
     rag = FakeRag(existing=["10", "11"])
     monkeypatch.setattr(
-        "examples.ragindex.index_csv.make_rag_service", lambda *a, **k: rag
+        "examples.ragindex.index_csv.rag_service_from_uri", lambda *a, **k: rag
     )
     args = build_parser().parse_args([csv_file, "--skip-existing"])
 
@@ -473,7 +482,7 @@ def test_an_up_to_date_skip_existing_rerun_succeeds(csv_file, monkeypatch):
     """Nothing left to index is a success, not a failure exit code."""
     rag = FakeRag(existing=["10", "11", "12"])
     monkeypatch.setattr(
-        "examples.ragindex.index_csv.make_rag_service", lambda *a, **k: rag
+        "examples.ragindex.index_csv.rag_service_from_uri", lambda *a, **k: rag
     )
     monkeypatch.setattr("sys.argv", ["index_csv", csv_file, "--skip-existing"])
 

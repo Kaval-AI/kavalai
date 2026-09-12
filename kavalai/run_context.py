@@ -44,6 +44,11 @@ class RunContext(BaseModel):
     One engine serves many concurrent runs, so a caller that wants *this* run's
     trajectory on its own — the evaluation runner, a notebook debugging one
     call — cannot swap the engine's logger.
+
+    ``template_overrides`` holds the template values passed to this run only
+    (``run_stream(templates=...)``); they are already merged into
+    ``templates`` and are kept separately so the run record can say which
+    values came from the caller rather than from the document.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -53,6 +58,7 @@ class RunContext(BaseModel):
     run_id: Optional[UUID] = None
     data: dict = {}
     templates: Dict[str, str] = {}
+    template_overrides: Dict[str, str] = {}
     agent_service: Optional[Any] = None
     token_stats: Optional[Any] = None
     seq_counter: Optional[Any] = None

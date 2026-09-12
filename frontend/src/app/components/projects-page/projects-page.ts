@@ -626,6 +626,22 @@ export class ProjectsPage implements OnInit {
     const port = p.db_port || 5432;
     const dbName = p.db_name || 'kavalai';
 
+    if (p.db_type === 'sqlite') {
+      const uri = `sqlite:///${p.db_name || 'agents.db'}`;
+      switch (type) {
+        case 'postgresql':
+          return uri;
+        case 'asyncpg':
+          return `sqlite+aiosqlite:///${p.db_name || 'agents.db'}`;
+        case 'jdbc':
+          return `jdbc:sqlite:${p.db_name || 'agents.db'}`;
+        case 'env':
+          return `KAVALAI_DB_URI=${uri}`;
+        default:
+          return '';
+      }
+    }
+
     switch (type) {
       case 'postgresql':
         return `postgresql://${user}:${displayPassword}@${host}:${port}/${dbName}`;

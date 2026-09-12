@@ -1,0 +1,732 @@
+/*
+Copyright 2026 OÜ KAVAL AI (registry code 17393877)
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+Kaval.AI chat widget styles, ported from the kaval.ai website chatbot.
+Every color, font and radius is a --kcb-* token, overridable from the host
+page or through the `theme` option of KavalChatbot.mount(). The defaults are
+the kaval.ai palette.
+
+Buttons are reset below with `.kcb-chatbot button`, so every rule that
+styles one of the widget's buttons is written `.kcb-chatbot .kcb-x`: a single
+class would lose to the reset, and a host's bare `button` rule would lose to
+both. The public classes are listed in docs/reference/widget.rst.
+*/
+
+.kcb-chatbot {
+  --kcb-accent: #acc12f;
+  --kcb-accent-content: #273e47;
+  --kcb-surface: #f4f4f6;
+  --kcb-surface-alt: #e5e5e8;
+  --kcb-border: #d6d6da;
+  --kcb-text: #273e47;
+  --kcb-link-hover: #809537;
+  --kcb-radius: 0.5rem;
+  --kcb-radius-small: 0.25rem;
+  /* --kcb-font is the name the token had before --kcb-font-family; setting
+     either works. */
+  --kcb-font: system-ui, sans-serif;
+  --kcb-font-family: var(--kcb-font);
+  --kcb-font-size: 16px;
+  --kcb-font-header: var(--kcb-font-family);
+  --kcb-font-mono: ui-monospace, monospace;
+  --kcb-shadow: rgba(39, 62, 71, 0.35);
+  --kcb-z: 1100;
+  /* Height of the page's fixed header, if any: a maximized window stops
+     under it so the navigation stays reachable. */
+  --kcb-top-offset: 0px;
+
+  font-family: var(--kcb-font-family);
+  font-size: var(--kcb-font-size);
+  line-height: 1.4;
+  color: var(--kcb-text);
+}
+
+.kcb-chatbot *,
+.kcb-chatbot *::before,
+.kcb-chatbot *::after {
+  box-sizing: border-box;
+}
+
+/* The widget shows and hides its parts with the `hidden` attribute, which
+   any `display` rule below would otherwise override. */
+.kcb-chatbot [hidden] {
+  display: none !important;
+}
+
+.kcb-chatbot button {
+  font: inherit;
+  border: none;
+  cursor: pointer;
+  background: none;
+  color: inherit;
+}
+
+/* Floating mode: bubble bottom-right; opens a panel above it on desktop and
+   a full-screen overlay on mobile. */
+.kcb-floating {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: var(--kcb-z);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+/* Inline mode: the window simply fills its host element. */
+.kcb-inline .kcb-window {
+  width: 100%;
+  height: 100%;
+  min-height: 20rem;
+}
+
+.kcb-icon {
+  width: 1em;
+  height: 1em;
+  display: block;
+}
+
+.kcb-chatbot .kcb-bubble {
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--kcb-accent);
+  color: var(--kcb-accent-content);
+  box-shadow: 0 4px 12px var(--kcb-shadow);
+}
+
+/* The float bubble rolls a full turn on toggle while the logo and the X
+   crossfade — both children are always rendered, stacked on each other. */
+.kcb-chatbot .kcb-bubble-float {
+  position: relative;
+  transition: transform 0.35s ease;
+}
+
+.kcb-open .kcb-bubble-float {
+  transform: rotate(360deg);
+}
+
+.kcb-bubble-logo,
+.kcb-bubble-glyph {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.35s ease, transform 0.35s ease;
+}
+
+.kcb-bubble-logo {
+  border: 2px solid var(--kcb-accent);
+  object-fit: cover;
+}
+
+.kcb-close-icon {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transform: scale(0.4);
+  transition: opacity 0.35s ease, transform 0.35s ease;
+}
+
+.kcb-open .kcb-bubble-float .kcb-bubble-logo,
+.kcb-open .kcb-bubble-float .kcb-bubble-glyph {
+  opacity: 0;
+  transform: scale(0.4);
+}
+
+.kcb-open .kcb-close-icon {
+  opacity: 1;
+  transform: scale(1);
+}
+
+/* The header copy of the bubble only exists on mobile. */
+.kcb-chatbot .kcb-bubble-inline {
+  display: none;
+}
+
+/* Speech bubble inviting the first click, parked above the float bubble. The
+   delay lets the page settle before it slides in. */
+.kcb-chatbot .kcb-greeting {
+  position: absolute;
+  right: 0;
+  bottom: 68px; /* the 56px bubble plus a gap */
+  width: max-content;
+  max-width: min(240px, calc(100vw - 48px));
+  padding: 8px 12px;
+  text-align: left;
+  font-size: calc(var(--kcb-font-size) * 0.85);
+  font-weight: 500;
+  line-height: 1.3;
+  border-radius: var(--kcb-radius);
+  background-color: var(--kcb-accent);
+  color: var(--kcb-accent-content);
+  box-shadow: 0 4px 12px var(--kcb-shadow);
+  animation: kcb-greeting-in 0.35s ease-out 1s both;
+}
+
+/* The tail: a rotated square tucked under the lower edge. */
+.kcb-greeting::after {
+  content: "";
+  position: absolute;
+  right: 22px;
+  bottom: -5px;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  background-color: inherit;
+  transform: rotate(45deg);
+}
+
+@keyframes kcb-greeting-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
+/* Default size; inline width/height styles take over once the user resizes. */
+.kcb-window {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--kcb-surface);
+  color: var(--kcb-text);
+  border-radius: var(--kcb-radius);
+  box-shadow: 0 8px 24px var(--kcb-shadow);
+  overflow: hidden;
+  transform-origin: bottom right;
+}
+
+.kcb-window-opening {
+  animation: kcb-window-open 0.25s ease-out;
+}
+
+@keyframes kcb-window-open {
+  from {
+    opacity: 0;
+    transform: scale(0.85) translateY(12px);
+  }
+}
+
+.kcb-window-close {
+  animation: kcb-window-close 0.25s ease-in forwards;
+}
+
+@keyframes kcb-window-close {
+  to {
+    opacity: 0;
+    transform: scale(0.85) translateY(12px);
+  }
+}
+
+.kcb-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background-color: var(--kcb-accent);
+  color: var(--kcb-accent-content);
+}
+
+.kcb-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-family: var(--kcb-font-header);
+  font-size: calc(var(--kcb-font-size) * 1.05);
+  font-weight: 600;
+}
+
+.kcb-title-logo {
+  height: 26px;
+  border-radius: 50%;
+}
+
+.kcb-title-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  line-height: 1.2;
+}
+
+/* Tells the visitor that the other party is an AI system. It takes the
+   header's own colours, so it stays legible under any theme. */
+.kcb-disclosure {
+  margin-top: 3px;
+  padding: 0 6px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-family: var(--kcb-font-family);
+  font-size: calc(var(--kcb-font-size) * 0.68);
+  font-weight: 500;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+  opacity: 0.85;
+  white-space: nowrap;
+}
+
+.kcb-status {
+  font-family: var(--kcb-font-family);
+  font-size: calc(var(--kcb-font-size) * 0.72);
+  font-weight: 400;
+  opacity: 0.8;
+  max-width: 220px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kcb-disclosure + .kcb-status {
+  margin-top: 2px;
+}
+
+.kcb-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.kcb-chatbot .kcb-icon-btn {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: transparent;
+  font-size: 15px;
+  border-radius: var(--kcb-radius-small);
+}
+
+.kcb-chatbot .kcb-icon-btn:hover {
+  background-color: rgba(0, 0, 0, 0.12);
+}
+
+/* Invisible drag strips on the growable edges (floating desktop only). */
+.kcb-resize {
+  position: absolute;
+  z-index: 1;
+  touch-action: none;
+}
+
+.kcb-inline .kcb-resize {
+  display: none;
+}
+
+.kcb-chatbot.kcb-inline .kcb-maximize {
+  display: none;
+}
+
+.kcb-resize-left {
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: ew-resize;
+}
+
+.kcb-resize-top {
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 6px;
+  cursor: ns-resize;
+}
+
+.kcb-resize-corner {
+  top: 0;
+  left: 0;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+}
+
+.kcb-history {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.kcb-empty {
+  margin: auto;
+  text-align: center;
+  opacity: 0.6;
+  font-size: calc(var(--kcb-font-size) * 0.95);
+}
+
+.kcb-message {
+  max-width: 92%;
+  padding: 8px 12px;
+  border-radius: var(--kcb-radius);
+  background-color: var(--kcb-surface-alt);
+  align-self: flex-start;
+  overflow-wrap: break-word;
+  /* Agent replies are markdown blocks that bring their own spacing and, for
+     code, their own horizontal scroller — which needs a shrinkable parent.
+     Only the raw-text user bubbles set `white-space: pre-wrap`. */
+  min-width: 0;
+}
+
+.kcb-message.kcb-from-user {
+  max-width: 85%;
+  background-color: var(--kcb-accent);
+  color: var(--kcb-accent-content);
+  align-self: flex-end;
+  white-space: pre-wrap;
+}
+
+/* Stand-in for the reply while the agent thinks: three dots lifting in turn. */
+.kcb-typing {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 13px 12px;
+}
+
+.kcb-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: var(--kcb-text);
+  animation: kcb-dot-bounce 1.2s ease-in-out infinite;
+}
+
+.kcb-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.kcb-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes kcb-dot-bounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  30% {
+    transform: translateY(-4px);
+    opacity: 0.85;
+  }
+}
+
+/* Thumbs under a completed answer; rendered only when the host passes
+   `onFeedback`. The chosen one carries aria-pressed="true". */
+.kcb-feedback {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  align-self: flex-start;
+  max-width: 92%;
+  margin: -4px 0 0 4px;
+}
+
+.kcb-chatbot .kcb-feedback-btn {
+  width: 28px;
+  height: 24px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  border-radius: var(--kcb-radius-small);
+  opacity: 0.55;
+}
+
+.kcb-chatbot .kcb-feedback-btn:hover {
+  opacity: 1;
+  background-color: var(--kcb-surface-alt);
+}
+
+.kcb-chatbot .kcb-feedback-btn[aria-pressed="true"] {
+  opacity: 1;
+  background-color: var(--kcb-accent);
+  color: var(--kcb-accent-content);
+}
+
+.kcb-feedback-comment {
+  display: flex;
+  flex-basis: 100%;
+  gap: 6px;
+  margin: 4px 0 0;
+}
+
+.kcb-feedback-comment input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: calc(var(--kcb-font-size) * 0.85);
+  color: inherit;
+  background-color: var(--kcb-surface);
+  border: 1px solid var(--kcb-border);
+  border-radius: var(--kcb-radius-small);
+}
+
+.kcb-feedback-comment input:focus {
+  outline: 2px solid var(--kcb-accent);
+  outline-offset: -1px;
+  border-color: transparent;
+}
+
+.kcb-chatbot .kcb-feedback-submit {
+  padding: 4px 12px;
+  font-size: calc(var(--kcb-font-size) * 0.8);
+  font-weight: 600;
+  background-color: var(--kcb-accent);
+  color: var(--kcb-accent-content);
+  border-radius: var(--kcb-radius-small);
+}
+
+.kcb-feedback-thanks {
+  font-size: calc(var(--kcb-font-size) * 0.8);
+  opacity: 0.7;
+}
+
+/* --- Markdown rendering inside agent replies --------------------------- */
+
+.kcb-md-paragraph,
+.kcb-md-heading {
+  margin: 0 0 0.5em;
+  white-space: pre-wrap;
+}
+
+.kcb-md-heading {
+  font-family: var(--kcb-font-header);
+  font-weight: 600;
+  margin-top: 0.6em;
+}
+
+.kcb-md-heading[data-level="1"] {
+  font-size: 1.15em;
+}
+
+.kcb-md-heading[data-level="2"] {
+  font-size: 1.08em;
+}
+
+.kcb-md-list {
+  margin: 0 0 0.5em;
+  padding-left: 1.3em;
+}
+
+.kcb-md-list li {
+  margin: 0.15em 0;
+  white-space: pre-wrap;
+}
+
+.kcb-md-rule {
+  border: none;
+  border-top: 1px solid var(--kcb-border);
+  margin: 0.6em 0;
+}
+
+.kcb-message > *:first-child {
+  margin-top: 0;
+}
+
+.kcb-message > *:last-child {
+  margin-bottom: 0;
+}
+
+.kcb-md-link {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+}
+
+.kcb-md-link:hover {
+  color: var(--kcb-link-hover);
+}
+
+.kcb-md-strong {
+  font-weight: 700;
+}
+
+.kcb-md-em {
+  font-style: italic;
+}
+
+.kcb-inline-code {
+  font-family: var(--kcb-font-mono);
+  font-size: 0.85em;
+  padding: 1px 4px;
+  border-radius: var(--kcb-radius-small);
+  background-color: rgba(0, 0, 0, 0.08);
+  overflow-wrap: anywhere;
+}
+
+/* Dark slab so code reads as code against the light bubble. It scrolls
+   sideways rather than wrapping, so indentation survives. */
+.kcb-code {
+  margin: 0 0 0.5em;
+  padding: 8px 10px;
+  border-radius: var(--kcb-radius-small);
+  background-color: var(--kcb-text);
+  color: var(--kcb-surface);
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.kcb-code code {
+  font-family: var(--kcb-font-mono);
+  font-size: 0.82em;
+  line-height: 1.45;
+  white-space: pre;
+}
+
+/* Suggested-option badges between the history and the input. */
+.kcb-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 12px 8px;
+}
+
+.kcb-choices:empty {
+  display: none;
+}
+
+.kcb-chatbot .kcb-choice {
+  background: transparent;
+  color: var(--kcb-text);
+  border: 1px solid var(--kcb-accent);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: calc(var(--kcb-font-size) * 0.8);
+}
+
+.kcb-chatbot .kcb-choice:hover:enabled {
+  background-color: var(--kcb-accent);
+  color: var(--kcb-accent-content);
+}
+
+.kcb-input-row {
+  display: flex;
+  gap: 8px;
+  padding: 16px 12px;
+  border-top: 1px solid var(--kcb-border);
+  margin: 0;
+}
+
+.kcb-input-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 14px 12px;
+  font: inherit;
+  color: inherit;
+  background-color: var(--kcb-surface);
+  border: 1px solid var(--kcb-border);
+  border-radius: var(--kcb-radius-small);
+}
+
+.kcb-input-row input:focus {
+  outline: 2px solid var(--kcb-accent);
+  outline-offset: -1px;
+  border-color: transparent;
+}
+
+.kcb-chatbot .kcb-send {
+  padding: 8px 20px;
+  background-color: var(--kcb-accent);
+  color: var(--kcb-accent-content);
+  border-radius: var(--kcb-radius-small);
+  font-weight: 600;
+}
+
+.kcb-chatbot .kcb-send:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kcb-dot {
+    animation: none;
+    opacity: 0.5;
+  }
+
+  .kcb-chatbot .kcb-greeting {
+    animation: none;
+  }
+
+  .kcb-window-opening,
+  .kcb-window-close,
+  .kcb-chatbot .kcb-bubble-float,
+  .kcb-bubble-logo,
+  .kcb-bubble-glyph,
+  .kcb-close-icon {
+    animation-duration: 0.01s !important;
+    transition-duration: 0.01s !important;
+  }
+}
+
+@media (max-width: 768px) {
+  /* Open chat covers the whole screen; the close moves into the header. */
+  .kcb-floating.kcb-open {
+    inset: 0;
+    align-items: stretch;
+    gap: 0;
+  }
+
+  /* !important beats the inline desktop resize dimensions. */
+  .kcb-floating.kcb-open .kcb-window {
+    width: 100% !important;
+    height: 100% !important;
+    border-radius: 0;
+  }
+
+  .kcb-chatbot.kcb-floating.kcb-open .kcb-bubble-float {
+    display: none;
+  }
+
+  .kcb-resize {
+    display: none;
+  }
+
+  /* The window already fills the screen, so there is nothing to maximize. */
+  .kcb-chatbot.kcb-floating .kcb-maximize {
+    display: none;
+  }
+
+  .kcb-chatbot.kcb-floating .kcb-bubble-inline {
+    display: flex;
+    width: 40px;
+    height: 40px;
+    font-size: 18px;
+    box-shadow: none;
+  }
+}

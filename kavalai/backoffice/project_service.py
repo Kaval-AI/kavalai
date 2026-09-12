@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from kavalai.backoffice import db
 from kavalai.crud import insert, update, delete
-from kavalai.db import db_manager
+from kavalai.db import build_db_uri, db_manager
 
 
 class ProjectService:
@@ -177,17 +177,10 @@ class ProjectService:
     async def test_connection(self, project: db.Project) -> Dict[str, str]:
         try:
             logger.info(
-                f"Testing connection to project database: host={project.db_host}, "
-                f"port={project.db_port}, db={project.db_name}, user={project.db_user}"
+                f"Testing connection to project database: "
+                f"{describe_project_database(project)}"
             )
-            project_session_maker = db_manager.get_sessionmaker(
-                user=project.db_user,
-                password=project.db_password,
-                host=project.db_host,
-                port=project.db_port,
-                db_name=project.db_name,
-                schema=project.db_schema,
-            )
+            project_session_maker = project_sessionmaker(project)
             async with project_session_maker() as project_session:
                 await project_session.execute(text("SELECT 1"))
             return {"status": "success", "message": "Connection successful"}
@@ -197,3 +190,43 @@ class ProjectService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Failed to connect: {str(e)}",
             )
+
+
+def project_db_uri(project: db.Project) -> str:
+    """The URI of the agent database a project points at.
+
+    ``db_type`` decides how the connection fields are read: ``sqlite`` takes
+    ``db_name`` as a file path, anything else builds a PostgreSQL URI from
+    host, port, user, password and database.
+    """
+    if project.db_type == "sqlite":
+        return f"sqlite:///{project.db_name}"
+    return build_db_uri(
+        project.db_user,
+        project.db_password,
+        project.db_host,
+        project.db_port,
+        project.db_name,
+    )
+
+
+def project_schema(project: db.Project) -> Optional[str]:
+    """The schema of the project's agent database (``None`` for SQLite)."""
+    return None if project.db_type == "sqlite" else project.db_schema
+
+
+def project_sessionmaker(project: db.Project) -> async_sessionmaker[AsyncSession]:
+    """A sessionmaker for the agent database the project points at."""
+    return db_manager.get_sessionmaker(
+        uri=project_db_uri(project), schema=project_schema(project)
+    )
+
+
+def describe_project_database(project: db.Project) -> str:
+    """A log-safe description of the project's database (no password)."""
+    if project.db_type == "sqlite":
+        return f"sqlite file={project.db_name}"
+    return (
+        f"host={project.db_host}, port={project.db_port}, db={project.db_name}, "
+        f"user={project.db_user}, schema={project.db_schema}"
+    )

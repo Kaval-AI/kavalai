@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
+    Index,
     JSON,
     MetaData,
     TEXT,
@@ -32,6 +33,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID, JSONB
 from sqlalchemy.engine import make_url
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import (
     DeclarativeBase,
@@ -41,6 +43,7 @@ from sqlalchemy.orm import (
     sessionmaker,
 )
 from sqlalchemy.pool import StaticPool
+from sqlalchemy.sql.functions import GenericFunction
 
 from kavalai import idb
 
@@ -59,6 +62,55 @@ def uuid_column():
 def json_column():
     """JSON column type: ``JSONB`` on Postgres, generic ``JSON`` on SQLite."""
     return JSONB().with_variant(JSON(), "sqlite")
+
+
+class json_typeof(GenericFunction):
+    """Type name of a JSON value: ``array``, ``object``, ``null``, ...
+
+    Renders as ``jsonb_typeof`` on Postgres and ``json_type`` on SQLite, so a
+    query over a :func:`json_column` reads the same against both. Written for
+    the backoffice session list, which counts the tasks whose ``errors`` hold
+    something.
+    """
+
+    type = TEXT()
+    """The SQL type of the result."""
+
+    inherit_cache = True
+    """The compiled form depends on nothing but the arguments, so SQLAlchemy
+    may cache it."""
+
+
+class json_array_length(GenericFunction):
+    """Number of elements in a JSON array: ``jsonb_array_length`` on Postgres,
+    ``json_array_length`` on SQLite."""
+
+    type = Integer()
+    """The SQL type of the result."""
+
+    inherit_cache = True
+    """The compiled form depends on nothing but the arguments, so SQLAlchemy
+    may cache it."""
+
+
+@compiles(json_typeof, "postgresql")
+def _json_typeof_postgresql(element, compiler, **kw):
+    return f"jsonb_typeof({compiler.process(element.clauses, **kw)})"
+
+
+@compiles(json_typeof, "sqlite")
+def _json_typeof_sqlite(element, compiler, **kw):
+    return f"json_type({compiler.process(element.clauses, **kw)})"
+
+
+@compiles(json_array_length, "postgresql")
+def _json_array_length_postgresql(element, compiler, **kw):
+    return f"jsonb_array_length({compiler.process(element.clauses, **kw)})"
+
+
+@compiles(json_array_length, "sqlite")
+def _json_array_length_sqlite(element, compiler, **kw):
+    return f"json_array_length({compiler.process(element.clauses, **kw)})"
 
 
 class VectorType(TypeDecorator):
@@ -104,12 +156,28 @@ class VectorType(TypeDecorator):
 
 
 def ensure_async_scheme(uri: str) -> str:
-    """Ensures the URI uses the postgresql+asyncpg driver."""
+    """Return ``uri`` with the async driver for its backend.
+
+    ``postgresql`` (any driver) becomes ``postgresql+asyncpg`` and ``sqlite``
+    becomes ``sqlite+aiosqlite``; anything else is returned unchanged.
+    """
     if uri and "://" in uri:
         scheme, rest = uri.split("://", 1)
         if scheme.startswith("postgresql"):
             return f"postgresql+asyncpg://{rest}"
+        if scheme.startswith("sqlite"):
+            return f"sqlite+aiosqlite://{rest}"
     return uri
+
+
+def is_sqlite_uri(uri: str) -> bool:
+    """Whether ``uri`` names a SQLite database (any driver spelling)."""
+    return bool(uri) and uri.split("://", 1)[0].startswith("sqlite")
+
+
+def sqlite_path_from_uri(uri: str) -> str:
+    """The file path a ``sqlite:///...`` URI points at (``:memory:`` included)."""
+    return make_url(uri).database or ":memory:"
 
 
 def build_db_uri(
@@ -123,7 +191,8 @@ def build_db_uri(
 # to ``PRAGMA user_version``). Bump on any ORM schema change: SQLite stores
 # created with a different version are dropped and recreated on init.
 # 2: rag_index left the shared metadata (RAG backends self-provision).
-SQLITE_SCHEMA_VERSION = 4
+# 5: model_call_stats.session_id / run_id and the composite indexes.
+SQLITE_SCHEMA_VERSION = 5
 
 
 def _drop_all_sqlite_tables(connection):
@@ -189,6 +258,10 @@ class DatabaseManager:
     ):
         """Return an ``async_sessionmaker`` for the given database and schema.
 
+        A ``sqlite://`` URI is served by :meth:`get_sqlite_sessionmaker`: the
+        file named by the URI, foreign keys on, one shared connection, and
+        ``schema`` ignored because SQLite has none.
+
         ``schema`` selects the schema the ORM tables live in. The models are
         defined schema-less; the schema is applied per-engine via SQLAlchemy's
         ``schema_translate_map``, so the same models can target any schema at
@@ -207,6 +280,13 @@ class DatabaseManager:
             url = ensure_async_scheme(uri)
         else:
             url = build_db_uri(user, password, host, port, db_name)
+
+        # A SQLite URI takes the SQLite engine: no connection pool to size and
+        # no schemas, so ``schema`` and the pool options do not apply.
+        if is_sqlite_uri(url):
+            return self.get_sqlite_sessionmaker(
+                db_path=sqlite_path_from_uri(url), echo=bool(echo)
+            )
 
         # Cache per (url, schema): translate maps are engine-level options.
         key = (url, schema)
@@ -521,14 +601,25 @@ class ModelCallStat(Base):
     multiple. ``cached_prompt_tokens`` and ``reasoning_tokens`` are stored
     instead, which is what makes cost computable downstream (e.g. with
     ``genai-prices``) from a row like this one.
+
+    ``agent_id``, ``session_id`` and ``run_id`` attribute the call to the run
+    that made it, so cost per run and per conversation is a query. None of
+    them is a foreign key: a cost record outlives the conversation it belongs
+    to. Purging a session blanks its calls' payloads — the prompt is the
+    conversation again — and keeps the token counts.
     """
 
     __tablename__ = "model_call_stats"
+    __table_args__ = (
+        Index("ix_model_call_stats_agent_id_created_at", "agent_id", "created_at"),
+    )
 
     id: Mapped[UUID] = mapped_column(uuid_column(), primary_key=True, default=uuid4)
     call_type: Mapped[str] = mapped_column(TEXT, nullable=False, index=True)
     model: Mapped[str] = mapped_column(TEXT, nullable=False, index=True)
-    agent_id: Mapped[UUID | None] = mapped_column(uuid_column(), index=True)
+    agent_id: Mapped[UUID | None] = mapped_column(uuid_column())
+    session_id: Mapped[UUID | None] = mapped_column(uuid_column(), index=True)
+    run_id: Mapped[UUID | None] = mapped_column(uuid_column(), index=True)
     request_data: Mapped[dict | None] = mapped_column(json_column())
     response_data: Mapped[dict | None] = mapped_column(json_column())
     response_code: Mapped[int | None] = mapped_column(Integer)
@@ -560,13 +651,21 @@ class Session(Base):
     A session groups together everything exchanged with one agent over a
     conversation: its runs, tasks and chat messages. ``external_id`` lets a
     caller correlate the session with an identifier in their own system.
+
+    ``updated_at`` is the time of the session's last run: every run moves it.
+    Retention and the recent-first lists sort on it, which is why it is
+    indexed.
     """
 
     __tablename__ = "sessions"
+    __table_args__ = (
+        Index("ix_sessions_agent_id_external_id", "agent_id", "external_id"),
+        Index("ix_sessions_agent_id_updated_at", "agent_id", "updated_at"),
+    )
 
     id: Mapped[UUID] = mapped_column(uuid_column(), primary_key=True, default=uuid4)
     agent_id: Mapped[UUID] = mapped_column(
-        ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, index=True
+        ForeignKey("agents.id", ondelete="CASCADE"), nullable=False
     )
     external_id: Mapped[str | None] = mapped_column(TEXT)
     created_at: Mapped[datetime] = mapped_column(
@@ -576,6 +675,7 @@ class Session(Base):
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
+        index=True,
     )
 
     agent: Mapped["Agent"] = relationship(back_populates="sessions")
@@ -685,13 +785,17 @@ class ChatMessage(Base):
     """
 
     __tablename__ = "chat_messages"
+    __table_args__ = (
+        Index("ix_chat_messages_session_id_created_at", "session_id", "created_at"),
+        Index("ix_chat_messages_agent_id_created_at", "agent_id", "created_at"),
+    )
 
     id: Mapped[UUID] = mapped_column(uuid_column(), primary_key=True, default=uuid4)
     agent_id: Mapped[UUID] = mapped_column(
-        ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, index=True
+        ForeignKey("agents.id", ondelete="CASCADE"), nullable=False
     )
     session_id: Mapped[UUID] = mapped_column(
-        ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False, index=True
+        ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False
     )
     run_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("runs.id", ondelete="SET NULL"), index=True

@@ -11,9 +11,10 @@ Query the local SQLite index::
 
 Query the Postgres collection the backoffice RAG explorer shows::
 
-    uv run --env-file .env python -m examples.ragindex.query_index \
+    python -m examples.ragindex.query_index \
         "office life is quietly destroying me" \
-        --index postgres --collection songs --top-k 5
+        --index postgresql://user:pass@localhost:5432/kavalai --schema agents \
+        --collection songs --top-k 5
 
 Similarity is cosine, **higher is better**, and identical across backends for
 the same model — ``1.0`` is a perfect match.
@@ -66,15 +67,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--index",
         default="songs.db",
-        help=(
-            "'postgres' for the database in KAVALAI_DB_URI, a database URI, "
-            "or a SQLite file path (default: songs.db)"
-        ),
+        help="Database URI or SQLite file path of the index (default: songs.db)",
     )
     parser.add_argument(
         "--schema",
         default=None,
-        help="Postgres schema holding the RAG tables (default: KAVALAI_DB_SCHEMA)",
+        help="Postgres schema holding the RAG tables (default: the backend's)",
     )
     parser.add_argument(
         "--collection",

@@ -13,8 +13,13 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+
+``OUTPUT_CAP_NAMES`` are the names other libraries and providers give the
+output cap; an ``llm_kwargs`` key spelled so is pointed at
+``max_output_tokens``.
 """
 
+from difflib import get_close_matches
 from typing import Any, Optional
 
 from kavalai.llm_clients import registry
@@ -23,21 +28,50 @@ from kavalai.llm_clients.base_client import (
     LlmClientParameters,
     ModelStatsReceiver,
 )
+from kavalai.workflow.models import WorkflowException
 
-# Known LlmClientParameters fields that may be supplied via a node's llm_kwargs.
-_PARAM_FIELDS = set(LlmClientParameters.model_fields.keys())
+OUTPUT_CAP_NAMES = frozenset(
+    {"max_tokens", "max_completion_tokens", "num_predict", "max_new_tokens"}
+)
 
 
 def build_parameters(llm_kwargs: Optional[dict[str, Any]]) -> LlmClientParameters:
     """Build :class:`LlmClientParameters` from a node's ``llm_kwargs``.
 
-    Recognised keys (temperature, top_p, reasoning_effort, service_tier,
-    timeout_seconds) are mapped onto the parameters model; unknown keys are
-    ignored so authors can keep provider-specific extras without breaking.
+    Every key must be a field of :class:`LlmClientParameters`. An unknown key
+    raises rather than being dropped: a misspelled ``temperature`` or a
+    provider's own name for the output cap would otherwise leave the call
+    running on defaults the author believes they changed.
+
+    Raises:
+        WorkflowException: A key is not a parameter; the message names it,
+            suggests the closest parameter and lists the valid ones.
     """
     kwargs = llm_kwargs or {}
-    known = {k: v for k, v in kwargs.items() if k in _PARAM_FIELDS}
-    return LlmClientParameters(**known)
+    valid = LlmClientParameters.model_fields
+    unknown = sorted(key for key in kwargs if key not in valid)
+    if unknown:
+        raise WorkflowException(unknown_keys_message(unknown, sorted(valid)))
+    return LlmClientParameters(**kwargs)
+
+
+def unknown_keys_message(unknown: list[str], valid: list[str]) -> str:
+    """The error text for ``llm_kwargs`` keys that are not parameters."""
+    described = []
+    for key in unknown:
+        if key in OUTPUT_CAP_NAMES:
+            suggestion = "max_output_tokens"
+        else:
+            close = get_close_matches(key, valid, n=1)
+            suggestion = close[0] if close else None
+        described.append(
+            f"'{key}' (did you mean '{suggestion}'?)" if suggestion else f"'{key}'"
+        )
+    noun = "key" if len(unknown) == 1 else "keys"
+    return (
+        f"Unknown llm_kwargs {noun} {', '.join(described)}. "
+        f"Valid keys: {', '.join(valid)}."
+    )
 
 
 def make_client(

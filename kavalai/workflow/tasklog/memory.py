@@ -45,6 +45,19 @@ class TaskRecord(BaseModel):
     tool_uri: Optional[str] = None
 
 
+class ModelCallRecord(ModelCallStat):
+    """One recorded model call: the call's statistics and who made it.
+
+    The same shape as a ``model_call_stats`` row. ``agent_id``,
+    ``session_id`` and ``run_id`` are ``None`` for a call made outside a
+    recorded run.
+    """
+
+    agent_id: Optional[str] = None
+    session_id: Optional[str] = None
+    run_id: Optional[str] = None
+
+
 class MemoryTaskLogger(TaskLogger):
     """Task logger keeping every record in a list instead of a database.
 
@@ -55,15 +68,25 @@ class MemoryTaskLogger(TaskLogger):
 
     Records arrive in completion order because writes are fire-and-forget;
     :attr:`records` is sorted by ``seq``, which is execution order.
+    ``max_payload_bytes`` is off by default: nothing is written to a database,
+    so the operational cap that protects a writer does not apply, and an
+    evaluator sees exactly what a tool returned.
     """
 
-    def __init__(self, max_payload_bytes: int = 0):
-        # Nothing is written to a database, so the operational size cap that
-        # protects the writer does not apply. Off by default keeps evaluators
-        # looking at exactly what the tool returned.
-        super().__init__(max_payload_bytes=max_payload_bytes)
+    def __init__(
+        self,
+        max_payload_bytes: int = 0,
+        *,
+        record_nodes: bool = True,
+        record_payloads: bool = True,
+    ):
+        super().__init__(
+            max_payload_bytes,
+            record_nodes=record_nodes,
+            record_payloads=record_payloads,
+        )
         self.nodes: list[TaskRecord] = []
-        self.model_calls: list[ModelCallStat] = []
+        self.model_calls: list[ModelCallRecord] = []
 
     @property
     def records(self) -> list[TaskRecord]:
@@ -80,12 +103,18 @@ class MemoryTaskLogger(TaskLogger):
             return self.records
         return [r for r in self.records if r.run_id == run_id]
 
+    def model_calls_for_run(self, run_id: Optional[str]) -> list[ModelCallRecord]:
+        """The model calls one run made, in completion order."""
+        if run_id is None:
+            return list(self.model_calls)
+        return [call for call in self.model_calls if call.run_id == run_id]
+
     def clear(self) -> None:
         """Drop everything recorded so far."""
         self.nodes.clear()
         self.model_calls.clear()
 
-    async def _log_node_impl(
+    async def write_node(
         self,
         *,
         run_id: Optional[str],
@@ -120,10 +149,22 @@ class MemoryTaskLogger(TaskLogger):
             )
         )
 
-    async def _log_model_call_impl(
-        self, stats: ModelCallStat, agent_id: Optional[str]
+    async def write_model_call(
+        self,
+        stats: ModelCallStat,
+        *,
+        agent_id: Optional[str],
+        session_id: Optional[str],
+        run_id: Optional[str],
     ) -> None:
-        self.model_calls.append(stats)
+        self.model_calls.append(
+            ModelCallRecord(
+                **stats.model_dump(),
+                agent_id=agent_id,
+                session_id=session_id,
+                run_id=run_id,
+            )
+        )
 
 
 class TeeTaskLogger(TaskLogger):
@@ -134,8 +175,13 @@ class TeeTaskLogger(TaskLogger):
     opened in the backoffice by its ``external_id``. Without this, asking for a
     private trajectory would silently switch the database recording off.
 
-    Each logger keeps its own payload cap, so a memory logger can hold a full
-    tool result while the database one still truncates the 4 MB crawl.
+    It is also how a logger with a purpose of its own — a meter that records
+    tokens against an account — sits beside the database one without
+    subclassing it.
+
+    Each logger keeps its own recording options and payload cap, so a memory
+    logger can hold a full tool result while the database one still
+    truncates the 4 MB crawl, or stores no payloads at all.
     """
 
     def __init__(self, *loggers: TaskLogger):
@@ -149,17 +195,24 @@ class TeeTaskLogger(TaskLogger):
             logger.log_node(**kwargs)
 
     def log_model_call(
-        self, stats: ModelCallStat, agent_id: Optional[str] = None
+        self,
+        stats: ModelCallStat,
+        agent_id: Optional[str] = None,
+        *,
+        session_id: Optional[str] = None,
+        run_id: Optional[str] = None,
     ) -> None:
         for logger in self.loggers:
-            logger.log_model_call(stats, agent_id)
+            logger.log_model_call(stats, agent_id, session_id=session_id, run_id=run_id)
 
     async def flush(self) -> None:
         for logger in self.loggers:
             await logger.flush()
 
-    async def _log_node_impl(self, **kwargs: Any) -> None:  # pragma: no cover
+    async def write_node(self, **kwargs: Any) -> None:  # pragma: no cover
         """Unreachable: :meth:`log_node` fans out instead of spawning here."""
 
-    async def _log_model_call_impl(self, *args: Any) -> None:  # pragma: no cover
+    async def write_model_call(
+        self, *args: Any, **kwargs: Any
+    ) -> None:  # pragma: no cover
         """Unreachable: :meth:`log_model_call` fans out instead of spawning here."""

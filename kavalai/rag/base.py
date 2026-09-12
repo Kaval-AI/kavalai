@@ -80,14 +80,25 @@ class BaseRagService(ABC):
     :meth:`query_batch`, :meth:`delete` and :meth:`delete_by_source_id` are
     abstract. Every backend implements all six.
 
-    **Optional.** :meth:`count_entries` and :meth:`iter_entries` raise
+    **Optional.** :meth:`count_entries`, :meth:`iter_entries`,
+    :meth:`delete_by_metadata` and :meth:`replace` raise
     ``NotImplementedError`` by default. A backend that overrides them lists
     their names in ``capabilities``; ask :meth:`supports` before calling them
     rather than catching the exception.
 
-    **Defaulted.** :meth:`compute_similarity_matrix` and
-    :meth:`learn_normalizer` work on every backend as written, and may be
+    **Defaulted.** :meth:`compute_similarity_matrix`, :meth:`learn_normalizer`
+    and :meth:`delete_many` work on every backend as written, and may be
     overridden with an exact or cheaper implementation.
+
+    ``source_ids`` means the same on every method that takes it: ``None`` does
+    not filter, and an empty list matches nothing. The distinction is a safety
+    property — a filter computed to be empty (a tenant with no sources, a
+    permission check that passed nothing) must not widen into a search of
+    everything.
+
+    The SQL backends additionally take ``min_similarity`` and
+    ``stats_receiver`` on their query and index methods; a ``rag_query`` node
+    passes the run's receiver to any service whose ``query`` accepts one.
 
     ``tests/rag/test_conformance.py`` runs the declared contract against every
     backend, so "implements the interface correctly" is checked rather than
@@ -187,7 +198,9 @@ class BaseRagService(ABC):
             text (str): The query text.
             top_k (int): Number of top results to return. Defaults to 5.
             collection_name (Optional[str]): If provided, filter by collection name.
-            source_ids (Optional[list[str]]): If provided, filter by source identifiers.
+            source_ids (Optional[list[str]]): ``None`` searches every source;
+                a list restricts the search to those sources, and an empty
+                list returns no results.
             keep_best (bool): If True, only the best result per source_id is
                 returned. Useful when a single source is split into multiple
                 indexed items. Backends whose store cannot group server-side
@@ -224,7 +237,8 @@ class BaseRagService(ABC):
             texts (list[str]): List of query texts to search for.
             top_k (int): Number of top results to return per query. Defaults to 5.
             collection_name (Optional[str]): If provided, filter by collection name.
-            source_ids (Optional[list[str]]): If provided, filter by source identifiers.
+            source_ids (Optional[list[str]]): As in :meth:`query`; an empty
+                list returns an empty result list for every text.
             include_content (bool): When False, ``content`` is omitted from the
                 results. See :meth:`query`.
 
@@ -260,6 +274,56 @@ class BaseRagService(ABC):
             collection_name (str): The name of the collection.
             source_id (Union[str, list[str]]): A source identifier, or a list of them.
         """
+
+    async def delete_many(
+        self, ids: list[UUID], collection_name: Optional[str] = None
+    ) -> None:
+        """
+        Delete several indexed items by identifier.
+
+        The default deletes them one at a time through :meth:`delete`; a
+        backend overrides it with one statement.
+
+        Args:
+            ids (list[UUID]): Identifiers of the items to delete.
+            collection_name (Optional[str]): Collection the items belong to,
+                as in :meth:`delete`.
+        """
+        for item_id in ids:
+            await self.delete(item_id, collection_name=collection_name)
+
+    async def delete_by_metadata(self, collection_name: str, match: dict) -> None:
+        """
+        Delete the items whose metadata has every key of ``match`` equal.
+
+        ``match`` holds top-level keys and scalar values (strings, numbers,
+        booleans). Optional: check ``supports("delete_by_metadata")``.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support delete_by_metadata"
+        )
+
+    async def replace(
+        self,
+        collection_name: str,
+        texts: list[str],
+        metadata_list: list[dict],
+        source_ids: Optional[list[str]] = None,
+        *,
+        match: Optional[dict] = None,
+        source_id: Optional[str] = None,
+    ) -> list[dict]:
+        """
+        Replace the items selected by ``match`` or ``source_id`` atomically.
+
+        The new texts are embedded before anything is deleted, and the delete
+        and the insert commit together, so a failure leaves the old items in
+        place. Optional: check ``supports("replace")``.
+
+        Returns:
+            list[dict]: The created entries, shaped as in :meth:`index`.
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not support replace")
 
     async def count_entries(self, collection_name: str) -> int:
         """Number of entries in a collection (0 if it doesn't exist)."""

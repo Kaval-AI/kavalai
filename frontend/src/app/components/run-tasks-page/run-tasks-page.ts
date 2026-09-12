@@ -18,6 +18,7 @@ import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { AgentService } from '../../services/agent-service';
 import { UserService } from '../../services/user-service';
 import { Task } from '../../models/task';
+import { LLMCallStat } from '../../models/llm-call-stat';
 import { TasksList } from '../tasks-list/tasks-list';
 import { TaskTimelineChart } from '../task-timeline-chart/task-timeline-chart';
 import { NavigationService } from '../../services/navigation-service';
@@ -40,6 +41,9 @@ export class RunTasksPage implements OnInit {
   runId: string | null = null;
   projectId: string | null = null;
   tasks: Task[] = [];
+  /** The run's model calls, oldest first; at most `modelCallsLimit` of them. */
+  modelCalls: LLMCallStat[] = [];
+  readonly modelCallsLimit = 100;
   loading: boolean = false;
   error: string | null = null;
 
@@ -71,6 +75,35 @@ export class RunTasksPage implements OnInit {
   private tryLoad(): void {
     if (!this.projectId || !this.sessionId || !this.runId) return;
     this.loadTasks();
+    this.loadModelCalls();
+  }
+
+  private loadModelCalls(): void {
+    if (!this.projectId || !this.runId) return;
+    this.agentService
+      .getLLMCallStats(this.projectId, undefined, this.modelCallsLimit, 0, { runId: this.runId })
+      .subscribe({
+        next: (calls) => {
+          this.modelCalls = [...calls].reverse();
+        },
+        // The tasks are the page's subject; without the calls only their section is missing.
+        error: (err) => {
+          this.modelCalls = [];
+          console.error(err);
+        }
+      });
+  }
+
+  get modelCallTokens(): number {
+    return this.modelCalls.reduce((sum, call) => sum + (call.total_tokens || 0), 0);
+  }
+
+  formatDuration(seconds: number | null): string {
+    return seconds === null ? '-' : `${(seconds * 1000).toFixed(0)} ms`;
+  }
+
+  formatTime(dateStr: string): string {
+    return new Date(dateStr).toLocaleTimeString();
   }
 
   private loadTasks(): void {

@@ -1,0 +1,435 @@
+<!doctype html>
+<!--
+Copyright 2026 OÜ KAVAL AI (registry code 17393877)
+Licensed under the Apache License, Version 2.0.
+
+The demo chatbot page: browse a scraped site offline, Wayback-style, with
+the Kaval.AI chat widget answering from the site's RAG index — all in the
+browser. Loads scrape.py's pages database (and, when present, the RAG index
+beside it) with sql.js; answers with WebLLM (an in-browser model over
+WebGPU), falling back to quoting the best-matching passages when no model
+can run.
+
+    python -m http.server            # from the repo root
+    open http://localhost:8000/tools/zerocostchatbot/archive.html?db=/docs.kaval.ai.pages.db
+
+?db= names the pages database; ?rag= the RAG index (default: the .rag.db
+beside it); ?model= a WebLLM chat model id. Without ?db= the page offers
+file pickers, which also work from file://.
+
+make_demo.py compiles this page into a client's demo folder: it copies the
+databases beside it and defines window.KavalArchiveDefaults (db, rag,
+collection, model, endpoint, title, suggestions) before archive.js loads,
+so the folder opens straight into the site. A URL parameter still wins over
+a default. With `endpoint` set the widget talks to a running agent server
+instead of loading a model in the browser.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DEMO chatbot</title>
+  <link rel="stylesheet" href="../../kavalai/widget/kaval-chatbot.css" />
+  <style>
+    :root { --bar: #273e47; --accent: #acc12f; --muted: #8a9aa3; --panel: #f4f4f6; }
+    html, body { height: 100%; margin: 0; font-family: system-ui, sans-serif; font-size: 14px; color: #1f2d34; }
+    body { display: grid; grid-template-rows: auto 1fr; grid-template-columns: 300px 1fr; }
+    /* With the sidebar gone the grid has one column, so the viewer fills it. */
+    body.nav-hidden { grid-template-columns: 1fr; }
+    body.nav-hidden aside { display: none; }
+    header { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; padding: 8px 12px; background: var(--bar); color: #fff; flex-wrap: wrap; }
+    header .brand { font-weight: 700; color: var(--accent); white-space: nowrap; }
+    header button, header label, header select { background: transparent; color: #fff; border: 1px solid rgba(255,255,255,0.35); border-radius: 4px; padding: 5px 9px; cursor: pointer; font: inherit; }
+    header select { background: var(--bar); }
+    header select option { color: #1f2d34; background: #fff; }
+    header button:disabled { opacity: 0.35; cursor: default; }
+    header input[type=text] { flex: 1; min-width: 160px; padding: 6px 10px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.35); background: rgba(255,255,255,0.1); color: #fff; font: inherit; }
+    header .meta { color: var(--muted); white-space: nowrap; font-size: 12px; }
+    header a { color: var(--accent); }
+    aside { border-right: 1px solid #d6d6da; background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+    aside input { margin: 8px; padding: 6px 8px; border: 1px solid #d6d6da; border-radius: 4px; font: inherit; }
+    aside ul { list-style: none; margin: 0; padding: 0 0 8px; overflow-y: auto; }
+    aside li { padding: 6px 12px; cursor: pointer; border-left: 3px solid transparent; }
+    aside li:hover { background: #e8e8ec; }
+    aside li.current { border-left-color: var(--accent); background: #e5e5e8; }
+    aside li .t { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    aside li .u { display: block; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    main { position: relative; min-height: 0; min-width: 0; }
+    iframe { width: 100%; height: 100%; border: none; background: #fff; }
+    .notice { position: absolute; left: 50%; top: 24px; transform: translateX(-50%); background: var(--bar); color: #fff; padding: 10px 16px; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); max-width: 80%; }
+    .notice a { color: var(--accent); }
+    .picker { grid-column: 1 / -1; display: grid; place-items: center; height: 100%; }
+    .picker div { text-align: center; }
+    .picker input { display: block; margin: 12px auto; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <header>
+    <button id="nav-toggle" title="Show or hide the page index" aria-pressed="true">&#9776;</button>
+    <span class="brand">DEMO chatbot</span>
+    <button id="back" title="Back" disabled>&#8592;</button>
+    <button id="forward" title="Forward" disabled>&#8594;</button>
+    <input type="text" id="address" placeholder="Archived URL" />
+    <span class="meta" id="meta"></span>
+    <label><input type="checkbox" id="scripts" /> Run page scripts</label>
+    <select id="skin" title="Chatbot skin" hidden></select>
+    <select id="model" title="Chat model" hidden></select>
+    <a id="live" href="#" target="_blank" rel="noopener" hidden>open live &#8599;</a>
+  </header>
+
+  <aside id="sidebar" hidden>
+    <input type="search" id="filter" placeholder="Filter pages…" />
+    <ul id="pages"></ul>
+  </aside>
+
+  <main id="viewer" hidden>
+    <iframe id="frame" sandbox="allow-same-origin allow-scripts allow-popups allow-forms" title="Archived page"></iframe>
+    <div class="notice" id="notice" hidden></div>
+  </main>
+
+  <div class="picker" id="picker">
+    <div>
+      <p>Open a pages database produced by <code>scrape.py</code>.</p>
+      <input type="file" id="file" accept=".db,.sqlite" />
+      <p>Optionally, the RAG index from <code>build_index.py</code> — it powers the chatbot.</p>
+      <input type="file" id="rag-file" accept=".db,.sqlite" />
+      <p><small>Or add <code>?db=/path/to/site.pages.db</code> (and <code>&amp;rag=</code>) to the URL.</small></p>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.12.0/sql-wasm.js"></script>
+  <script src="../../kavalai/widget/kaval-chatbot.js"></script>
+  <script src="archive.js"></script>
+  <script>
+    (function () {
+      var SQL_CDN = "https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.12.0/";
+      var WEBLLM_URL = "https://esm.run/@mlc-ai/web-llm";
+      /* The same embedding model build_index.py defaults to (snowflake-arctic-
+         embed-s), as WebLLM ships it — so query and index vectors agree. */
+      var EMBED_MODEL = "snowflake-arctic-embed-s-q0f32-MLC-b4";
+      var CHAT_MODELS = [
+        ["Qwen2.5-1.5B-Instruct-q4f32_1-MLC", "Qwen2.5-1.5B · ~1.9 GB"],
+        ["Qwen2.5-0.5B-Instruct-q4f32_1-MLC", "Qwen2.5-0.5B · ~1.1 GB"],
+        ["Qwen2.5-3B-Instruct-q4f32_1-MLC", "Qwen2.5-3B · ~2.9 GB"],
+        ["Llama-3.2-3B-Instruct-q4f32_1-MLC", "Llama-3.2-3B · ~3.0 GB"],
+      ];
+      var SKINS = {
+        kaval: { label: "Kaval lime", theme: {} },
+        ocean: { label: "Ocean", theme: { accent: "#2f5ac1", accentContent: "#ffffff", surface: "#ffffff", surfaceAlt: "#eef1f8", border: "#d5dbeb", text: "#1c2a4a", linkHover: "#2f5ac1", radius: "1rem" } },
+        midnight: { label: "Midnight", theme: { accent: "#7c5cff", accentContent: "#ffffff", surface: "#141824", surfaceAlt: "#1f2537", border: "#2c3450", text: "#e6e8f0", linkHover: "#b3a4ff", radius: "0.75rem", shadow: "rgba(0, 0, 0, 0.6)" } },
+        minimal: { label: "Minimal", theme: { accent: "#111111", accentContent: "#ffffff", surface: "#ffffff", surfaceAlt: "#f2f2f2", border: "#e0e0e0", text: "#111111", linkHover: "#555555", radius: "0.25rem", radiusSmall: "0.125rem" } },
+        sunset: { label: "Sunset", theme: { accent: "#f26b3a", accentContent: "#ffffff", surface: "#fffaf5", surfaceAlt: "#ffe9dc", border: "#f5cdb8", text: "#3a2418", linkHover: "#c94f21", radius: "1.25rem" } },
+      };
+
+      var $ = function (id) { return document.getElementById(id); };
+      var params = new URLSearchParams(location.search);
+      var defaults = window.KavalArchiveDefaults || {};
+      function setting(name) {
+        return params.get(name) || defaults[name] || null;
+      }
+      var index = null;
+      var rag = null;
+      var widget = null;
+      var current = null;
+      var back = [];
+      var forward = [];
+
+      function el(tag, className, text) {
+        var node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text !== undefined) node.textContent = text;
+        return node;
+      }
+
+      /* ---- site browsing ------------------------------------------- */
+
+      function notice(parts) {
+        var box = $("notice");
+        box.replaceChildren();
+        if (!parts) { box.hidden = true; return; }
+        parts.forEach(function (part) { box.appendChild(part); });
+        box.hidden = false;
+        clearTimeout(notice.timer);
+        notice.timer = setTimeout(function () { box.hidden = true; }, 6000);
+      }
+
+      function renderList(filter) {
+        var list = $("pages");
+        list.replaceChildren();
+        var needle = (filter || "").toLowerCase();
+        index.pages.forEach(function (page) {
+          var label = (page.title || "") + " " + page.url;
+          if (needle && label.toLowerCase().indexOf(needle) === -1) return;
+          var item = el("li");
+          item.dataset.url = page.url;
+          if (current && page.url === current.url) item.classList.add("current");
+          item.appendChild(el("span", "t", page.title || page.url));
+          item.appendChild(el("span", "u", page.url));
+          item.addEventListener("click", function () { go(page.url); });
+          list.appendChild(item);
+        });
+      }
+
+      function show(page) {
+        current = page;
+        var archived = index.pages.map(function (p) { return p.url; });
+        $("frame").srcdoc = KavalArchive.prepareArchivedHtml(
+          index.html(page.url), page.url, archived, { runScripts: $("scripts").checked }
+        );
+        $("address").value = page.url;
+        $("meta").textContent =
+          (page.status_code || "") + " · " + (page.fetch_mode || "") +
+          " · " + (page.last_crawled_at || "").slice(0, 16).replace("T", " ");
+        $("live").href = page.url;
+        $("live").hidden = false;
+        $("back").disabled = back.length === 0;
+        $("forward").disabled = forward.length === 0;
+        renderList($("filter").value);
+        var item = document.querySelector('#pages li[data-url="' + CSS.escape(page.url) + '"]');
+        if (item) item.scrollIntoView({ block: "nearest" });
+      }
+
+      /* Navigate to an archived page, pushing the current one on the back
+         stack; an unarchived target only shows where the archive ends. */
+      function go(href, base) {
+        var page = index.find(href, base);
+        if (!page) {
+          var link = el("a", null, href);
+          link.href = href;
+          notice([document.createTextNode("Not in the archive: "), link]);
+          return;
+        }
+        if (current && current.url !== page.url) {
+          back.push(current);
+          forward = [];
+        }
+        show(page);
+      }
+
+      /* ---- chatbot ------------------------------------------------- */
+
+      function progressLabel(report) {
+        var pct = report && typeof report.progress === "number"
+          ? " " + Math.round(report.progress * 100) + "%" : "";
+        var text = (report && report.text) || "Loading model…";
+        return text.replace(/\[.*?\]\s*/g, "").replace(/\(.*?\)\s*/g, "").slice(0, 60) + pct;
+      }
+
+      function shortName(modelId) {
+        return modelId.replace(/-Instruct.*$/, "");
+      }
+
+      /* Quotes the best-matching passages: the answer when no model can
+         run (no WebGPU, load failure) — still the site's own words. */
+      function lexicalConnector() {
+        return {
+          send: function (text) {
+            var hits = rag.lexicalTopK(text, 3);
+            return Promise.resolve({ text: KavalArchive.passagesMarkdown(hits), choices: [] });
+          },
+          reset: function () {},
+        };
+      }
+
+      /* Embeds the question, retrieves, and lets an in-browser model answer
+         from the passages. The engine holds the chat and embedding models
+         together; a failure to load hands over to the lexical connector. */
+      function webllmConnector(chatModel) {
+        var enginePromise = null;
+        var history = [];
+        var fallback = null;
+
+        function engine() {
+          if (enginePromise) return enginePromise;
+          widget.setStatus("Loading model…");
+          enginePromise = import(WEBLLM_URL)
+            .then(function (webllm) {
+              return webllm.CreateMLCEngine([chatModel, EMBED_MODEL], {
+                initProgressCallback: function (report) { widget.setStatus(progressLabel(report)); },
+              });
+            })
+            .then(function (loaded) {
+              widget.setStatus("Ready · " + shortName(chatModel));
+              return loaded;
+            }, function (error) {
+              console.error("WebLLM failed to load", error);
+              widget.setStatus("Model unavailable — quoting passages");
+              fallback = lexicalConnector();
+              throw error;
+            });
+          return enginePromise;
+        }
+
+        return {
+          warmUp: function () { engine().catch(function () {}); },
+          send: async function (text, onPartial) {
+            if (fallback) return fallback.send(text, onPartial);
+            var loaded;
+            try { loaded = await engine(); } catch (_error) { return fallback.send(text, onPartial); }
+            var embedded = await loaded.embeddings.create({
+              input: [KavalArchive.queryText(rag.model, text)],
+              model: EMBED_MODEL,
+            });
+            var hits = rag.topK(embedded.data[0].embedding, 5);
+            var messages = KavalArchive.buildMessages(text, hits, history, current && current.url);
+            var stream = await loaded.chat.completions.create({
+              messages: messages, model: chatModel, stream: true, temperature: 0.3, max_tokens: 400,
+            });
+            var answer = "";
+            for await (var chunk of stream) {
+              var delta = chunk.choices && chunk.choices[0] && chunk.choices[0].delta;
+              if (delta && delta.content) {
+                answer += delta.content;
+                onPartial(answer);
+              }
+            }
+            history = history.concat(
+              [{ role: "user", content: text }, { role: "assistant", content: answer }]
+            ).slice(-6);
+            return { text: answer + KavalArchive.sourcesMarkdown(hits), choices: [] };
+          },
+          reset: function () { history = []; },
+        };
+      }
+
+      function mountChatbot() {
+        var skinSelect = $("skin");
+        Object.keys(SKINS).forEach(function (key) {
+          skinSelect.appendChild(new Option(SKINS[key].label, key));
+        });
+        skinSelect.hidden = false;
+        skinSelect.addEventListener("change", function () {
+          widget.setTheme(SKINS[skinSelect.value].theme);
+        });
+
+        var modelSelect = $("model");
+        CHAT_MODELS.forEach(function (pair) {
+          modelSelect.appendChild(new Option(pair[1], pair[0]));
+        });
+        var requested = setting("model");
+        if (requested && !CHAT_MODELS.some(function (p) { return p[0] === requested; })) {
+          modelSelect.appendChild(new Option(requested, requested));
+        }
+        modelSelect.value = requested || CHAT_MODELS[0][0];
+        modelSelect.hidden = !navigator.gpu || !!defaults.endpoint;
+        modelSelect.addEventListener("change", function () {
+          var url = new URL(location.href);
+          url.searchParams.set("model", modelSelect.value);
+          location.href = url.href;
+        });
+
+        var connector = defaults.endpoint
+          ? KavalChatbot.agentConnector({ url: defaults.endpoint })
+          : navigator.gpu ? webllmConnector(modelSelect.value) : lexicalConnector();
+        var host = new URL(index.pages[0].url).hostname;
+        widget = KavalChatbot.mount({
+          connector: connector,
+          mode: "floating",
+          target: $("viewer"),
+          title: defaults.title || host,
+          greeting: "Hello! Ask me about this site.",
+          emptyMessage: "Hi! Ask me anything about " + host + ".",
+          suggestions: defaults.suggestions || [],
+        });
+        if (connector.warmUp) {
+          connector.warmUp();
+        } else if (!defaults.endpoint) {
+          widget.setStatus("No WebGPU — quoting passages");
+        }
+        widget.open();
+      }
+
+      /* ---- loading ------------------------------------------------- */
+
+      var sqlPromise = null;
+      function sql() {
+        if (!sqlPromise) sqlPromise = initSqlJs({ locateFile: function (f) { return SQL_CDN + f; } });
+        return sqlPromise;
+      }
+
+      function openPages(bytes) {
+        return sql().then(function (SQL) {
+          index = new KavalArchive.ArchiveIndex(new SQL.Database(new Uint8Array(bytes)));
+          if (!index.pages.length) {
+            alert("This database holds no fetched pages.");
+            return false;
+          }
+          $("picker").hidden = true;
+          $("sidebar").hidden = false;
+          $("viewer").hidden = false;
+          renderList("");
+          show(index.pages[0]);
+          return true;
+        });
+      }
+
+      function openRag(bytes) {
+        return sql().then(function (SQL) {
+          rag = new KavalArchive.RagIndex(new SQL.Database(new Uint8Array(bytes)), setting("collection"));
+          mountChatbot();
+        });
+      }
+
+      function fetchBytes(url) {
+        return fetch(url).then(function (r) {
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return r.arrayBuffer();
+        });
+      }
+
+      var pendingRag = null;
+      $("file").addEventListener("change", function (event) {
+        var file = event.target.files[0];
+        if (!file) return;
+        file.arrayBuffer().then(openPages).then(function (ok) {
+          if (ok && defaults.endpoint) return mountChatbot();
+          if (ok && pendingRag) return openRag(pendingRag);
+          if (ok) notice([document.createTextNode("No RAG index loaded, so no chatbot.")]);
+        });
+      });
+      $("rag-file").addEventListener("change", function (event) {
+        var file = event.target.files[0];
+        if (file) file.arrayBuffer().then(function (bytes) { pendingRag = bytes; if (index) openRag(bytes); });
+      });
+      $("nav-toggle").addEventListener("click", function () {
+        var hidden = document.body.classList.toggle("nav-hidden");
+        $("nav-toggle").setAttribute("aria-pressed", String(!hidden));
+      });
+      $("filter").addEventListener("input", function () { renderList($("filter").value); });
+      $("address").addEventListener("keydown", function (event) {
+        if (event.key === "Enter") go($("address").value, current && current.url);
+      });
+      $("scripts").addEventListener("change", function () { if (current) show(current); });
+      $("back").addEventListener("click", function () {
+        if (!back.length) return;
+        forward.push(current);
+        show(back.pop());
+      });
+      $("forward").addEventListener("click", function () {
+        if (!forward.length) return;
+        back.push(current);
+        show(forward.pop());
+      });
+      window.addEventListener("message", function (event) {
+        var data = event.data || {};
+        if (data.type === "kaval-archive-navigate") go(data.href, current && current.url);
+      });
+
+      var dbParam = setting("db");
+      if (dbParam) {
+        var ragParam = setting("rag") || dbParam.replace(/\.pages\.db$/, ".rag.db");
+        fetchBytes(dbParam).then(openPages).then(function (ok) {
+          if (!ok) return;
+          if (defaults.endpoint) return mountChatbot();
+          return fetchBytes(ragParam).then(openRag, function () {
+            notice([document.createTextNode("No RAG index at " + ragParam + ", so no chatbot.")]);
+          });
+        }).catch(function (error) {
+          alert("Could not load " + dbParam + ": " + error.message);
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

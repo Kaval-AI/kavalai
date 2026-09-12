@@ -14,68 +14,124 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-import os
-from unittest.mock import patch, MagicMock
-import httpx
-from kavalai.tools.webtools.http_client import http_request
+import base64
+import inspect
+
+import pytest
+
+from kavalai import FunctionKernel
+from kavalai import net
+from kavalai.functionkernel import FunctionKernelException
+from kavalai.net import UnsafeUrlError
+from kavalai.tools.webtools.http_client import (
+    HttpResponse,
+    _tor_proxy_url,
+    http_request,
+    make_http_request,
+)
+from tests.tools.local_http import fake_resolver, local_server
+
+intranet_request = make_http_request(allow_private_networks=True)
 
 
-def test_http_request_sends_basic_auth_only_when_both_parts_are_given():
+@pytest.fixture(autouse=True)
+def no_real_dns(monkeypatch):
+    monkeypatch.setattr(net, "resolve_host", fake_resolver)
+
+
+async def test_refuses_a_loopback_server_by_default():
+    with local_server() as server:
+        with pytest.raises(UnsafeUrlError, match="127.0.0.1"):
+            await http_request("GET", f"http://127.0.0.1:{server.port}/")
+    assert server.requests == []
+
+
+async def test_allow_private_networks_reaches_it():
+    with local_server() as server:
+        response = await intranet_request(
+            "post",
+            f"http://127.0.0.1:{server.port}/orders",
+            params={"page": 2},
+            json_body={"item": "rye"},
+        )
+    assert isinstance(response, HttpResponse)
+    assert response.status_code == 200
+    assert response.json_data["method"] == "POST"
+    assert response.json_data["path"] == "/orders?page=2"
+    assert response.json_data["body"] == '{"item":"rye"}'
+
+
+async def test_sends_basic_auth_only_when_both_parts_are_given():
     """Half a credential is no credential: a user without a password must not
     become an ``auth`` tuple with an empty secret."""
-    mock_response = MagicMock(spec=httpx.Response)
-    mock_response.status_code = 200
-    mock_response.headers = {}
-    mock_response.text = ""
+    with local_server() as server:
+        url = f"http://127.0.0.1:{server.port}/"
+        both = await intranet_request("get", url, auth_user="u", auth_password="p")
+        half = await intranet_request("get", url, auth_user="u")
+    expected = "Basic " + base64.b64encode(b"u:p").decode()
+    assert both.json_data["authorization"] == expected
+    assert half.json_data["authorization"] is None
 
-    with patch("httpx.Client") as mock_client_class:
-        mock_client_class.return_value.__enter__.return_value.request.return_value = (
-            mock_response
+
+async def test_text_that_is_not_json_leaves_json_data_empty():
+    with local_server() as server:
+        response = await intranet_request(
+            "GET", f"http://127.0.0.1:{server.port}/text", data_body="x"
         )
-        http_request("get", "https://example.com", auth_user="u", auth_password="p")
-        assert mock_client_class.call_args.kwargs["auth"] == ("u", "p")
-
-        http_request("get", "https://example.com", auth_user="u")
-        assert mock_client_class.call_args.kwargs["auth"] is None
+    assert response.text == "invalid json"
+    assert response.json_data is None
 
 
-def test_http_request_proxy():
-    mock_response = MagicMock(spec=httpx.Response)
-    mock_response.status_code = 200
-    mock_response.headers = {}
-    mock_response.text = "proxy ok"
+async def test_proxy_is_allowed_on_a_private_address(monkeypatch):
+    """The proxy resolves the name, so the target passes a pre-check only."""
+    with local_server() as proxy:
+        monkeypatch.setenv("KAVALAI_TOR_PROXY_HOST", "127.0.0.1")
+        monkeypatch.setenv("KAVALAI_TOR_PROXY_PORT", str(proxy.port))
+        response = await http_request("GET", "http://public.test/page", use_proxy=True)
+    assert response.status_code == 200
+    assert proxy.requests[0]["path"] == "http://public.test/page"
 
-    with patch.dict(
-        os.environ,
-        {"KAVALAI_TOR_PROXY_HOST": "proxy.host", "KAVALAI_TOR_PROXY_PORT": "9999"},
-    ):
-        with patch("httpx.Client") as mock_client_class:
-            mock_client_instance = mock_client_class.return_value.__enter__.return_value
-            mock_client_instance.request.return_value = mock_response
 
-            response = http_request(
-                method="GET", url="https://example.com", use_proxy=True
+async def test_proxy_target_is_pre_checked(monkeypatch):
+    with local_server() as proxy:
+        monkeypatch.setenv("KAVALAI_TOR_PROXY_HOST", "127.0.0.1")
+        monkeypatch.setenv("KAVALAI_TOR_PROXY_PORT", str(proxy.port))
+        with pytest.raises(UnsafeUrlError):
+            await http_request("GET", "http://internal.test/", use_proxy=True)
+        assert proxy.requests == []
+        response = await intranet_request(
+            "GET", "http://internal.test/", use_proxy=True
+        )
+    assert response.status_code == 200
+    assert proxy.requests[0]["path"] == "http://internal.test/"
+
+
+def test_proxy_defaults(monkeypatch):
+    monkeypatch.delenv("KAVALAI_TOR_PROXY_HOST", raising=False)
+    monkeypatch.delenv("KAVALAI_TOR_PROXY_PORT", raising=False)
+    assert _tor_proxy_url() == "http://localhost:8118"
+
+
+def test_the_model_cannot_switch_the_guard_off():
+    """The opt-out is a registration argument, never a tool argument."""
+    for tool in (http_request, intranet_request):
+        assert tool._is_kavalai_tool is True
+        assert tool.__name__ == "http_request"
+        assert "allow_private_networks" not in inspect.signature(tool).parameters
+    assert intranet_request is not make_http_request(allow_private_networks=True)
+
+
+async def test_through_the_kernel():
+    kernel = FunctionKernel()
+    kernel.register_python_tool("http.request", http_request)
+    kernel.register_python_tool("intranet.request", intranet_request)
+    with local_server() as server:
+        url = f"http://127.0.0.1:{server.port}/"
+        with pytest.raises(FunctionKernelException, match="non-public address"):
+            await kernel.call_tool(
+                "python://http.request", {"method": "GET", "url": url}
             )
-
-            assert response.status_code == 200
-
-            mock_client_class.assert_called_once()
-            args, kwargs = mock_client_class.call_args
-            assert kwargs["proxy"] == "http://proxy.host:9999"
-
-
-def test_http_request_invalid_json():
-    mock_response = MagicMock(spec=httpx.Response)
-    mock_response.status_code = 200
-    mock_response.headers = {}
-    mock_response.text = "invalid json"
-    mock_response.json.side_effect = ValueError("Invalid JSON")
-
-    with patch("httpx.Client.request") as mock_request:
-        mock_request.return_value = mock_response
-
-        response = http_request(method="GET", url="https://example.com")
-
-        assert response.status_code == 200
-        assert response.json_data is None
-        assert response.text == "invalid json"
+        response = await kernel.call_tool(
+            "python://intranet.request", {"method": "GET", "url": url}
+        )
+    assert response.status_code == 200

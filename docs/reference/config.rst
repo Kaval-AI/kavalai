@@ -72,6 +72,12 @@ Read by ``python -m kavalai.server`` and, for the judge, by ``kavalai-eval``.
        ``default_llm_parameters`` and to the eval judge. A graph's or node's
        ``llm_kwargs`` override them: node > graph > these > provider defaults.
        An unset value leaves the provider's own default in force.
+   * - ``KAVALAI_LLM_MAX_OUTPUT_TOKENS``
+     - Most tokens a model call may generate, reasoning tokens included. A
+       call that reaches it raises
+       :class:`~kavalai.llm_clients.base_client.OutputTruncatedError` instead
+       of returning a partial answer. Unset leaves the provider's own limit in
+       force; Anthropic, which requires a value, is sent ``64000``.
    * - ``KAVALAI_LLM_TIMEOUT_SECONDS``
      - Seconds before a model call is abandoned. Default ``30``.
    * - ``KAVALAI_LLM_STREAM_TIMEOUT_SECONDS``
@@ -113,6 +119,18 @@ Read by ``python -m kavalai.server`` and ``python -m kavalai.migrate_db agents``
    * - ``KAVALAI_DB_SCHEMA``
      - Schema holding the runtime tables. Default ``public``; ``agents`` by
        convention.
+   * - ``KAVALAI_RAG_MODEL``
+     - Embedding model of the ``default`` RAG service. Setting it registers
+       that service at start-up, without a setup module, so a workflow's
+       ``rag_query`` nodes resolve. The normalizer from
+       ``KAVALAI_EMBEDDING_NORMALIZER_YAML``, when set, is attached to it.
+   * - ``KAVALAI_RAG_URI``
+     - Where that index lives, as a database URI (``sqlite:///site.rag.db``
+       or a Postgres URI). Required whenever ``KAVALAI_RAG_MODEL`` is set —
+       the index is not assumed to live in the agent database.
+   * - ``KAVALAI_RAG_SCHEMA``
+     - Schema holding the RAG tables. Optional; the backend's default
+       otherwise.
    * - ``KAVALAI_DB_POOL_SIZE``
      - SQLAlchemy pool size. Default ``0``.
    * - ``KAVALAI_DB_MAX_OVERFLOW``
@@ -140,6 +158,15 @@ Agent server
      - Bind address. Default ``0.0.0.0``.
    * - ``KAVALAI_AGENT_PORT``
      - Port. Default ``10000``.
+   * - ``KAVALAI_AGENT_PUBLIC_EVENTS``
+     - Serve ``/stream_agent`` through
+       :func:`~kavalai.server.public_events`: no node events, no token
+       counts, no restart reasons, and a fixed message quoting the run id in
+       place of a failed run's error text. Default ``false``. Set it when
+       people other than the operator reach the server.
+   * - ``KAVALAI_AGENT_RUN_TIMEOUT_SECONDS``
+     - Seconds after which a run is cancelled and recorded as failed, passed
+       to the engine as ``run_timeout``. Unset sets no limit.
    * - ``KAVALAI_AGENT_BASIC_AUTH_USER``
      - Basic-auth username. Auth is disabled only when both this and the
        password are unset; setting either one enables it.

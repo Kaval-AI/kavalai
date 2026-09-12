@@ -1,14 +1,21 @@
+import sqlite3
+
 import pytest
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kavalai.db import (
+    SQLITE_SCHEMA_VERSION,
     Agent,
     Session,
     Run,
     Task,
     ChatMessage,
     ModelCallStat,
+    db_manager,
     ensure_async_scheme,
+    is_sqlite_uri,
+    sqlite_path_from_uri,
 )
 from kavalai.crud import insert, delete, get_one
 
@@ -166,8 +173,10 @@ def test_ensure_async_scheme():
         == "postgresql+asyncpg://user:pass@host:5432/db"
     )
 
-    # Test with non-postgresql scheme
-    assert ensure_async_scheme("sqlite:///:memory:") == "sqlite:///:memory:"
+    # SQLite gets its async driver too; an unknown scheme is left alone
+    assert ensure_async_scheme("sqlite:///:memory:") == "sqlite+aiosqlite:///:memory:"
+    assert ensure_async_scheme("sqlite+aiosqlite:///x.db") == "sqlite+aiosqlite:///x.db"
+    assert ensure_async_scheme("mysql://u:p@h/db") == "mysql://u:p@h/db"
 
     # Test with invalid URI
     assert ensure_async_scheme("not_a_uri") == "not_a_uri"
@@ -211,8 +220,80 @@ async def test_sqlite_compat_sessionmaker_runs_agent_service():
     assert updated.output_data == {"a": 1}
 
 
+def _stale_browser_store(path) -> None:
+    """A SQLite store stamped by the previous schema version, with a row."""
+    connection = sqlite3.connect(path)
+    with connection:
+        connection.execute(
+            "CREATE TABLE model_call_stats (id TEXT PRIMARY KEY, call_type TEXT)"
+        )
+        connection.execute("INSERT INTO model_call_stats VALUES ('old', 'llm')")
+        connection.execute(f"PRAGMA user_version = {SQLITE_SCHEMA_VERSION - 1}")
+    connection.close()
+
+
+def _store_layout(path) -> tuple[int, set[str], int]:
+    connection = sqlite3.connect(path)
+    try:
+        (version,) = connection.execute("PRAGMA user_version").fetchone()
+        columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(model_call_stats)")
+        }
+        (rows,) = connection.execute("SELECT count(*) FROM model_call_stats").fetchone()
+    finally:
+        connection.close()
+    return version, columns, rows
+
+
+@pytest.mark.parametrize("flavour", ["async", "compat"])
+async def test_a_stale_browser_store_is_recreated(tmp_path, flavour):
+    """Browser stores have no migrations: an older stamp means start again."""
+    from kavalai.db import DatabaseManager
+
+    path = str(tmp_path / "browser.db")
+    _stale_browser_store(path)
+    manager = DatabaseManager()
+    if flavour == "async":
+        await manager.init_sqlite(db_path=path)
+        await manager.get_sqlite_engine(db_path=path).dispose()
+    else:
+        manager.get_sqlite_compat_sessionmaker(db_path=path)
+        manager.get_sqlite_sync_engine(db_path=path).dispose()
+
+    version, columns, rows = _store_layout(path)
+    assert version == SQLITE_SCHEMA_VERSION
+    assert {"agent_id", "session_id", "run_id"} <= columns
+    assert rows == 0
+
+
 @pytest.mark.asyncio
 async def test_delete_missing_row_reports_false(agents_db: AsyncSession):
     from uuid import uuid4
 
     assert await delete(agents_db, Agent, uuid4()) is False
+
+
+def test_sqlite_uri_helpers():
+    assert is_sqlite_uri("sqlite:///x.db")
+    assert is_sqlite_uri("sqlite+aiosqlite:///x.db")
+    assert not is_sqlite_uri("postgresql://u:p@h/db")
+    assert not is_sqlite_uri("")
+    assert sqlite_path_from_uri("sqlite:////tmp/agents.db") == "/tmp/agents.db"
+    assert sqlite_path_from_uri("sqlite:///rel.db") == "rel.db"
+    assert sqlite_path_from_uri("sqlite://") == ":memory:"
+
+
+@pytest.mark.asyncio
+async def test_get_sessionmaker_serves_sqlite_uris(tmp_path):
+    """A ``sqlite://`` URI lands on the SQLite engine: schema ignored, the
+    same shared engine as ``get_sqlite_sessionmaker`` and foreign keys on."""
+    db_path = tmp_path / "agents.db"
+    session_maker = db_manager.get_sessionmaker(
+        uri=f"sqlite:///{db_path}", schema="ignored"
+    )
+    assert (
+        session_maker.kw["bind"]
+        is db_manager.get_sqlite_sessionmaker(db_path=str(db_path)).kw["bind"]
+    )
+    async with session_maker() as session:
+        assert (await session.execute(text("PRAGMA foreign_keys"))).scalar() == 1

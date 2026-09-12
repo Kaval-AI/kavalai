@@ -16,14 +16,16 @@ limitations under the License.
 
 import os
 import time
-from typing import Optional, Type
+from typing import Any, Optional, Type
 
 from openai import AsyncOpenAI
+from openai.lib._parsing._responses import type_to_text_format_param
 from openai.types.responses import (
     ResponseTextDeltaEvent,
     ResponseRefusalDeltaEvent,
     ResponseErrorEvent,
     ResponseCompletedEvent,
+    ResponseIncompleteEvent,
 )
 from pydantic import BaseModel
 
@@ -31,6 +33,7 @@ from kavalai.llm_clients.base_client import (
     ensure_user_turn,
     BaseLlmClient,
     ChatHistory,
+    LlmClientException,
     LlmClientParameters,
     ModelStatsReceiver,
 )
@@ -107,14 +110,18 @@ class OpenAIClient(BaseLlmClient):
             # `reasoning`, not as a top-level `reasoning_effort` kwarg
             # (that is the Chat Completions form).
             call_kwargs["reasoning"] = {"effort": params.reasoning_effort}
+        if params.max_output_tokens is not None:
+            call_kwargs["max_output_tokens"] = params.max_output_tokens
 
         if response_model:
-            call_kwargs["text_format"] = response_model
+            # The schema goes out as `text.format` rather than `text_format`.
+            # Given `text_format`, the SDK validates the text itself when it
+            # ends, so a truncated answer would fail there as a validation
+            # error before the stream reports why it stopped.
+            call_kwargs["text"] = {"format": type_to_text_format_param(response_model)}
 
-        prompt_tokens = 0
-        completion_tokens = 0
-        cached_prompt_tokens = None
-        reasoning_tokens = None
+        usage = {"prompt_tokens": 0, "completion_tokens": 0}
+        incomplete_reason = None
         full_response = ""
 
         async with self.client.responses.stream(**call_kwargs) as stream:
@@ -127,25 +134,48 @@ class OpenAIClient(BaseLlmClient):
                 elif isinstance(event, ResponseErrorEvent):
                     # ResponseErrorEvent carries `message`/`code`, not `error`.
                     raise RuntimeError(f"OpenAI Stream Error: {event.message}")
-                elif isinstance(event, ResponseCompletedEvent):
-                    usage = event.response.usage
-                    prompt_tokens = usage.input_tokens
-                    completion_tokens = usage.output_tokens
-                    # Cached input is billed at a fraction of fresh input, and
-                    # reasoning tokens are output the caller never sees — both
-                    # are subsets of the counts above.
-                    input_details = getattr(usage, "input_tokens_details", None)
-                    cached_prompt_tokens = getattr(input_details, "cached_tokens", None)
-                    output_details = getattr(usage, "output_tokens_details", None)
-                    reasoning_tokens = getattr(output_details, "reasoning_tokens", None)
+                elif isinstance(
+                    event, (ResponseCompletedEvent, ResponseIncompleteEvent)
+                ):
+                    if event.response.usage is not None:
+                        usage = usage_counts(event.response.usage)
+                    if isinstance(event, ResponseIncompleteEvent):
+                        details = event.response.incomplete_details
+                        incomplete_reason = getattr(details, "reason", None) or (
+                            "unknown"
+                        )
+
+        if incomplete_reason == "max_output_tokens":
+            raise self._output_truncated(
+                incomplete_reason, full_response, request_data=call_kwargs, **usage
+            )
+        if incomplete_reason is not None:
+            raise LlmClientException(
+                f"OpenAI model '{self.model}' returned an incomplete response "
+                f"(reason '{incomplete_reason}'); the partial output is not "
+                "returned."
+            )
 
         await value_streamer.stream_complete()
         await self._record_completed_call(
             request_data=call_kwargs,
             response_data=full_response,
             started=start_time,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            cached_prompt_tokens=cached_prompt_tokens,
-            reasoning_tokens=reasoning_tokens,
+            **usage,
         )
+
+
+def usage_counts(usage: Any) -> dict:
+    """The token counts of a Responses API ``usage``, named as a model call stat.
+
+    Cached input is billed at a fraction of fresh input, and reasoning tokens
+    are output the caller never sees — both are subsets of the two main counts.
+    """
+    input_details = getattr(usage, "input_tokens_details", None)
+    output_details = getattr(usage, "output_tokens_details", None)
+    return {
+        "prompt_tokens": usage.input_tokens,
+        "completion_tokens": usage.output_tokens,
+        "cached_prompt_tokens": getattr(input_details, "cached_tokens", None),
+        "reasoning_tokens": getattr(output_details, "reasoning_tokens", None),
+    }

@@ -50,6 +50,79 @@ The client accepts ``api_key=`` (or ``host=``) directly, which wins over the
 environment. ``openai/`` also takes ``base_url=``, which is what makes it serve
 any OpenAI-compatible endpoint — see :doc:`../tutorials/llm_clients`.
 
+Output caps and truncation
+--------------------------
+
+:class:`~kavalai.LlmClientParameters` names each setting once, and each client
+sends it under its provider's own name. A parameter left at ``None`` is not
+sent, so the provider's default applies.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 14 30 26 30
+
+   * - Prefix
+     - ``max_output_tokens`` sent as
+     - ``reasoning_effort`` sent as
+     - Truncation reported as
+   * - ``openai/``
+     - ``max_output_tokens``
+     - ``reasoning.effort``
+     - ``status: incomplete``, reason ``max_output_tokens``
+   * - ``gemini/``
+     - ``max_output_tokens``
+     - ``thinking_config.thinking_level``
+     - ``finish_reason: MAX_TOKENS``
+   * - ``anthropic/``
+     - ``max_tokens``; ``64000`` when unset, since the API requires a value
+     - ``output_config.effort``
+     - ``stop_reason: max_tokens``
+   * - ``ollama/``
+     - ``options.num_predict``
+     - ``think``; ``"none"`` sends ``false``
+     - ``done_reason: length``
+   * - ``browser/``
+     - ``max_tokens`` in the bridge request
+     - not sent
+     - ``finish_reason: length``, if the bridge reports it
+
+On reasoning models the cap covers the reasoning tokens as well as the answer,
+so a small cap can be spent before any visible text is produced.
+
+A call that reaches the cap raises
+:class:`~kavalai.llm_clients.base_client.OutputTruncatedError` instead of
+returning what was generated. For structured output that text is JSON cut off
+mid-value, which either fails to parse or, repaired leniently, validates into a
+model with content missing; neither is an answer. The error is not retried —
+the same cap cuts the same answer and the retry is billed again — and the
+truncated call is still recorded as a model call with its token counts and the
+partial output. A streaming consumer receives the partial chunks that arrived,
+then the error, and no ``complete`` chunk:
+
+.. code-block:: python
+
+   from kavalai import LlmClientParameters, make_client
+   from kavalai.llm_clients.base_client import OutputTruncatedError
+
+   client = make_client(
+       "anthropic/claude-sonnet-5",
+       LlmClientParameters(max_output_tokens=40),
+   )
+   try:
+       await client.prompt("Write a 300-word story about a lighthouse keeper.")
+   except OutputTruncatedError as error:
+       print(error)
+
+.. code-block:: text
+
+   The output of 'anthropic/claude-sonnet-5' was cut off at the output cap of
+   40 tokens after 40 output tokens (stop reason 'max_tokens'). The partial
+   output is not returned. Raise max_output_tokens (LlmClientParameters, or
+   llm_kwargs in a workflow) or ask for a shorter answer.
+
+``KAVALAI_LLM_MAX_OUTPUT_TOKENS`` sets the cap for every call the agent server
+makes — see :doc:`config`.
+
 Embedding models
 ----------------
 
@@ -119,7 +192,14 @@ A RAG service is registered under a plain name — there is no
    * - ``sqlite``
      - :class:`~kavalai.rag.sqllite.SqliteRagService`
      - A single file through `sqlite-vector
-       <https://github.com/sqliteai/sqlite-vector>`_, readable in the browser
+       <https://github.com/sqliteai/sqlite-vector>`_, with the same registry
+       and one table per collection
+
+Both keep the storage model described in :doc:`../guides/data_model`, so an
+index can be browsed in the backoffice whichever database holds it.
+:func:`~kavalai.rag.rag_service_from_uri` picks the service from a database
+URI — ``postgresql://`` or ``sqlite:///path`` — which is what the
+``ragindex`` example and the backoffice do.
 
 Both are registered bare, with nothing bound, so ``make_rag_service("sqlite")``
 still needs whatever the backend requires. What a workflow actually names is a
@@ -140,6 +220,129 @@ graph says otherwise:
 
 The workflow document then mentions neither a filename nor a connection string
 — see :doc:`../guides/workflows`.
+
+:class:`~kavalai.rag.postgres.PostgresRagService` takes the session maker and
+the model positionally; ``normalizer``, ``schema``, ``provision``,
+``stats_receiver`` and ``vector_type`` are keyword-only, and
+:class:`~kavalai.rag.sqllite.SqliteRagService` takes the last three as
+keywords too. Neither service writes statistics of its own: each embedding
+call is reported to the ``stats_receiver`` passed to the call, or else to the
+one given to the constructor, and to nothing when neither is set.
+
+**The collection's model is the one used.** Each collection records in
+``rag_collections`` the embedding model it was created with, and a service
+embeds every query and every new batch for that collection with the recorded
+model. Its own ``model`` names the model for the collections it *creates*. Two
+models of the same dimension produce vectors that are not comparable, and a
+query embedded with the wrong one returns plausible neighbours without any
+error; taking the model from the registry rules that mistake out. One
+embedding client is kept per model, so one service serves collections of
+different models, and a service built with ``model=None`` queries and indexes
+existing collections and refuses only to create one:
+
+.. code-block:: python
+
+   from kavalai.rag import SqliteRagService
+
+   rag = SqliteRagService(
+       "handbook.db", model="fastembed/BAAI/bge-small-en-v1.5"
+   )
+   await rag.index(
+       "The library is open on Tuesdays and Fridays.",
+       collection_name="handbook",
+   )
+
+   other = SqliteRagService(
+       "handbook.db", model="fastembed/snowflake/snowflake-arctic-embed-xs"
+   )
+   hit = (await other.query(
+       "When is the library open?", collection_name="handbook"
+   ))[0]
+   print(hit.model)
+
+.. code-block:: text
+
+   fastembed/BAAI/bge-small-en-v1.5
+
+Where the two disagree, as here, the service logs a warning — ``RAG collection
+'handbook' was built with fastembed/BAAI/bge-small-en-v1.5; it is embedded
+with that model, not with this service's
+fastembed/snowflake/snowflake-arctic-embed-xs.`` A registry entry is cached
+for the life of the service, so a collection that another process drops or
+recreates is not noticed until the service is recreated.
+
+**Provisioning.** With ``provision=True``, the default, a service creates what
+it needs on the first write: the registry, a collection's table and indexes
+and, on PostgreSQL, the ``vector`` extension. With ``provision=False`` it
+issues no DDL. A database without a registry then reads as empty —
+``list_collections()`` returns ``[]`` and a query returns no hits — and
+indexing into a collection that does not exist raises instead of creating it.
+``ensure_registry()`` and ``create_collection()`` issue DDL whatever
+``provision`` says; they are the calls an owner-privileged job makes, which
+:doc:`../deploy/index` describes. Read paths create nothing under either
+setting: a read that performs DDL fails under a role without the privilege
+and surprises one that has it.
+
+**Half-precision vectors on PostgreSQL.** ``vector_type="halfvec"`` stores the
+embeddings of new collections as 16-bit floats. That halves their memory, at a
+small cost in the precision of the scores, and raises pgvector's HNSW limit
+from 2,000 dimensions to 4,000, so a 3,072-dimension model such as
+``openai/text-embedding-3-large`` can be indexed only this way:
+
+.. code-block:: python
+
+   from kavalai.rag import PostgresRagService
+
+   rag = PostgresRagService.from_uri(
+       "postgresql://user:pass@db/kavalai",
+       "openai/text-embedding-3-large",
+       schema="rag",
+   )
+   try:
+       await rag.create_collection("large", 3072)
+   except Exception as error:
+       print(error.orig)
+
+   await rag.create_collection("large", 3072, vector_type="halfvec")
+   print([c["embedding_size"] for c in await rag.list_collections()])
+
+.. code-block:: text
+
+   <class 'asyncpg.exceptions.ProgramLimitExceededError'>: column cannot
+   have more than 2000 dimensions for hnsw index
+   [3072]
+
+``halfvec`` needs pgvector 0.7 or later; on an older one creating such a
+collection raises ``ValueError``. An existing collection keeps the type it was
+created with, which the service reads from the table's column rather than from
+its own setting. :class:`~kavalai.rag.sqllite.SqliteRagService` stores 32-bit
+floats only and refuses any other ``vector_type`` with ``ValueError``.
+
+**Filtered queries on PostgreSQL.** An HNSW scan visits a bounded set of
+nearest candidates (``hnsw.ef_search``, 40 by default) and applies the
+``WHERE`` clause to those, so a query restricted by ``source_ids`` whose
+matching rows lie away from the query vector can return fewer than ``top_k``
+rows, or none. A very selective filter does not suffer from this: PostgreSQL
+then reads the matching rows through the ``source_id`` index and sorts them
+exactly. The shortfall arises when the filter matches too many rows for that
+plan — a site's pages in a collection shared by a few sites, for instance. On
+pgvector 0.8 or later the service runs a filtered query with
+iterative index scans — ``SET LOCAL hnsw.iterative_scan = relaxed_order``,
+which lasts for that query's transaction only — and the index keeps scanning
+until enough rows pass the filter or pgvector's ``hnsw.max_scan_tuples`` limit
+is reached. ``batch_query_with_join`` does the same when it is given
+``additional_where``. On an older pgvector the setting is not issued and the
+shortfall remains.
+
+**One table per collection, for now.** Each collection has its own table, typed
+vector column and index, which keeps a scan inside one collection and makes
+dropping a collection a ``DROP TABLE``. A shared layout — one hash-partitioned
+table per dimension — is the alternative once a database holds more than
+2,000 collections or more than 5 million vectors. It is deliberately not
+implemented: a second layout would double both the conformance suite every
+backend runs and the upgrade paths between collection schema versions, and
+the deployments Kaval.AI serves are below that threshold. The decision is to be
+revisited when one reaches it.
 
 Which names are registered right now
 ------------------------------------
@@ -329,19 +532,21 @@ lazily:
 
 Because the client is built on first use, a name the registry cannot resolve
 raises on the first ``index`` or ``query`` call rather than at construction —
-so validate the string early if the service is built at start-up. Four
-practical points then matter more than a model's benchmark score:
+so validate the string early if the service is built at start-up. The model
+may also be omitted: a service built with ``model=None`` embeds each existing
+collection with the model that collection records, so it can query and index
+it, and refuses only to create a collection — which is how the backoffice
+opens an index it did not build. Four practical points then matter more than
+a model's benchmark score:
 
 **Index and query with the same model.** Vectors from two different models are
-not comparable, and the search returns nonsense rather than failing. Under
-PostgreSQL a collection's vector column is sized on the first batch, so a model
-of a *different* dimension at least fails loudly::
+not comparable, and a search across them returns plausible neighbours rather
+than failing. Both services therefore take an existing collection's model from
+the registry instead of from their own ``model`` (see `RAG services`_ above),
+and check the dimension recorded beside it on every write::
 
    ValueError: Collection 'handbook' stores 384-dimensional embeddings; got
    1536.
-
-A model of the same dimension does not, which is the case worth being careful
-about.
 
 **Every hit says what produced it.** The model and dimension travel with the
 data, so an index of unknown provenance can identify itself:
@@ -372,6 +577,30 @@ the old one.
 vector storage and index size for a modest retrieval gain on short factual
 text. Start small and measure with an evaluation suite
 (:doc:`../guides/evaluation`) before paying for width.
+
+**A shorter vector can come from the same model.** ``text-embedding-3-*`` and
+``gemini-embedding-001`` return shortened vectors on request, and
+:class:`~kavalai.llm_clients.embeddings.OpenAIEmbeddingClient` and
+:class:`~kavalai.llm_clients.embeddings.GeminiEmbeddingClient` take
+``dimensions=`` for it. Bind it at registration under a provider name of its
+own: the model string is what a collection records, so the reduced model must
+not share a name with the full one, whose vectors it cannot be compared with.
+
+.. code-block:: python
+
+   from kavalai import make_embedding_client, register_embedding_provider
+   from kavalai.llm_clients.embeddings import OpenAIEmbeddingClient
+
+   register_embedding_provider(
+       "openai-512", OpenAIEmbeddingClient, dimensions=512
+   )
+   client = make_embedding_client("openai-512/text-embedding-3-small")
+   vectors, _ = await client.compute_embeddings(["How deep is Lake Miller?"])
+   print(len(vectors[0]))
+
+.. code-block:: text
+
+   512
 
 **Local or hosted is a deployment decision.** ``fastembed`` needs no API key
 and no network after the first download, which makes it the reproducible choice

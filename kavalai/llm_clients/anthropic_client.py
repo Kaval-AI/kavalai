@@ -33,9 +33,9 @@ from kavalai.llm_clients.base_client import (
 from kavalai.llm_clients.common import walk_json_schema
 from kavalai.llm_clients.streamer import Streamer
 
-# The Messages API requires max_tokens on every request. It is only an output
-# ceiling (nothing is pre-allocated) and responses stream, so a generous
-# default is safe.
+# The Messages API requires max_tokens on every request, so this is sent when
+# `max_output_tokens` is unset. It is only an output ceiling (nothing is
+# pre-allocated) and responses stream, so a generous default is safe.
 DEFAULT_MAX_TOKENS = 64000
 
 
@@ -92,16 +92,20 @@ class AnthropicClient(BaseLlmClient):
             [msg.model_dump() for msg in ensure_user_turn(chat_history.messages)]
         )
 
+        params = self.parameters
         call_kwargs: Dict[str, Any] = {
             "model": self.model,
-            "max_tokens": DEFAULT_MAX_TOKENS,
+            "max_tokens": (
+                DEFAULT_MAX_TOKENS
+                if params.max_output_tokens is None
+                else params.max_output_tokens
+            ),
             "messages": messages,
         }
         if system_prompt:
             call_kwargs["system"] = system_prompt
 
         output_config: Dict[str, Any] = {}
-        params = self.parameters
         if params.temperature is not None:
             call_kwargs["temperature"] = params.temperature
         if params.top_p is not None:
@@ -153,6 +157,22 @@ class AnthropicClient(BaseLlmClient):
             cached_prompt_tokens = (
                 getattr(usage, "cache_read_input_tokens", 0) or 0
             ) + (getattr(usage, "cache_creation_input_tokens", 0) or 0) or None
+
+        if final_message.stop_reason == "max_tokens":
+            raise self._output_truncated(
+                "max_tokens",
+                full_response,
+                max_output_tokens=call_kwargs["max_tokens"],
+                request_data=call_kwargs,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                cached_prompt_tokens=cached_prompt_tokens,
+            )
+        if final_message.stop_reason == "model_context_window_exceeded":
+            raise LlmClientException(
+                f"Anthropic model '{self.model}' stopped because its context "
+                "window was exhausted; the partial output is not returned."
+            )
 
         await value_streamer.stream_complete()
         await self._record_completed_call(

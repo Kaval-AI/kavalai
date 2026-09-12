@@ -48,21 +48,44 @@ def migrated_backoffice_db(backoffice_db_config):
     )
 
 
-@pytest_asyncio.fixture(scope="function")
-async def backoffice_db(migrated_backoffice_db, backoffice_db_config):
-    # Import inside fixture to ensure env vars are set before module-level engine creation
+@pytest.fixture(scope="session")
+def sqlite_backoffice_uri(tmp_path_factory):
+    """A migrated SQLite backoffice database, one per test session."""
+    path = tmp_path_factory.mktemp("backoffice") / "backoffice.db"
+    uri = f"sqlite:///{path}"
+    migrate("backoffice", uri=uri)
+    return uri
+
+
+@pytest_asyncio.fixture(scope="function", params=["postgres", "sqlite"])
+async def backoffice_db(request, monkeypatch):
+    """An empty backoffice database, on each backend the backoffice supports.
+
+    The application reads ``KAVALAI_BO_DB_URI`` at call time, so pointing the
+    variable at the backend under test is enough for the endpoints to follow.
+    """
+    if request.param == "postgres":
+        config = request.getfixturevalue("backoffice_db_config")
+        request.getfixturevalue("migrated_backoffice_db")
+        monkeypatch.setenv("KAVALAI_BO_DB_URI", config["uri"])
+        monkeypatch.setenv("KAVALAI_BO_DB_SCHEMA", config["schema"])
+    else:
+        monkeypatch.setenv(
+            "KAVALAI_BO_DB_URI", request.getfixturevalue("sqlite_backoffice_uri")
+        )
+        monkeypatch.delenv("KAVALAI_BO_DB_SCHEMA", raising=False)
+
     from kavalai.backoffice.db import AsyncBackofficeSession, Base
 
     async with AsyncBackofficeSession() as session:
-        # Get all table names from the Base metadata to truncate them
-        tables = ", ".join(
-            f"test_backoffice.{table.name}"
-            for table in reversed(Base.metadata.sorted_tables)
-        )
-
-        if tables:
-            await session.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE;"))
-            await session.commit()
+        tables = list(reversed(Base.metadata.sorted_tables))
+        if request.param == "postgres":
+            names = ", ".join(f"test_backoffice.{table.name}" for table in tables)
+            await session.execute(text(f"TRUNCATE {names} RESTART IDENTITY CASCADE;"))
+        else:
+            for table in tables:
+                await session.execute(text(f"DELETE FROM {table.name}"))
+        await session.commit()
 
         yield session
         await session.rollback()

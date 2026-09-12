@@ -13,46 +13,57 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
-PostgreSQL (pgvector) backed RAG service — **self-provisioning**.
+PostgreSQL (pgvector) backed RAG service.
 
-This backend owns its schema entirely; no Alembic migration set covers it.
-It maintains a small registry table (``rag_collections``) plus one table per
-collection with a *typed* ``vector(N)`` column, a real HNSW index for the
-collection's exact dimension, and a GIN index on the metadata column.
-Dropping a collection is ``DROP TABLE``. The registry row carries a
-``schema_version`` used for in-code upgrades of collection tables.
+This backend owns its schema; no Alembic migration set covers it. The storage
+model is the one described in :mod:`kavalai.rag.collections`: a
+``rag_collections`` registry plus one table per collection with a typed
+``vector(N)`` or ``halfvec(N)`` column, an HNSW index for the collection's
+exact dimension, and a GIN index on the metadata column. Dropping a collection
+is ``DROP TABLE``. With ``provision=False`` the service issues no DDL and the
+tables are created by :meth:`~CollectionRagService.ensure_registry` and
+:meth:`~CollectionRagService.create_collection` from a role that may.
 
 All SQL here is raw and therefore bypasses ``schema_translate_map`` — every
-statement qualifies the configured schema explicitly.
+statement qualifies the configured schema explicitly, and the vector types are
+qualified with ``public``, where the extension is created.
 
-``RAG_COLLECTION_SCHEMA_VERSION`` is the version of the per-collection table
-layout. Bump it when the layout changes and register an upgrade step in
-``_COLLECTION_UPGRADES``, which maps a *from_version* to an async callable
+``HALFVEC_MIN_VERSION`` and ``ITERATIVE_SCAN_MIN_VERSION`` are the pgvector
+releases that introduced ``halfvec`` and iterative index scans.
+``_COLLECTION_UPGRADES`` maps a *from_version* to an async callable
 ``(session, service, collection_info) -> None`` that brings a collection from
-``from_version`` to ``from_version + 1``.
+``from_version`` to ``from_version + 1``; see
+``RAG_COLLECTION_SCHEMA_VERSION`` in :mod:`kavalai.rag.collections`.
 """
 
-import hashlib
 import json
-import re
-from datetime import datetime, timezone
-from typing import AsyncIterator, Callable, Optional, Union, AsyncContextManager
-from uuid import UUID, uuid4
-
-from loguru import logger
+from contextlib import asynccontextmanager
+from typing import Any, AsyncContextManager, AsyncIterator, Callable, Optional, Union
+from uuid import UUID
 
 # Imported under an alias because several methods take a ``text`` parameter.
 from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from kavalai.db import Agent, db_manager
-from kavalai.llm_clients.embeddings import make_embedding_client
+from kavalai.db import db_manager
 from kavalai.normalizer import Normalizer
-from kavalai.rag.base import BaseRagService, RagServiceResult
+from kavalai.rag.collections import (
+    RAG_COLLECTION_SCHEMA_VERSION,
+    CollectionInfo,
+    CollectionRagService,
+    MetadataValue,
+)
 
-RAG_COLLECTION_SCHEMA_VERSION = 1
+__all__ = [
+    "CollectionInfo",
+    "PostgresRagService",
+    "RAG_COLLECTION_SCHEMA_VERSION",
+]
 
 _COLLECTION_UPGRADES: dict[int, Callable] = {}
+
+HALFVEC_MIN_VERSION = (0, 7)
+ITERATIVE_SCAN_MIN_VERSION = (0, 8)
 
 
 def _vector_literal(embedding) -> str:
@@ -67,41 +78,40 @@ def _parse_vector(value) -> list[float]:
     return list(value)
 
 
-class CollectionInfo:
-    """Registry entry for one RAG collection."""
-
-    def __init__(
-        self,
-        name: str,
-        table_name: str,
-        model: str,
-        embedding_size: int,
-        schema_version: int,
-    ):
-        self.name = name
-        self.table_name = table_name
-        self.model = model
-        self.embedding_size = embedding_size
-        self.schema_version = schema_version
+def _parse_version(value: Optional[str]) -> tuple[int, ...]:
+    """``"0.8.0"`` -> ``(0, 8, 0)``; anything unparsable is ``(0,)``."""
+    parts = []
+    for part in (value or "").split("."):
+        if not part.isdigit():
+            break
+        parts.append(int(part))
+    return tuple(parts) or (0,)
 
 
-class PostgresRagService(BaseRagService):
+class PostgresRagService(CollectionRagService):
     """
     PostgreSQL (pgvector) backed RAG service with backend-owned DDL.
 
-    Each collection lives in its own table (typed ``vector(N)`` column,
-    per-collection HNSW + GIN indexes) registered in ``rag_collections``.
-    Collections are provisioned lazily on first index (the embedding dimension
-    is taken from the first batch) or explicitly via :meth:`create_collection`.
+    Each collection lives in its own table (typed ``vector(N)`` or
+    ``halfvec(N)`` column, per-collection HNSW and GIN indexes) registered in
+    ``rag_collections``. Collections are provisioned on first index (the
+    embedding dimension is taken from the first batch) or explicitly via
+    :meth:`~kavalai.rag.collections.CollectionRagService.create_collection`.
 
-    All operations are scoped to a single collection (``"default"`` unless
-    specified) — ``collection_name`` is a logical handle in the
-    :class:`BaseRagService` interface; here it maps to a table.
+    ``vector_type="halfvec"`` stores new collections' embeddings as 16-bit
+    floats: half the memory, and HNSW indexes for up to 4,000 dimensions
+    instead of 2,000, so a 3,072-dimension model can be indexed at all. It
+    needs pgvector 0.7 or later. An existing collection keeps the type it was
+    created with.
+
+    A query restricted by ``source_ids`` enables pgvector's iterative index
+    scans (0.8 or later) for its transaction. Without them an HNSW search
+    filters its candidates after the search, so a filter whose rows lie away
+    from the query can return fewer than ``top_k`` rows, or none.
     """
 
-    capabilities = frozenset({"count_entries", "iter_entries"})
-
-    REGISTRY_TABLE = "rag_collections"
+    collection_upgrades = _COLLECTION_UPGRADES
+    vector_types = frozenset({"vector", "halfvec"})
 
     def __init__(
         self,
@@ -110,9 +120,12 @@ class PostgresRagService(BaseRagService):
             Callable[[], AsyncContextManager[AsyncSession]],
         ],
         model: Optional[str] = None,
-        agent: Optional[Agent] = None,
+        *,
         normalizer: Optional[Normalizer] = None,
         schema: Optional[str] = None,
+        provision: bool = True,
+        stats_receiver: Any = None,
+        vector_type: str = "vector",
     ):
         """
         Initialize the PostgresRagService.
@@ -120,66 +133,54 @@ class PostgresRagService(BaseRagService):
         Args:
             session_maker: Async session maker or a factory that returns an async
                 context manager for the session.
-            model (Optional[str]): The embedding model to use. May be ``None``
-                for export/stats-only usage (anything that computes embeddings
-                will then fail).
-            agent (Optional[Agent]): Optional Agent object to associate with this service.
+            model (Optional[str]): Embedding model for collections this service
+                creates. Existing collections are embedded with their own.
             normalizer (Optional[Normalizer]): Optional normalizer to use for embeddings.
             schema (Optional[str]): Schema the RAG tables live in. All backend SQL is
                 raw and qualifies this schema explicitly. ``None`` uses the
                 connection default (Postgres: ``public``).
+            provision (bool): Whether the service may create the registry and
+                collection tables itself. See
+                :class:`~kavalai.rag.collections.CollectionRagService`.
+            stats_receiver: Receives each embedding call's statistics.
+            vector_type (str): ``"vector"`` or ``"halfvec"`` for new collections.
         """
+        super().__init__(
+            model=model,
+            normalizer=normalizer,
+            provision=provision,
+            stats_receiver=stats_receiver,
+            vector_type=vector_type,
+        )
         self.session_maker = session_maker
-        self.model = model
-        self.agent = agent
-        self.normalizer = normalizer
         self.schema = schema
-        self._embedding_client = None
-        self._registry_ready = False
-        self._collections: dict[str, CollectionInfo] = {}
-
-    @property
-    def embedding_client(self):
-        """Embedding client, created lazily so model-less usage works."""
-        if self._embedding_client is None:
-            if not self.model:
-                raise ValueError(
-                    "This PostgresRagService was created without an embedding "
-                    "model; indexing and querying require one."
-                )
-            self._embedding_client = make_embedding_client(self.model)
-        return self._embedding_client
-
-    @embedding_client.setter
-    def embedding_client(self, client) -> None:
-        self._embedding_client = client
+        self._pgvector_version: Optional[tuple[int, ...]] = None
 
     @classmethod
     def from_uri(
         cls,
         uri: str,
-        model: str,
-        agent: Optional[Agent] = None,
-        normalizer: Optional[Normalizer] = None,
+        model: Optional[str] = None,
+        *,
         schema: Optional[str] = None,
+        **options: Any,
     ) -> "PostgresRagService":
-        """Create a PostgresRagService from a database URI."""
+        """Create a PostgresRagService from a database URI.
+
+        ``options`` are the constructor's keyword arguments.
+        """
         session_maker = db_manager.get_sessionmaker(uri=uri, schema=schema)
-        return cls(session_maker, model, agent, normalizer, schema=schema)
+        return cls(session_maker, model, schema=schema, **options)
 
     @classmethod
     def from_session_maker(
         cls,
         session_maker: async_sessionmaker[AsyncSession],
-        model: str,
-        agent: Optional[Agent] = None,
-        normalizer: Optional[Normalizer] = None,
-        schema: Optional[str] = None,
+        model: Optional[str] = None,
+        **options: Any,
     ) -> "PostgresRagService":
         """Create a PostgresRagService from a session maker."""
-        return cls(session_maker, model, agent, normalizer, schema=schema)
-
-    # Naming / SQL helpers
+        return cls(session_maker, model, **options)
 
     def _qualified(self, table_name: str) -> str:
         """Schema-qualified, quoted table reference for raw SQL."""
@@ -187,26 +188,43 @@ class PostgresRagService(BaseRagService):
             return f'"{self.schema}"."{table_name}"'
         return f'"{table_name}"'
 
-    @staticmethod
-    def table_name_for_collection(collection_name: str) -> str:
-        """Deterministic, SQL-safe table name for a collection.
+    async def _pgvector(self, session: AsyncSession) -> tuple[int, ...]:
+        """The installed pgvector version, read once per service."""
+        if self._pgvector_version is None:
+            version = (
+                await session.execute(
+                    sql_text(
+                        "SELECT extversion FROM pg_extension WHERE extname = 'vector'"
+                    )
+                )
+            ).scalar()
+            self._pgvector_version = _parse_version(version)
+        return self._pgvector_version
 
-        A sanitized slug keeps the name readable; a short hash of the exact
-        collection name guarantees uniqueness across names that sanitize to
-        the same slug.
-        """
-        slug = re.sub(r"[^a-z0-9_]+", "_", collection_name.lower()).strip("_")[:32]
-        digest = hashlib.sha1(  # nosec B324 - naming, not security
-            collection_name.encode("utf-8")
-        ).hexdigest()[:8]
-        return f"rag_c_{slug}_{digest}" if slug else f"rag_c_{digest}"
+    # Hooks
 
-    # Provisioning
+    @asynccontextmanager
+    async def _connection(self):
+        async with self.session_maker() as session:
+            yield session
 
-    async def _ensure_registry(self, session: AsyncSession) -> None:
+    async def _commit(self, session: AsyncSession) -> None:
+        await session.commit()
+
+    async def _rollback(self, session: AsyncSession) -> None:
+        await session.rollback()
+
+    async def _registry_exists(self, session: AsyncSession) -> bool:
+        return (
+            await session.execute(
+                sql_text("SELECT to_regclass(:name) IS NOT NULL").bindparams(
+                    name=self._qualified(self.REGISTRY_TABLE)
+                )
+            )
+        ).scalar()
+
+    async def _create_registry(self, session: AsyncSession) -> None:
         """Create the pgvector extension and the registry table if needed."""
-        if self._registry_ready:
-            return
         await session.execute(
             sql_text("CREATE EXTENSION IF NOT EXISTS vector SCHEMA public")
         )
@@ -224,93 +242,91 @@ class PostgresRagService(BaseRagService):
                 """
             )
         )
-        await session.commit()
-        self._registry_ready = True
 
-    async def _load_collection(
-        self, session: AsyncSession, collection_name: str
-    ) -> Optional[CollectionInfo]:
-        """Fetch a collection's registry entry (cached), upgrading if stale."""
-        cached = self._collections.get(collection_name)
-        if cached is not None:
-            return cached
-
-        await self._ensure_registry(session)
-        row = (
-            await session.execute(
-                sql_text(
-                    f"SELECT name, table_name, model, embedding_size, schema_version "
-                    f"FROM {self._qualified(self.REGISTRY_TABLE)} WHERE name = :name"
-                ).bindparams(name=collection_name)
-            )
-        ).first()
-        if row is None:
-            return None
-
-        info = CollectionInfo(
+    @staticmethod
+    def _info_from_row(row) -> CollectionInfo:
+        return CollectionInfo(
             name=row.name,
             table_name=row.table_name,
             model=row.model,
             embedding_size=row.embedding_size,
             schema_version=row.schema_version,
         )
-        await self._upgrade_collection(session, info)
-        self._collections[collection_name] = info
-        return info
 
-    async def _upgrade_collection(
-        self, session: AsyncSession, info: CollectionInfo
-    ) -> None:
-        """Bring a collection table up to ``RAG_COLLECTION_SCHEMA_VERSION``."""
-        if info.schema_version > RAG_COLLECTION_SCHEMA_VERSION:
-            raise ValueError(
-                f"Collection '{info.name}' has schema_version "
-                f"{info.schema_version}, newer than this library supports "
-                f"({RAG_COLLECTION_SCHEMA_VERSION}). Upgrade kavalai."
-            )
-        while info.schema_version < RAG_COLLECTION_SCHEMA_VERSION:
-            upgrade = _COLLECTION_UPGRADES.get(info.schema_version)
-            if upgrade is None:
-                raise ValueError(
-                    f"No upgrade step registered from collection schema_version "
-                    f"{info.schema_version} (collection '{info.name}')."
-                )
-            logger.info(
-                f"Upgrading RAG collection '{info.name}' from schema_version "
-                f"{info.schema_version} to {info.schema_version + 1}."
-            )
-            await upgrade(session, self, info)
-            info.schema_version += 1
+    async def _fetch_registry_row(
+        self, session: AsyncSession, name: str
+    ) -> Optional[CollectionInfo]:
+        row = (
             await session.execute(
                 sql_text(
-                    f"UPDATE {self._qualified(self.REGISTRY_TABLE)} "
-                    f"SET schema_version = :version WHERE name = :name"
-                ).bindparams(version=info.schema_version, name=info.name)
+                    f"SELECT name, table_name, model, embedding_size, schema_version "
+                    f"FROM {self._qualified(self.REGISTRY_TABLE)} WHERE name = :name"
+                ).bindparams(name=name)
             )
-            await session.commit()
+        ).first()
+        return None if row is None else self._info_from_row(row)
 
-    async def _ensure_collection(
-        self, session: AsyncSession, collection_name: str, embedding_size: int
-    ) -> CollectionInfo:
-        """Get a collection, creating its table on first use."""
-        info = await self._load_collection(session, collection_name)
-        if info is not None:
-            if info.embedding_size != embedding_size:
-                raise ValueError(
-                    f"Collection '{collection_name}' stores "
-                    f"{info.embedding_size}-dimensional embeddings; got "
-                    f"{embedding_size}."
+    async def _list_registry(self, session: AsyncSession) -> list[CollectionInfo]:
+        rows = (
+            await session.execute(
+                sql_text(
+                    f"SELECT name, table_name, model, embedding_size, "
+                    f"schema_version FROM "
+                    f"{self._qualified(self.REGISTRY_TABLE)} ORDER BY name"
                 )
-            return info
-
-        if not self.model:
-            raise ValueError(
-                "This PostgresRagService was created without an embedding "
-                "model; creating collections requires one."
             )
+        ).all()
+        return [self._info_from_row(row) for row in rows]
 
-        table_name = self.table_name_for_collection(collection_name)
+    async def _insert_registry_row(
+        self, session: AsyncSession, info: CollectionInfo
+    ) -> None:
+        await session.execute(
+            sql_text(
+                f"INSERT INTO {self._qualified(self.REGISTRY_TABLE)} "
+                f"(name, table_name, model, embedding_size, schema_version) "
+                f"VALUES (:name, :table_name, :model, :embedding_size, :version) "
+                f"ON CONFLICT (name) DO NOTHING"
+            ).bindparams(
+                name=info.name,
+                table_name=info.table_name,
+                model=info.model,
+                embedding_size=info.embedding_size,
+                version=info.schema_version,
+            )
+        )
+
+    async def _set_registry_version(
+        self, session: AsyncSession, name: str, version: int
+    ) -> None:
+        await session.execute(
+            sql_text(
+                f"UPDATE {self._qualified(self.REGISTRY_TABLE)} "
+                f"SET schema_version = :version WHERE name = :name"
+            ).bindparams(version=version, name=name)
+        )
+
+    async def _delete_registry_row(self, session: AsyncSession, name: str) -> None:
+        await session.execute(
+            sql_text(
+                f"DELETE FROM {self._qualified(self.REGISTRY_TABLE)} WHERE name = :name"
+            ).bindparams(name=name)
+        )
+
+    async def _create_collection_table(
+        self, session: AsyncSession, info: CollectionInfo
+    ) -> None:
+        if info.vector_type == "halfvec":
+            version = await self._pgvector(session)
+            if version < HALFVEC_MIN_VERSION:
+                raise ValueError(
+                    f"halfvec collections need pgvector "
+                    f"{'.'.join(map(str, HALFVEC_MIN_VERSION))} or later; the "
+                    f"database has {'.'.join(map(str, version))}."
+                )
+        table_name = info.table_name
         qualified = self._qualified(table_name)
+        vector_type = f"public.{info.vector_type}"
         await session.execute(
             sql_text(
                 f"""
@@ -318,7 +334,7 @@ class PostgresRagService(BaseRagService):
                     id UUID PRIMARY KEY,
                     source_id TEXT NOT NULL,
                     content TEXT,
-                    embedding public.vector({embedding_size}),
+                    embedding {vector_type}({info.embedding_size}),
                     metadata JSONB,
                     created_at TIMESTAMPTZ NOT NULL,
                     updated_at TIMESTAMPTZ NOT NULL
@@ -341,362 +357,195 @@ class PostgresRagService(BaseRagService):
         await session.execute(
             sql_text(
                 f'CREATE INDEX IF NOT EXISTS "ix_{table_name}_embedding" '
-                f"ON {qualified} USING hnsw (embedding public.vector_cosine_ops)"
+                f"ON {qualified} USING hnsw "
+                f"(embedding public.{info.vector_type}_cosine_ops)"
             )
+        )
+
+    async def _drop_collection_table(
+        self, session: AsyncSession, info: CollectionInfo
+    ) -> None:
+        await session.execute(
+            sql_text(f"DROP TABLE IF EXISTS {self._qualified(info.table_name)}")
+        )
+
+    async def _prepare_collection(
+        self, session: AsyncSession, info: CollectionInfo
+    ) -> None:
+        """Read the collection's vector type from its embedding column."""
+        column_type = (
+            await session.execute(
+                sql_text(
+                    "SELECT format_type(atttypid, atttypmod) FROM pg_attribute "
+                    "WHERE attrelid = to_regclass(:table) AND attname = 'embedding'"
+                ).bindparams(table=self._qualified(info.table_name))
+            )
+        ).scalar()
+        info.vector_type = (
+            "halfvec" if column_type and "halfvec" in column_type else "vector"
+        )
+
+    async def _count_rows(self, session: AsyncSession, info: CollectionInfo) -> int:
+        return (
+            await session.execute(
+                sql_text(f"SELECT count(*) FROM {self._qualified(info.table_name)}")
+            )
+        ).scalar() or 0
+
+    async def _insert_rows(
+        self, session: AsyncSession, info: CollectionInfo, rows: list[dict]
+    ) -> None:
+        insert_sql = sql_text(
+            f"INSERT INTO {self._qualified(info.table_name)} "
+            f"(id, source_id, content, embedding, metadata, created_at, updated_at) "
+            f"VALUES (:id, :source_id, :content, "
+            f"CAST(:embedding AS public.{info.vector_type}), "
+            f"CAST(:metadata AS jsonb), :created_at, :updated_at)"
         )
         await session.execute(
-            sql_text(
-                f"INSERT INTO {self._qualified(self.REGISTRY_TABLE)} "
-                f"(name, table_name, model, embedding_size, schema_version) "
-                f"VALUES (:name, :table_name, :model, :embedding_size, :version) "
-                f"ON CONFLICT (name) DO NOTHING"
-            ).bindparams(
-                name=collection_name,
-                table_name=table_name,
-                model=self.model,
-                embedding_size=embedding_size,
-                version=RAG_COLLECTION_SCHEMA_VERSION,
-            )
-        )
-        await session.commit()
-        logger.info(
-            f"Provisioned RAG collection '{collection_name}' "
-            f"(table {table_name}, dim {embedding_size})."
-        )
-        info = CollectionInfo(
-            name=collection_name,
-            table_name=table_name,
-            model=self.model,
-            embedding_size=embedding_size,
-            schema_version=RAG_COLLECTION_SCHEMA_VERSION,
-        )
-        self._collections[collection_name] = info
-        return info
-
-    async def create_collection(
-        self, collection_name: str, embedding_size: int
-    ) -> None:
-        """Explicitly provision a collection with a known embedding dimension."""
-        async with self.session_maker() as session:
-            await self._ensure_collection(session, collection_name, embedding_size)
-
-    async def drop_collection(self, collection_name: str) -> None:
-        """Drop a collection: its table and registry entry."""
-        async with self.session_maker() as session:
-            info = await self._load_collection(session, collection_name)
-            if info is None:
-                return
-            await session.execute(
-                sql_text(f"DROP TABLE IF EXISTS {self._qualified(info.table_name)}")
-            )
-            await session.execute(
-                sql_text(
-                    f"DELETE FROM {self._qualified(self.REGISTRY_TABLE)} "
-                    f"WHERE name = :name"
-                ).bindparams(name=collection_name)
-            )
-            await session.commit()
-        self._collections.pop(collection_name, None)
-        logger.info(f"Dropped RAG collection '{collection_name}'.")
-
-    async def list_collections(self) -> list[dict]:
-        """List registered collections with entry counts."""
-        async with self.session_maker() as session:
-            await self._ensure_registry(session)
-            rows = (
-                await session.execute(
-                    sql_text(
-                        f"SELECT name, table_name, model, embedding_size, "
-                        f"schema_version FROM "
-                        f"{self._qualified(self.REGISTRY_TABLE)} ORDER BY name"
-                    )
-                )
-            ).all()
-            collections = []
-            for row in rows:
-                count = (
-                    await session.execute(
-                        sql_text(
-                            f"SELECT count(*) FROM {self._qualified(row.table_name)}"
-                        )
-                    )
-                ).scalar()
-                collections.append(
-                    {
-                        "name": row.name,
-                        "model": row.model,
-                        "embedding_size": row.embedding_size,
-                        "schema_version": row.schema_version,
-                        "count": count or 0,
-                    }
-                )
-            await session.commit()
-            return collections
-
-    async def get_stats(self) -> dict:
-        """Aggregate stats across collections (for e.g. the backoffice)."""
-        collections = await self.list_collections()
-        return {
-            "total_entries": sum(c["count"] for c in collections),
-            "total_collections": len(collections),
-            "collections": [c["name"] for c in collections],
-        }
-
-    # Indexing
-
-    async def index(
-        self,
-        text: str,
-        source_metadata: Optional[dict] = None,
-        collection_name: str = "default",
-        source_id: str = "default",
-    ) -> dict:
-        """Index a single text blob with metadata. Returns the created row dict."""
-        return (
-            await self.index_batch(
-                texts=[text],
-                metadata_list=[source_metadata or {}],
-                collection_name=collection_name,
-                source_ids=[source_id],
-            )
-        )[0]
-
-    async def index_batch(
-        self,
-        texts: list[str],
-        metadata_list: list[dict],
-        source_ids: Optional[list[str]] = None,
-        collection_name: str = "default",
-    ) -> list[dict]:
-        """
-        Index multiple text items in a single batch.
-
-        The collection is provisioned on first use, taking its embedding
-        dimension from the computed embeddings.
-
-        Returns:
-            list[dict]: Created rows (id, model, collection_name, source_id,
-                content, embedding_size, rag_metadata, created_at, updated_at).
-        """
-        if not texts:
-            return []
-
-        if len(texts) != len(metadata_list):
-            raise ValueError(
-                "The number of texts and metadata dictionaries must be the same."
-            )
-
-        if source_ids and len(texts) != len(source_ids):
-            raise ValueError("The number of texts and source_ids must be the same.")
-
-        async with self.session_maker() as session:
-            embeddings, stats = await self.embedding_client.compute_embeddings(
-                texts=texts,
-                normalizer=self.normalizer,
-            )
-            session.add(stats)
-
-            dim = len(embeddings[0])
-            info = await self._ensure_collection(session, collection_name, dim)
-
-            now = datetime.now(timezone.utc)
-            source_ids = source_ids or ["default"] * len(texts)
-            rows = [
+            insert_sql,
+            [
                 {
-                    "id": uuid4(),
-                    "model": info.model,
-                    "collection_name": collection_name,
-                    "source_id": source_id,
-                    "content": content,
-                    "embedding_size": dim,
-                    "embedding": list(emb),
-                    "rag_metadata": meta,
-                    "created_at": now,
-                    "updated_at": now,
+                    "id": row["id"],
+                    "source_id": row["source_id"],
+                    "content": row["content"],
+                    "embedding": _vector_literal(row["embedding"]),
+                    "metadata": json.dumps(row["rag_metadata"]),
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
                 }
-                for content, meta, emb, source_id in zip(
-                    texts, metadata_list, embeddings, source_ids
-                )
-            ]
-
-            insert_sql = sql_text(
-                f"INSERT INTO {self._qualified(info.table_name)} "
-                f"(id, source_id, content, embedding, metadata, created_at, updated_at) "
-                f"VALUES (:id, :source_id, :content, CAST(:embedding AS vector), "
-                f"CAST(:metadata AS jsonb), :created_at, :updated_at)"
-            )
-            await session.execute(
-                insert_sql,
-                [
-                    {
-                        "id": row["id"],
-                        "source_id": row["source_id"],
-                        "content": row["content"],
-                        "embedding": _vector_literal(row["embedding"]),
-                        "metadata": json.dumps(row["rag_metadata"]),
-                        "created_at": row["created_at"],
-                        "updated_at": row["updated_at"],
-                    }
-                    for row in rows
-                ],
-            )
-            await session.commit()
-            return rows
-
-    # Deletion
-
-    async def delete(
-        self, item_id: UUID, collection_name: Optional[str] = None
-    ) -> None:
-        """
-        Delete a single indexed item by its identifier.
-
-        Args:
-            item_id (UUID): Identifier of the indexed item to delete.
-            collection_name (Optional[str]): Collection the item belongs to.
-                If omitted, all registered collections are searched.
-        """
-        async with self.session_maker() as session:
-            if collection_name is not None:
-                info = await self._load_collection(session, collection_name)
-                infos = [info] if info else []
-            else:
-                infos = [
-                    await self._load_collection(session, c["name"])
-                    for c in await self.list_collections()
-                ]
-            for info in infos:
-                await session.execute(
-                    sql_text(
-                        f"DELETE FROM {self._qualified(info.table_name)} WHERE id = :id"
-                    ).bindparams(id=item_id)
-                )
-            await session.commit()
-
-    async def delete_by_source_id(
-        self,
-        collection_name: str,
-        source_id: Union[str, list[str]],
-    ) -> None:
-        """Delete all items in a collection matching the source identifier(s)."""
-        source_ids = [source_id] if isinstance(source_id, str) else source_id
-        async with self.session_maker() as session:
-            info = await self._load_collection(session, collection_name)
-            if info is None:
-                return
-            await session.execute(
-                sql_text(
-                    f"DELETE FROM {self._qualified(info.table_name)} "
-                    f"WHERE source_id = ANY(:source_ids)"
-                ).bindparams(source_ids=source_ids)
-            )
-            await session.commit()
-
-    # Querying
-
-    def _map_row(
-        self,
-        row,
-        info: CollectionInfo,
-        query_index=None,
-        include_content: bool = True,
-    ) -> RagServiceResult:
-        return RagServiceResult(
-            id=row.id,
-            model=info.model,
-            collection_name=info.name,
-            source_id=row.source_id,
-            content=row.content if include_content else None,
-            embedding_size=info.embedding_size,
-            rag_metadata=row.metadata or {},
-            similarity=1.0 - float(row.distance) if row.distance is not None else 0.0,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
-            query_index=query_index,
+                for row in rows
+            ],
         )
 
-    async def query(
-        self,
-        text: str,
-        top_k: int = 5,
-        collection_name: Optional[str] = None,
-        source_ids: Optional[list[str]] = None,
-        keep_best: bool = False,
-        include_content: bool = True,
-    ) -> list[RagServiceResult]:
-        """
-        Query one collection for similarities to the input text.
+    async def _delete_rows(
+        self, session: AsyncSession, info: CollectionInfo, item_ids: list[UUID]
+    ) -> None:
+        await session.execute(
+            sql_text(
+                f"DELETE FROM {self._qualified(info.table_name)} WHERE id = ANY(:ids)"
+            ).bindparams(ids=item_ids)
+        )
 
-        ``collection_name`` defaults to ``"default"`` — with table-per-collection
-        storage there is no cross-collection search; query each collection
-        explicitly if needed.
+    async def _delete_rows_by_source_ids(
+        self, session: AsyncSession, info: CollectionInfo, source_ids: list[str]
+    ) -> None:
+        await session.execute(
+            sql_text(
+                f"DELETE FROM {self._qualified(info.table_name)} "
+                f"WHERE source_id = ANY(:source_ids)"
+            ).bindparams(source_ids=source_ids)
+        )
+
+    async def _delete_rows_by_metadata(
+        self,
+        session: AsyncSession,
+        info: CollectionInfo,
+        match: dict[str, MetadataValue],
+    ) -> None:
+        """``metadata @> :match``, served by the collection's GIN index."""
+        await session.execute(
+            sql_text(
+                f"DELETE FROM {self._qualified(info.table_name)} "
+                f"WHERE metadata @> CAST(:match AS jsonb)"
+            ).bindparams(match=json.dumps(match))
+        )
+
+    async def _iter_rows(
+        self, session: AsyncSession, info: CollectionInfo, batch_size: int
+    ) -> AsyncIterator[dict]:
+        """Keyset pagination over ``id``."""
+        params: dict = {"batch_size": batch_size}
+        while True:
+            where = "WHERE id > :last_id" if "last_id" in params else ""
+            query_sql = (
+                f"SELECT id, source_id, content, embedding::text AS embedding, "
+                f"metadata, created_at, updated_at "
+                f"FROM {self._qualified(info.table_name)} {where} "
+                f"ORDER BY id ASC LIMIT :batch_size"
+            )
+            rows = (
+                await session.execute(sql_text(query_sql).bindparams(**params))
+            ).all()
+            if not rows:
+                return
+            for row in rows:
+                yield {
+                    "id": row.id,
+                    "source_id": row.source_id,
+                    "content": row.content,
+                    "embedding": _parse_vector(row.embedding),
+                    "rag_metadata": row.metadata or {},
+                    "created_at": row.created_at,
+                    "updated_at": row.updated_at,
+                }
+            params["last_id"] = rows[-1].id
+
+    async def _fetch_embeddings(
+        self, session: AsyncSession, info: CollectionInfo, ids: list[UUID]
+    ) -> dict[UUID, list[float]]:
+        rows = (
+            await session.execute(
+                sql_text(
+                    f"SELECT id, embedding::text AS embedding "
+                    f"FROM {self._qualified(info.table_name)} "
+                    f"WHERE id = ANY(:ids)"
+                ).bindparams(ids=ids)
+            )
+        ).all()
+        return {row.id: _parse_vector(row.embedding) for row in rows}
+
+    async def _enable_filtered_scan(self, session: AsyncSession) -> None:
+        """Let HNSW keep scanning until a filtered query has its rows.
+
+        ``SET LOCAL`` lasts for the current transaction only, so it affects the
+        query that follows and nothing else on a pooled connection.
         """
-        results = await self.query_batch(
-            texts=[text],
+        if await self._pgvector(session) >= ITERATIVE_SCAN_MIN_VERSION:
+            await session.execute(
+                sql_text("SET LOCAL hnsw.iterative_scan = relaxed_order")
+            )
+
+    async def _scan(
+        self,
+        session: AsyncSession,
+        info: CollectionInfo,
+        embeddings: list[list[float]],
+        top_k: int,
+        source_ids: Optional[list[str]],
+        keep_best: bool,
+    ) -> list[list[dict]]:
+        """One query for the whole batch (CROSS JOIN LATERAL over the vectors)."""
+        cte_sql, params = self._build_batch_query_cte(
+            info=info,
+            embeddings=embeddings,
             top_k=top_k,
-            collection_name=collection_name,
             source_ids=source_ids,
             keep_best=keep_best,
-            include_content=include_content,
         )
-        out = results[0]
-        for item in out:
-            item.query_index = None
-        return out
-
-    async def query_batch(
-        self,
-        texts: list[str],
-        top_k: int = 5,
-        collection_name: Optional[str] = None,
-        source_ids: Optional[list[str]] = None,
-        keep_best: bool = False,
-        include_content: bool = True,
-    ) -> list[list[RagServiceResult]]:
-        """
-        Query one collection for similarities to multiple input texts in a
-        single database call (CROSS JOIN LATERAL over an unnested vector array).
-        """
-        if not texts:
-            return []
-        collection_name = collection_name or "default"
-
-        async with self.session_maker() as session:
-            embeddings, stats = await self.embedding_client.compute_embeddings(
-                texts=texts,
-                normalizer=self.normalizer,
+        if source_ids:
+            await self._enable_filtered_scan(session)
+        query_sql = (
+            f"WITH {cte_sql} SELECT * FROM rag_results "
+            f"ORDER BY query_idx ASC, distance ASC"
+        )
+        rows = (await session.execute(sql_text(query_sql).bindparams(**params))).all()
+        batches: list[list[dict]] = [[] for _ in embeddings]
+        for row in rows:
+            batches[int(row.query_idx) - 1].append(
+                {
+                    "id": row.id,
+                    "source_id": row.source_id,
+                    "content": row.content,
+                    "metadata": row.metadata,
+                    "created_at": row.created_at,
+                    "updated_at": row.updated_at,
+                    "distance": row.distance,
+                }
             )
-            session.add(stats)
+        return batches
 
-            info = await self._load_collection(session, collection_name)
-            if info is None:
-                await session.commit()  # persist embedding stats
-                return [[] for _ in texts]
-
-            cte_sql, params = self._build_batch_query_cte(
-                info=info,
-                embeddings=embeddings,
-                top_k=top_k,
-                source_ids=source_ids,
-                keep_best=keep_best,
-            )
-            query_sql = (
-                f"WITH {cte_sql} SELECT * FROM rag_results "
-                f"ORDER BY query_idx ASC, distance ASC"
-            )
-            result = await session.execute(sql_text(query_sql).bindparams(**params))
-            rows = result.all()
-            await session.commit()
-
-            results_by_query: dict[int, list[RagServiceResult]] = {
-                i: [] for i in range(len(texts))
-            }
-            for row in rows:
-                idx = int(row.query_idx) - 1
-                results_by_query[idx].append(
-                    self._map_row(row, info, idx, include_content)
-                )
-            return [results_by_query[i] for i in range(len(texts))]
+    # Postgres-only queries
 
     def build_batch_query_cte(
         self,
@@ -740,7 +589,7 @@ class PostgresRagService(BaseRagService):
         vector_parts = []
         for i, embedding in enumerate(embeddings):
             params[f"vector_{i}"] = _vector_literal(embedding)
-            vector_parts.append(f"CAST(:vector_{i} AS public.vector)")
+            vector_parts.append(f"CAST(:vector_{i} AS public.{info.vector_type})")
         vector_array = f"ARRAY[{', '.join(vector_parts)}]"
 
         where_clauses = ["TRUE"]
@@ -814,6 +663,8 @@ class PostgresRagService(BaseRagService):
         join_columns: Optional[list[str]] = None,
         additional_where: Optional[str] = None,
         keep_best: bool = False,
+        *,
+        stats_receiver: Any = None,
     ) -> list[list[dict]]:
         """
         Query one collection and join with another table in a single SQL query.
@@ -828,16 +679,13 @@ class PostgresRagService(BaseRagService):
         collection_name = collection_name or "default"
 
         async with self.session_maker() as session:
-            embeddings, stats = await self.embedding_client.compute_embeddings(
-                texts=texts,
-                normalizer=self.normalizer,
-            )
-            session.add(stats)
-
             info = await self._load_collection(session, collection_name)
+            await session.commit()
             if info is None:
-                await session.commit()
                 return [[] for _ in texts]
+            embeddings = await self._compute_embeddings(
+                texts, info.model, stats_receiver
+            )
 
             source_filter = None
             if join_table and additional_where:
@@ -848,6 +696,7 @@ class PostgresRagService(BaseRagService):
                         AND {additional_where}
                     )
                 """
+                await self._enable_filtered_scan(session)
 
             cte_sql, params = self._build_batch_query_cte(
                 info=info,
@@ -905,16 +754,11 @@ class PostgresRagService(BaseRagService):
             return [[0.0 for _ in source_ids] for _ in texts]
 
         async with self.session_maker() as session:
-            embeddings, stats = await self.embedding_client.compute_embeddings(
-                texts=texts,
-                normalizer=self.normalizer,
-            )
-            session.add(stats)
-
             info = await self._load_collection(session, collection_name)
+            await session.commit()
             if info is None:
-                await session.commit()
                 return [[0.0 for _ in source_ids] for _ in texts]
+            embeddings = await self._compute_embeddings(texts, info.model)
 
             agg = "min" if method == "min" else "avg"
             params: dict = {"source_ids": source_ids}
@@ -922,8 +766,8 @@ class PostgresRagService(BaseRagService):
             for i, emb in enumerate(embeddings):
                 params[f"vector_{i}"] = _vector_literal(emb)
                 dist_cols.append(
-                    f"{agg}(embedding <=> CAST(:vector_{i} AS public.vector)) "
-                    f"AS dist_{i}"
+                    f"{agg}(embedding <=> CAST(:vector_{i} AS "
+                    f"public.{info.vector_type})) AS dist_{i}"
                 )
             query_sql = (
                 f"SELECT source_id, {', '.join(dist_cols)} "
@@ -960,7 +804,8 @@ class PostgresRagService(BaseRagService):
             mean_vector = (
                 await session.execute(
                     sql_text(
-                        f"SELECT avg(embedding) FROM {self._qualified(info.table_name)}"
+                        f"SELECT avg(embedding)::text "
+                        f"FROM {self._qualified(info.table_name)}"
                     )
                 )
             ).scalar()
@@ -968,86 +813,3 @@ class PostgresRagService(BaseRagService):
                 raise Exception("No embeddings found in RAG index.")
             await session.commit()
             return Normalizer(center_vector=_parse_vector(mean_vector))
-
-    # Bulk export
-
-    async def iter_entries(
-        self, collection_name: str, batch_size: int = 500
-    ) -> AsyncIterator[dict]:
-        """
-        Iterate all entries of a collection (including embeddings) in stable
-        ``id`` order using keyset pagination. Yields dicts with keys:
-        id, source_id, content, embedding, rag_metadata, created_at, updated_at.
-        """
-        async with self.session_maker() as session:
-            info = await self._load_collection(session, collection_name)
-            if info is None:
-                await session.commit()
-                return
-            params: dict = {"batch_size": batch_size}
-            while True:
-                where = "WHERE id > :last_id" if "last_id" in params else ""
-                query_sql = (
-                    f"SELECT id, source_id, content, embedding::text AS embedding, "
-                    f"metadata, created_at, updated_at "
-                    f"FROM {self._qualified(info.table_name)} {where} "
-                    f"ORDER BY id ASC LIMIT :batch_size"
-                )
-                rows = (
-                    await session.execute(sql_text(query_sql).bindparams(**params))
-                ).all()
-                if not rows:
-                    # Close the read transaction (see count_entries).
-                    await session.commit()
-                    return
-                for row in rows:
-                    yield {
-                        "id": row.id,
-                        "source_id": row.source_id,
-                        "content": row.content,
-                        "embedding": _parse_vector(row.embedding),
-                        "rag_metadata": row.metadata or {},
-                        "created_at": row.created_at,
-                        "updated_at": row.updated_at,
-                    }
-                params["last_id"] = rows[-1].id
-
-    async def count_entries(self, collection_name: str) -> int:
-        """Number of entries in a collection (0 if it doesn't exist)."""
-        async with self.session_maker() as session:
-            info = await self._load_collection(session, collection_name)
-            if info is None:
-                await session.commit()
-                return 0
-            count = (
-                await session.execute(
-                    sql_text(f"SELECT count(*) FROM {self._qualified(info.table_name)}")
-                )
-            ).scalar() or 0
-            # Close the read transaction: shared-session factories (e.g. the
-            # backoffice) would otherwise pin a pooled connection.
-            await session.commit()
-            return count
-
-    async def get_embeddings_by_ids(
-        self, collection_name: str, ids: list[UUID]
-    ) -> dict[UUID, list[float]]:
-        """Fetch embeddings for specific entry ids within a collection."""
-        if not ids:
-            return {}
-        async with self.session_maker() as session:
-            info = await self._load_collection(session, collection_name)
-            if info is None:
-                await session.commit()
-                return {}
-            rows = (
-                await session.execute(
-                    sql_text(
-                        f"SELECT id, embedding::text AS embedding "
-                        f"FROM {self._qualified(info.table_name)} "
-                        f"WHERE id = ANY(:ids)"
-                    ).bindparams(ids=ids)
-                )
-            ).all()
-            await session.commit()
-            return {row.id: _parse_vector(row.embedding) for row in rows}

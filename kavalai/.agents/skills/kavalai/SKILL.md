@@ -26,14 +26,22 @@ pip install "kavalai[common]"
 
 Python 3.12+. The **base** install is deliberately small and Pyodide-compatible,
 so it contains no provider SDKs. `common` is the normal install for anything
-that is not running in a browser.
+that is not running in a browser; a service that only runs and serves
+workflows installs `runtime`.
 
 | Extra | What it adds |
 |---|---|
-| `common` | Provider SDKs, RAG/embeddings, Postgres drivers, MCP, the REST/SSE servers, the bundled web tools |
+| `runtime` | Provider SDKs, MCP, FastAPI, asyncpg (agent database, pgvector RAG, migrations), sqlite-vector |
+| `webtools` | crawl4ai (Playwright, patchright), behind `crawl_url` / `web_search` |
+| `fastembed` | Local embedding models (onnxruntime) |
+| `backoffice` | Authlib, itsdangerous, scikit-learn, sse-starlette |
+| `common` | All four of the above |
 | `common_web` | What the core needs additionally under Pyodide/WebLLM (`pyodide-http`) |
 | `gpu` | `fastembed-gpu` for local embedding on an NVIDIA GPU |
 | `test` / `docs` | Test tooling; Sphinx and the notebook kernel |
+
+Extras are grouped by weight, not by provider: changing a workflow's
+`provider/model` string never needs a reinstall.
 
 `gpu` is **not** additive to `common`: `fastembed-gpu` is the same import name
 as `fastembed` built against `onnxruntime-gpu`, so the two cannot coexist. You
@@ -48,7 +56,8 @@ No code change follows — FastEmbed defaults to `cuda=Device.AUTO` and picks th
 CUDA execution provider when there is one.
 
 When an import fails with *"requires the optional 'openai' package. Install it
-with: pip install kavalai[common]"*, the message is right: install the extra.
+with: pip install "kavalai[runtime]""*, the message is right: install the extra
+it names.
 Provider clients are resolved lazily through `__getattr__` precisely so that
 `import kavalai` works where no SDK is installed. Do not "fix" it by importing
 the SDK directly.

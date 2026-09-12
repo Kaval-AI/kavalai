@@ -13,23 +13,31 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-import { Component, OnInit } from '@angular/core';
+import { Component, OnDestroy, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, RouterModule } from '@angular/router';
+import { Subscription } from 'rxjs';
 import { AgentService } from '../../services/agent-service';
 import { UserService } from '../../services/user-service';
 import { LLMCallStat } from '../../models/llm-call-stat';
 import { JsonTreeComponent } from '../json-tree/json-tree';
 
+/**
+ * Lists model calls, newest first. The `call_type`, `session_id` and `run_id`
+ * query parameters narrow the list, so a run's calls are one link away from
+ * the run and from any call it made.
+ */
 @Component({
   selector: 'app-llm-call-stats-page',
   standalone: true,
-  imports: [CommonModule, JsonTreeComponent],
+  imports: [CommonModule, RouterModule, JsonTreeComponent],
   templateUrl: './llm-call-stats-page.html',
   styleUrl: './llm-call-stats-page.css'
 })
-export class LlmCallStatsPage implements OnInit {
+export class LlmCallStatsPage implements OnInit, OnDestroy {
   callType: string | null = null;
+  sessionId: string | null = null;
+  runId: string | null = null;
   projectId: string | null = null;
   stats: LLMCallStat[] = [];
   loading = false;
@@ -38,6 +46,9 @@ export class LlmCallStatsPage implements OnInit {
   offset = 0;
   hasMore = true;
 
+  private subscriptions = new Subscription();
+  private loadSubscription: Subscription | null = null;
+
   constructor(
     private route: ActivatedRoute,
     private agentService: AgentService,
@@ -45,36 +56,64 @@ export class LlmCallStatsPage implements OnInit {
   ) {}
 
   ngOnInit(): void {
-    this.route.queryParams.subscribe(params => {
+    this.subscriptions.add(this.route.queryParams.subscribe(params => {
       this.callType = params['call_type'] || null;
-      this.userService.userDetails.subscribe(user => {
-        if (user && user.active_project_id) {
-          this.projectId = user.active_project_id;
-          this.offset = 0;
-          this.stats = [];
-          this.loadStats();
-        }
-      });
-    });
+      this.sessionId = params['session_id'] || null;
+      this.runId = params['run_id'] || null;
+      this.reload();
+    }));
+    this.subscriptions.add(this.userService.userDetails.subscribe(user => {
+      const projectId = user?.active_project_id && user.active_project_id !== 'None'
+        ? user.active_project_id
+        : null;
+      if (projectId !== this.projectId) {
+        this.projectId = projectId;
+        this.reload();
+      }
+    }));
+  }
+
+  ngOnDestroy(): void {
+    this.subscriptions.unsubscribe();
+    this.loadSubscription?.unsubscribe();
+  }
+
+  get isFiltered(): boolean {
+    return !!(this.callType || this.sessionId || this.runId);
+  }
+
+  reload(): void {
+    this.offset = 0;
+    this.stats = [];
+    this.hasMore = true;
+    this.loadStats();
   }
 
   loadStats(): void {
     if (!this.projectId) return;
 
+    // A filter change supersedes a page still in flight.
+    this.loadSubscription?.unsubscribe();
     this.loading = true;
-    this.agentService.getLLMCallStats(this.projectId, this.callType || undefined, this.limit, this.offset)
-      .subscribe({
-        next: (data) => {
-          this.stats = [...this.stats, ...data];
-          this.loading = false;
-          this.hasMore = data.length === this.limit;
-        },
-        error: (err) => {
-          this.error = 'Failed to load LLM call stats';
-          this.loading = false;
-          console.error(err);
-        }
-      });
+    this.error = null;
+    this.loadSubscription = this.agentService.getLLMCallStats(
+      this.projectId,
+      this.callType || undefined,
+      this.limit,
+      this.offset,
+      { sessionId: this.sessionId || undefined, runId: this.runId || undefined }
+    ).subscribe({
+      next: (data) => {
+        this.stats = [...this.stats, ...data];
+        this.loading = false;
+        this.hasMore = data.length === this.limit;
+      },
+      error: (err) => {
+        this.error = 'Failed to load model calls';
+        this.loading = false;
+        console.error(err);
+      }
+    });
   }
 
   loadMore(): void {

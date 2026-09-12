@@ -330,3 +330,35 @@ def test_builder_rag_query_matches_the_yaml_node():
     assert isinstance(node, RagQueryNode)
     assert (node.top_k, node.store) == (3, "content")
     assert (graph.rag_service, graph.rag_collection) == ("docs", "handbook")
+
+
+def test_builder_passes_the_history_window_and_the_similarity_threshold():
+    from kavalai import WorkflowBuilder
+
+    graph = (
+        WorkflowBuilder("wf")
+        .data_type("input", {"user_message": str})
+        .data_type("output", {"agent_response": str})
+        .start(next="retrieve")
+        .rag_query(
+            "retrieve",
+            query="{{ context.input.user_message }}",
+            output="docs",
+            next="answer",
+            min_similarity=0.4,
+        )
+        .llm(
+            "answer",
+            prompt="p",
+            output="output",
+            next="e",
+            history_limit=3,
+            history_max_chars=500,
+        )
+        .end(name="e", output="output")
+        .build()
+    )
+
+    assert graph.node_map["retrieve"].min_similarity == 0.4
+    answer = graph.node_map["answer"]
+    assert (answer.history_limit, answer.history_max_chars) == (3, 500)

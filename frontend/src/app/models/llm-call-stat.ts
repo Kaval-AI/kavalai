@@ -19,6 +19,10 @@ export interface LLMCallStat {
   call_type: string;
   model: string;
   agent_id: string | null;
+  /** The conversation of the run that made the call; not a foreign key. */
+  session_id: string | null;
+  /** The run that made the call — a workflow's rag_query embeddings included. */
+  run_id: string | null;
   response_code: number | null;
   prompt_tokens: number | null;
   completion_tokens: number | null;
@@ -30,4 +34,11 @@ export interface LLMCallStat {
   response_data: any | null;
   created_at: string;
   updated_at: string;
+}
+
+/** Narrows the model call list to one agent, conversation or run. */
+export interface LLMCallStatFilters {
+  agentId?: string;
+  sessionId?: string;
+  runId?: string;
 }

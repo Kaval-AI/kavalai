@@ -18,6 +18,7 @@ export interface Project {
   id: string;
   name: string;
   description?: string;
+  db_type?: 'postgresql' | 'sqlite';
   db_host?: string;
   db_port?: number;
   db_user?: string;

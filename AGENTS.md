@@ -34,12 +34,15 @@ Two components:
 | `kavalai/workflow/` | Engine v2: `models.py` (the graph), `engine.py`, `builder.py`, `expressions.py`, `render.py`, `tasklog/` |
 | `kavalai/llm_clients/` | OpenAI, Gemini, Anthropic, Ollama and in-browser clients behind one streaming interface; `registry.py` makes that set extensible |
 | `kavalai/eval/` | Evaluation against a **running** agent server: `base.py` (`AgentEvaluator`, `EvalResult`), `simple_evaluator.py` (literal matchers), `judge_evaluator.py` (a model grades a plain-language criterion), `eval_runner.py` (YAML cases + the `kavalai-eval` console script) |
-| `kavalai/rag/` | `BaseRagService` (three capability tiers), `PostgresRagService` (pgvector), `SqliteRagService` (portable file index) |
+| `kavalai/rag/` | `BaseRagService` (three capability tiers); `CollectionRagService` in `collections.py` is the shared storage model (`rag_collections` registry, whose model is authoritative, + a table per collection; `provision=False` for runtime roles without DDL) with statement hooks that `PostgresRagService` (pgvector) and `SqliteRagService` (sqlite-vector file) implement; `rag_service_from_uri` picks one by URI scheme |
 | `kavalai/tools/` | Bundled tools: browser, web search, HTTP |
-| `kavalai/migrations/` | Alembic sets: `agents` and `backoffice` |
+| `kavalai/migrations/` | Alembic sets: `agents` and `backoffice`; both apply on Postgres and SQLite (batch mode for ALTERs, `uuid_column()` for UUIDs) |
 | `backoffice/`, `frontend/` | Management API and Angular UI |
-| `tests/` | Pytest suite for the library; mock MCP servers in `tests/helpers/`. An example's tests live beside it under `examples/`, and `testpaths` covers both |
+| `tests/` | Pytest suite for the library; mock MCP servers in `tests/helpers/`. An example's tests live beside it under `examples/`, a root `tools/` module's in its `tests/` subfolder, and `testpaths` covers all three |
 | `docs/`, `notebooks/` | Sphinx documentation; the five tutorial notebooks are the source of truth |
+| `tools/` | Standalone product tooling outside the wheel; `zerocostchatbot/` scrapes a site into a resumable pages database (`python -m tools.zerocostchatbot.scrape`) and builds a RAG index from it (`python -m tools.zerocostchatbot.build_index`, fastembed by default) and compiles a static demo folder (`python -m tools.zerocostchatbot.make_demo`) from `archive.html`, the in-browser viewer of a pages database with the chat widget answering from its RAG index |
+| `kavalai/widget/` | Production chat widget shipped in the wheel (`widget_dir()`/`asset_path()`); floating/inline, `--kcb-*` theming, `texts` i18n, default-on AI disclosure label, `onFeedback` thumbs, `on()` events, agent-server SSE connector with headers/onResponse/storage; reference `docs/reference/widget.rst`; tests via `node --test kavalai/widget/tests/kaval-chatbot.test.js` |
+| `kavalai/net.py`, `kavalai/testing.py`, `kavalai/text.py` | The SSRF guard the bundled web tools use; offline test doubles (`ScriptedLlmClient`, `FakeEmbeddingClient`, `fake_providers`); HTML parsing and chunking for RAG indexes. None is imported by `kavalai/__init__.py` |
 | `examples/` | Runnable examples; `green_village/` (RAG chatbot, port 25000), `bakery/` (a YAML workflow with side effects, ports 25100/25101) and `business_info_agent/` (web research: search, crawl, summarise, port 25200) each ship an `eval_cases.yaml`; `support_agent/support_agent.yaml` is the branching-DAG example the docs load |
 
 ## Invariants
@@ -77,14 +80,20 @@ check a change against the list before proposing it.
    `SQLITE_SCHEMA_VERSION` on any schema change, or stale browser databases
    will not be rebuilt.
 6. **The base package stays Pyodide-compatible.** No greenlet, no native
-   extensions beyond the prebuilt Pyodide packages. Everything else goes in the
-   `common` extra.
+   extensions beyond the prebuilt Pyodide packages. Everything else goes in an
+   extra grouped by weight — `runtime`, `webtools`, `fastembed`, `backoffice` —
+   which `common` combines. Install hints name the narrowest one.
 7. **Every boundary validates, and failures are loud.** An unresolvable prompt
    reference raises; a tool result that does not match its declared model
    raises; duplicate tool or server names raise at registration.
 8. **Models are schema-less.** The target schema is applied per engine through
    `schema_translate_map`. Raw SQL and reflection bypass it and must qualify
    the schema explicitly.
+9. **Recording less is explicit, and an empty filter matches nothing.**
+   `record_nodes`, `record_payloads` and `record_context` are options a
+   deployer sets; nothing else drops a record, and an unknown `llm_kwargs` key
+   fails the load. `source_ids=[]` returns no hits and `agent_ids=[]` lists no
+   sessions — a filter computed to be empty never widens into everything.
 
 ## Working copy and git
 

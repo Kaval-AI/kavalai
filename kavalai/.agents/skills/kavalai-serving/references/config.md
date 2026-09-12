@@ -45,6 +45,9 @@ Read by `python -m kavalai.server` and `python -m kavalai.migrate_db agents`.
 |---|---|
 | `KAVALAI_DB_URI` | e.g. `postgresql://user:pass@host:5432/kavalai` |
 | `KAVALAI_DB_SCHEMA` | Schema holding the runtime tables. Default `public`; `agents` by convention |
+| `KAVALAI_RAG_MODEL` | Embedding model of the `default` RAG service. Setting it registers that service without a setup module |
+| `KAVALAI_RAG_URI` | Where that index lives, as a database URI. Required with `KAVALAI_RAG_MODEL`; never assumed to be the agent database |
+| `KAVALAI_RAG_SCHEMA` | Schema of the RAG tables. Optional |
 | `KAVALAI_DB_POOL_SIZE` | SQLAlchemy pool size. Default `0` |
 | `KAVALAI_DB_MAX_OVERFLOW` | Pool overflow. Default `0` |
 | `KAVALAI_SQL_ECHO` | Log every SQL statement. Default `false`. Useful once, noisy always |

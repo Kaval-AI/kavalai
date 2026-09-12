@@ -79,10 +79,13 @@ class BrowserLLMClient(BaseLlmClient):
 
         window.kavalBrowserLLM.chat(requestJson) -> Promise<resultJson>
 
-    where ``requestJson`` is a JSON string of ``{model, messages, temperature,
-    top_p, response_format?}`` and ``resultJson`` is a JSON string of either
-    ``{content, usage}`` or ``{error}``. Exchanging plain JSON strings keeps the
-    Python<->JS boundary free of proxy-conversion surprises.
+    where ``requestJson`` is a JSON string of ``{model, messages, temperature?,
+    top_p?, max_tokens?, response_format?}`` and ``resultJson`` is a JSON
+    string of either ``{content, usage, finish_reason?}`` or ``{error}``.
+    Exchanging plain JSON strings keeps the Python<->JS boundary free of
+    proxy-conversion surprises. A ``finish_reason`` of ``"length"`` raises
+    :class:`~kavalai.llm_clients.base_client.OutputTruncatedError`; a bridge
+    that does not report the field cannot signal truncation.
     """
 
     provider = "browser"
@@ -130,6 +133,8 @@ class BrowserLLMClient(BaseLlmClient):
             request["temperature"] = self.parameters.temperature
         if self.parameters.top_p is not None:
             request["top_p"] = self.parameters.top_p
+        if self.parameters.max_output_tokens is not None:
+            request["max_tokens"] = self.parameters.max_output_tokens
 
         if response_model is not None:
             # WebLLM (and OpenAI-compatible engines) constrain generation to the
@@ -168,10 +173,18 @@ class BrowserLLMClient(BaseLlmClient):
             raise LlmClientException(f"In-browser LLM error: {data['error']}")
 
         content = data.get("content") or ""
+        usage = data.get("usage") or {}
         await value_streamer.stream_partial(content)
+        if data.get("finish_reason") == "length":
+            raise self._output_truncated(
+                "length",
+                content,
+                request_data=request,
+                prompt_tokens=usage.get("prompt_tokens"),
+                completion_tokens=usage.get("completion_tokens"),
+            )
         await value_streamer.stream_complete()
 
-        usage = data.get("usage") or {}
         await self._record_completed_call(
             request_data=request,
             response_data=content,

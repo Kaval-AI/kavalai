@@ -124,6 +124,13 @@ rather than rendering empty, so a typo fails loudly instead of silently
 weakening the prompt. Do not write `{% if %}`, filters, or `{{ x | default }}`
 — they are not supported.
 
+Rendering is **one pass**: an inserted value is never rendered again. Per-run
+values for *declared* templates come from Python —
+`engine.run(data, templates={"house_style": owner_text})` — need no escaping,
+and are recorded with the run. Never build a workflow by string-substituting
+user or owner text into the YAML, and never accept template values from the
+HTTP request body.
+
 (The `Agent`'s own system-prompt template *is* Jinja2. That is a different
 template, and the distinction does not generalise to node prompts.)
 
@@ -223,7 +230,12 @@ the lifespan hook.
 is **opt-in per node**: `stream_output`, plus `stream_delta` to send only new
 text (prefer it for long outputs), plus agent-only `stream_instructions` and
 `stream_partials` (a debug firehose). Settable from YAML and from
-`WorkflowBuilder`.
+`WorkflowBuilder`. A `restart` event comes only from a node that streams.
+
+`run(..., timeout=)` / `run_stream(..., timeout=)` — or the engine's
+`run_timeout` — cancels a run after that many seconds and records it as failed
+with `WorkflowTimeoutError`. Do not wrap the generator in `asyncio.timeout`
+yourself: that does not record the run.
 
 ## The Python builder
 
@@ -248,6 +260,28 @@ engine = workflow.build_engine(agent_service=service)
 `build()` returns the `WorkflowGraph`; `build_engine(**kwargs)` returns a ready
 engine. Prefer YAML for a graph a human will read and the backoffice will
 render; prefer the builder when the graph is generated.
+
+## Testing without a model
+
+**Do not hand-write a `BaseLlmClient` stub.** `kavalai.testing` replaces the
+model and nothing else, so the real engine, streaming and validation run
+offline:
+
+```python
+from kavalai.testing import ScriptedLlmClient, fake_providers
+
+model = ScriptedLlmClient([{"intent": "refund"}, {"agent_response": "Done."}])
+engine = WorkflowEngine.from_yaml_path("workflow.yaml", client_factory=model)
+state = await engine.run({"user_message": "I want a refund"})
+assert state.trace == ["begin", "classify", "route", "handle_refund", "finish"]
+```
+
+Replies are consumed in the order the nodes run and validated by the engine,
+so a reply that does not fit the data type fails as a model's would;
+`model.calls` records every prompt. `with fake_providers(llm=model,
+name="openai"):` makes an unchanged `openai/...` workflow resolve to the
+script, and `model="fake/x"` on a RAG service to a hashing
+`FakeEmbeddingClient`; the registry is restored on exit.
 
 ## Checklist before you hand a workflow over
 

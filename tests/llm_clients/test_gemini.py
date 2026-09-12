@@ -15,6 +15,13 @@ from kavalai.llm_clients.base_client import (
     LlmClientException,
     LlmClientParameters,
     ModelStatsReceiver,
+    OutputTruncatedError,
+)
+from tests.llm_clients.truncation_cases import (
+    StatsCollector,
+    streamed_text_over_the_cap_raises,
+    structured_answer_fits_the_cap,
+    structured_answer_over_the_cap_raises,
 )
 
 
@@ -25,17 +32,31 @@ class SimpleResponse(BaseModel):
 USER_HISTORY = ChatHistory(messages=[ChatMessage(role="user", content="Say 'Hello'")])
 
 
-def text_chunk(*texts, thoughts=(), prompt_tokens=None, completion_tokens=None):
+def text_chunk(
+    *texts,
+    thoughts=(),
+    prompt_tokens=None,
+    completion_tokens=None,
+    thoughts_tokens=None,
+    finish_reason=None,
+):
     """A generate_content_stream chunk built from real Gemini types."""
     parts = [types.Part(text=t, thought=True) for t in thoughts]
     parts += [types.Part(text=t) for t in texts]
     usage = None
     if prompt_tokens is not None:
         usage = types.GenerateContentResponseUsageMetadata(
-            prompt_token_count=prompt_tokens, candidates_token_count=completion_tokens
+            prompt_token_count=prompt_tokens,
+            candidates_token_count=completion_tokens,
+            thoughts_token_count=thoughts_tokens,
         )
     return types.GenerateContentResponse(
-        candidates=[types.Candidate(content=types.Content(role="model", parts=parts))],
+        candidates=[
+            types.Candidate(
+                content=types.Content(role="model", parts=parts),
+                finish_reason=finish_reason,
+            )
+        ],
         usage_metadata=usage,
     )
 
@@ -160,10 +181,88 @@ async def test_reasoning_effort_streams_thoughts_separately():
     streamer = await client.stream_chat_completions(chat_history=USER_HISTORY)
     contents = [content async for content in streamer]
 
-    assert sent_config(client).thinking_config.include_thoughts is True
+    thinking_config = sent_config(client).thinking_config
+    assert thinking_config.include_thoughts is True
+    assert thinking_config.thinking_level == types.ThinkingLevel.LOW
     by_name = {(c.name, c.type): c.value for c in contents}
     assert by_name[("thought", "partial")] == "pondering"
     assert by_name[("response", "complete")] == "answer"
+
+
+@pytest.mark.asyncio
+async def test_the_output_cap_is_sent_only_when_set():
+    unset = make_client(chunks=[text_chunk("hi")])
+    await unset.chat_completions(chat_history=USER_HISTORY)
+    assert sent_config(unset).max_output_tokens is None
+
+    capped = make_client(
+        chunks=[text_chunk("hi")],
+        parameters=LlmClientParameters(max_output_tokens=300),
+    )
+    await capped.chat_completions(chat_history=USER_HISTORY)
+    assert sent_config(capped).max_output_tokens == 300
+
+
+@pytest.mark.asyncio
+async def test_a_stop_at_max_tokens_raises_and_is_recorded():
+    stats_receiver = CollectingStats()
+    client = make_client(
+        chunks=[
+            text_chunk('{"answer": '),
+            text_chunk(
+                '"Pa',
+                prompt_tokens=9,
+                completion_tokens=6,
+                thoughts_tokens=10,
+                finish_reason=types.FinishReason.MAX_TOKENS,
+            ),
+        ],
+        parameters=LlmClientParameters(max_output_tokens=16),
+        stats_receiver=stats_receiver,
+    )
+
+    with pytest.raises(OutputTruncatedError) as caught:
+        await client.chat_completions(
+            chat_history=USER_HISTORY, response_model=SimpleResponse
+        )
+
+    error = caught.value
+    assert (error.reason, error.max_output_tokens) == ("MAX_TOKENS", 16)
+    assert error.partial_output == '{"answer": "Pa'
+    (stat,) = stats_receiver.stats
+    assert (stat.prompt_tokens, stat.completion_tokens) == (9, 6)
+    assert stat.reasoning_tokens == 10
+
+
+@pytest.mark.asyncio
+async def test_a_cap_spent_on_thoughts_alone_records_zero_output():
+    stats_receiver = CollectingStats()
+    client = make_client(
+        chunks=[
+            text_chunk(
+                thoughts=["pondering"],
+                prompt_tokens=9,
+                thoughts_tokens=16,
+                finish_reason=types.FinishReason.MAX_TOKENS,
+            )
+        ],
+        parameters=LlmClientParameters(max_output_tokens=16, reasoning_effort="high"),
+        stats_receiver=stats_receiver,
+    )
+
+    with pytest.raises(OutputTruncatedError, match="No visible output"):
+        await client.chat_completions(chat_history=USER_HISTORY)
+
+    (stat,) = stats_receiver.stats
+    assert stat.completion_tokens == 0
+
+
+@pytest.mark.asyncio
+async def test_a_normal_stop_completes():
+    client = make_client(
+        chunks=[text_chunk("done", finish_reason=types.FinishReason.STOP)]
+    )
+    assert await client.chat_completions(chat_history=USER_HISTORY) == "done"
 
 
 @pytest.mark.asyncio
@@ -319,3 +418,44 @@ async def test_gemini_structured_output_against_the_real_api():
 
     assert contents[-1].type == "complete"
     assert "Paris" in json.loads(contents[-1].value)["answer"]
+
+
+gemini_key = pytest.mark.skipif(
+    not os.getenv("GEMINI_API_KEY"), reason="GEMINI_API_KEY not set"
+)
+
+
+def real_client(stats, **parameters):
+    return GeminiClient(
+        model="gemini-3.5-flash",
+        llm_client_parameters=LlmClientParameters(timeout_seconds=60.0, **parameters),
+        model_stats_receiver=stats,
+    )
+
+
+@pytest.mark.integration
+@gemini_key
+async def test_gemini_structured_answer_within_a_generous_cap():
+    stats = StatsCollector()
+    client = real_client(stats, reasoning_effort="low", max_output_tokens=1024)
+    await structured_answer_fits_the_cap(client, stats, cap=1024)
+    (stat,) = stats.calls
+    # Gemini counts thoughts apart from the answer; the cap covers both.
+    assert stat.completion_tokens + (stat.reasoning_tokens or 0) <= 1024
+
+
+@pytest.mark.integration
+@gemini_key
+async def test_gemini_structured_answer_over_the_cap_raises():
+    stats = StatsCollector()
+    client = real_client(stats, reasoning_effort="minimal", max_output_tokens=40)
+    error = await structured_answer_over_the_cap_raises(client, stats, cap=40)
+    assert error.reason == "MAX_TOKENS"
+
+
+@pytest.mark.integration
+@gemini_key
+async def test_gemini_streamed_text_over_the_cap_raises():
+    stats = StatsCollector()
+    client = real_client(stats, reasoning_effort="minimal", max_output_tokens=40)
+    await streamed_text_over_the_cap_raises(client, stats, cap=40)

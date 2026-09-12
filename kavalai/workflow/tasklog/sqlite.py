@@ -12,6 +12,11 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+
+``_SCHEMA`` mirrors the ``tasks`` and ``model_call_stats`` tables of
+:mod:`kavalai.db` using TEXT UUIDs and JSON-encoded payload columns.
+``_ADDED_COLUMNS`` lists the columns added since the first release of this
+logger; a file written by an older version gains them when it is opened.
 """
 
 import asyncio
@@ -22,11 +27,9 @@ from uuid import uuid4
 import aiosqlite
 
 from kavalai.utils import to_plain
-from kavalai.workflow.tasklog.base import TaskLogger
+from kavalai.workflow.tasklog.base import DEFAULT_MAX_PAYLOAD_BYTES, TaskLogger
 from kavalai.llm_clients.base_client import ModelCallStat
 
-# Mirrors the Postgres ``tasks`` and ``model_call_stats`` tables (db.py) using
-# TEXT UUIDs and JSON-encoded payload columns.
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS tasks (
     id TEXT PRIMARY KEY,
@@ -49,6 +52,8 @@ CREATE TABLE IF NOT EXISTS model_call_stats (
     call_type TEXT NOT NULL,
     model TEXT,
     agent_id TEXT,
+    session_id TEXT,
+    run_id TEXT,
     request_data TEXT,
     response_data TEXT,
     response_code INTEGER,
@@ -62,6 +67,8 @@ CREATE TABLE IF NOT EXISTS model_call_stats (
 );
 """
 
+_ADDED_COLUMNS = {"model_call_stats": ("session_id", "run_id")}
+
 
 def _dumps(value: Any) -> Optional[str]:
     if value is None:
@@ -73,11 +80,23 @@ class SqliteTaskLogger(TaskLogger):
     """Task logger storing node executions and model stats in SQLite.
 
     Defaults to a private ``:memory:`` database. Pass a file ``path`` to keep
-    the debugging data across runs.
+    the debugging data across runs. ``max_payload_bytes``, ``record_nodes``
+    and ``record_payloads`` are the :class:`TaskLogger` options.
     """
 
-    def __init__(self, path: str = ":memory:"):
-        super().__init__()
+    def __init__(
+        self,
+        path: str = ":memory:",
+        *,
+        max_payload_bytes: int = DEFAULT_MAX_PAYLOAD_BYTES,
+        record_nodes: bool = True,
+        record_payloads: bool = True,
+    ):
+        super().__init__(
+            max_payload_bytes,
+            record_nodes=record_nodes,
+            record_payloads=record_payloads,
+        )
         self.path = path
         self._conn: Optional[aiosqlite.Connection] = None
         self._connect_lock = asyncio.Lock()
@@ -94,11 +113,24 @@ class SqliteTaskLogger(TaskLogger):
                 conn = await aiosqlite.connect(self.path)
                 conn.row_factory = aiosqlite.Row
                 await conn.executescript(_SCHEMA)
+                await self._add_missing_columns(conn)
                 await conn.commit()
                 self._conn = conn
         return self._conn
 
-    async def _log_node_impl(
+    @staticmethod
+    async def _add_missing_columns(conn: aiosqlite.Connection) -> None:
+        """Bring a file written by an older version up to ``_SCHEMA``."""
+        for table, columns in _ADDED_COLUMNS.items():
+            async with conn.execute(f"PRAGMA table_info({table})") as cursor:
+                existing = {row["name"] for row in await cursor.fetchall()}
+            for column in columns:
+                if column not in existing:
+                    await conn.execute(
+                        f"ALTER TABLE {table} ADD COLUMN {column} TEXT"  # nosec B608
+                    )
+
+    async def write_node(
         self,
         *,
         run_id: Optional[str],
@@ -140,21 +172,29 @@ class SqliteTaskLogger(TaskLogger):
         )
         await conn.commit()
 
-    async def _log_model_call_impl(
-        self, stats: ModelCallStat, agent_id: Optional[str]
+    async def write_model_call(
+        self,
+        stats: ModelCallStat,
+        *,
+        agent_id: Optional[str],
+        session_id: Optional[str],
+        run_id: Optional[str],
     ) -> None:
         conn = await self._connect()
         await conn.execute(
             "INSERT INTO model_call_stats (id, call_type, model, agent_id, "
-            "request_data, response_data, response_code, prompt_tokens, "
-            "completion_tokens, total_tokens, cached_prompt_tokens, "
-            "reasoning_tokens, batch_size, duration_seconds) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "session_id, run_id, request_data, response_data, response_code, "
+            "prompt_tokens, completion_tokens, total_tokens, "
+            "cached_prompt_tokens, reasoning_tokens, batch_size, "
+            "duration_seconds) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 str(uuid4()),
                 stats.call_type,
                 stats.model,
                 agent_id,
+                session_id,
+                run_id,
                 stats.request_data,
                 stats.response_data,
                 stats.response_code,
@@ -181,13 +221,13 @@ class SqliteTaskLogger(TaskLogger):
         return await self._select("tasks", run_id, ("inputs", "output", "errors"))
 
     async def get_model_calls(self, run_id: Optional[str] = None) -> list[dict]:
-        """Return every logged model call as a plain dict.
+        """Return logged model calls, in table order, as plain dicts.
 
-        ``model_call_stats`` rows carry no ``run_id`` — the stats arrive from
-        the LLM client, which knows the agent but not the run — so ``run_id``
-        is accepted for symmetry with :meth:`get_tasks` and ignored.
+        Args:
+            run_id: Restrict to the calls one run made. ``None`` returns every
+                logged call.
         """
-        return await self._select("model_call_stats", None, ())
+        return await self._select("model_call_stats", run_id, ())
 
     async def _select(
         self, table: str, run_id: Optional[str], json_columns: tuple[str, ...]

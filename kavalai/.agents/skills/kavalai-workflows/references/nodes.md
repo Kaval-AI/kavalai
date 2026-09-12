@@ -11,7 +11,7 @@ type. This file is the exhaustive list; the skill body covers the rules.
 | `description` | no | Shown in the backoffice. |
 | `version` | no | Schema version. Defaults to `"2.0"`. |
 | `llm_model` | no | Default `provider/model` for every `llm` and `agent` node. Falls back to the engine's `default_llm_model` (`KAVALAI_DEFAULT_LLM_MODEL` under `python -m kavalai.server`). |
-| `llm_kwargs` | no | Defaults merged into `LlmClientParameters` (`temperature`, `top_p`, `timeout_seconds`, …). Nodes may override individual keys. |
+| `llm_kwargs` | no | Defaults merged into `LlmClientParameters` (`temperature`, `top_p`, `reasoning_effort`, `max_output_tokens`, `timeout_seconds`, …). Nodes may override individual keys. **An unknown key fails the load** — the output cap is `max_output_tokens`, never `max_tokens`. |
 | `rag_service` | no | Default RAG service **name** for `rag_query` nodes. Falls back to `"default"`. |
 | `rag_collection` | no | Default collection for `rag_query` nodes. |
 | `data_types` | yes | JSON-schema fragments compiled into Pydantic models. |
@@ -51,8 +51,10 @@ validated result stored under `output`.
 | `output` | Data type / context variable the result is written to. Required. |
 | `next` | Node to run afterwards. Required. |
 | `use_history` | Replay the session's chat history into the call. **Default `true`** — this is what gives a chatbot memory across turns. |
+| `history_limit` | Most recent messages sent, the current one included. Default `50`; `0` sends none. |
+| `history_max_chars` | Character ceiling on those messages; whole messages are dropped from the oldest end. Default: none. |
 | `llm_model` | Overrides the workflow default for this node. |
-| `llm_kwargs` | Per-node sampling/reliability overrides. |
+| `llm_kwargs` | Per-node sampling/reliability overrides. `max_output_tokens` caps the output; reaching it raises `OutputTruncatedError`, never a partial answer. |
 | `stream_output` | Emit this node's completion as `partial` events. Default `false`. |
 | `stream_delta` | Send only new text per `partial`. Prefer for long outputs. Default `false`. |
 
@@ -61,7 +63,8 @@ validated result stored under `output`.
 A multi-step, tool-using `Agent` loop inside the graph. Use it when the model
 should decide which tools to call; use `function` when you already know.
 
-Takes every `llm` key **except `use_history`**, plus:
+Takes every `llm` key **except `use_history`, `history_limit` and
+`history_max_chars`**, plus:
 
 | Key | Description |
 |---|---|
@@ -106,9 +109,14 @@ rendered exactly like an `llm` prompt.
 | `service` | Registered service name. Defaults to the graph's `rag_service`, then `"default"`. Never a connection string. |
 | `collection` | Defaults to the graph's `rag_collection`. |
 | `top_k` | Maximum hits. Default `5`. |
-| `source_ids` | Restrict to these source identifiers. |
+| `source_ids` | Restrict to these source identifiers. Absent = no filter; **`[]` matches nothing**. |
 | `keep_best` | Keep only the best hit per `source_id`, for documents indexed as many chunks. Default `false`. |
+| `min_similarity` | Drop hits below this cosine similarity (`-1`…`1`), after `top_k`. |
 | `store` | `results` (default) keeps the full hit list with scores and metadata, so `if`/`switch` can read them; `content` stores just the hit texts joined by blank lines, which is what a following prompt usually wants. |
+
+Whatever `store` says, the node records its hits (`id`, `source_id`,
+`similarity`, `metadata` — no text) on its task row and in its
+`node_completed` event's `output_data`.
 
 ## if
 

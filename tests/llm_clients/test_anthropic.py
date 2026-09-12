@@ -13,7 +13,16 @@ from kavalai.llm_clients.anthropic_client import (
 from kavalai.llm_clients.base_client import (
     ChatHistory,
     ChatMessage,
+    LlmClientException,
     LlmClientParameters,
+    ModelStatsReceiver,
+    OutputTruncatedError,
+)
+from tests.llm_clients.truncation_cases import (
+    StatsCollector,
+    streamed_text_over_the_cap_raises,
+    structured_answer_fits_the_cap,
+    structured_answer_over_the_cap_raises,
 )
 
 
@@ -52,7 +61,12 @@ def make_text_event(text):
 def make_final_message(stop_reason="end_turn", input_tokens=10, output_tokens=5):
     return MagicMock(
         stop_reason=stop_reason,
-        usage=MagicMock(input_tokens=input_tokens, output_tokens=output_tokens),
+        usage=MagicMock(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_read_input_tokens=0,
+            cache_creation_input_tokens=0,
+        ),
     )
 
 
@@ -247,6 +261,82 @@ async def test_anthropic_refusal_raises(anthropicclient):
             pass
 
 
+class CollectingStats(ModelStatsReceiver):
+    def __init__(self):
+        self.stats = []
+
+    def receive_model_stats(self, stats):
+        self.stats.append(stats)
+
+
+HI = ChatHistory(messages=[ChatMessage(role="user", content="Say 'Hi'")])
+
+
+@pytest.mark.asyncio
+async def test_the_output_cap_replaces_the_required_default():
+    client = AnthropicClient(
+        model="claude-haiku-4-5",
+        llm_client_parameters=LlmClientParameters(max_output_tokens=300),
+        api_key="fake",
+    )
+    stream_mock = mock_stream(client, [make_text_event("Hi")], make_final_message())
+
+    await client.chat_completions(chat_history=HI)
+
+    assert stream_mock.call_args.kwargs["max_tokens"] == 300
+
+
+@pytest.mark.asyncio
+async def test_a_stop_at_max_tokens_raises_and_is_recorded():
+    stats_receiver = CollectingStats()
+    client = AnthropicClient(
+        model="claude-haiku-4-5",
+        llm_client_parameters=LlmClientParameters(max_output_tokens=16),
+        model_stats_receiver=stats_receiver,
+        api_key="fake",
+    )
+    mock_stream(
+        client,
+        [make_text_event('{"answer": "Pa')],
+        make_final_message(stop_reason="max_tokens", input_tokens=20, output_tokens=16),
+    )
+
+    with pytest.raises(OutputTruncatedError) as caught:
+        await client.chat_completions(chat_history=HI, response_model=SimpleResponse)
+
+    error = caught.value
+    assert (error.reason, error.max_output_tokens) == ("max_tokens", 16)
+    assert error.partial_output == '{"answer": "Pa'
+    (stat,) = stats_receiver.stats
+    assert (stat.prompt_tokens, stat.completion_tokens) == (20, 16)
+    assert stat.response_code is None
+
+
+@pytest.mark.asyncio
+async def test_a_stop_at_the_required_default_names_it(anthropicclient):
+    mock_stream(anthropicclient, [], make_final_message(stop_reason="max_tokens"))
+
+    with pytest.raises(OutputTruncatedError) as caught:
+        await anthropicclient.chat_completions(chat_history=HI)
+
+    assert caught.value.max_output_tokens == DEFAULT_MAX_TOKENS
+    assert f"output cap of {DEFAULT_MAX_TOKENS} tokens" in str(caught.value)
+
+
+@pytest.mark.asyncio
+async def test_an_exhausted_context_window_raises(anthropicclient):
+    mock_stream(
+        anthropicclient,
+        [make_text_event("Once")],
+        make_final_message(stop_reason="model_context_window_exceeded"),
+    )
+
+    with pytest.raises(LlmClientException, match="context window") as caught:
+        await anthropicclient.chat_completions(chat_history=HI)
+
+    assert not isinstance(caught.value, OutputTruncatedError)
+
+
 @pytest.mark.asyncio
 async def test_anthropic_model_stats(anthropicclient):
     received = []
@@ -359,3 +449,41 @@ async def test_anthropic_structured_output_against_the_real_api():
 
     assert contents[-1].type == "complete"
     assert "Paris" in json.loads(contents[-1].value)["answer"]
+
+
+anthropic_key = pytest.mark.skipif(
+    not os.getenv("ANTHROPIC_API_KEY"), reason="ANTHROPIC_API_KEY not set"
+)
+
+
+def real_client(stats, **parameters):
+    return AnthropicClient(
+        model="claude-sonnet-5",
+        llm_client_parameters=LlmClientParameters(timeout_seconds=60.0, **parameters),
+        model_stats_receiver=stats,
+    )
+
+
+@pytest.mark.integration
+@anthropic_key
+async def test_anthropic_structured_answer_within_a_generous_cap():
+    stats = StatsCollector()
+    client = real_client(stats, reasoning_effort="low", max_output_tokens=1024)
+    await structured_answer_fits_the_cap(client, stats, cap=1024)
+
+
+@pytest.mark.integration
+@anthropic_key
+async def test_anthropic_structured_answer_over_the_cap_raises():
+    stats = StatsCollector()
+    client = real_client(stats, max_output_tokens=40)
+    error = await structured_answer_over_the_cap_raises(client, stats, cap=40)
+    assert error.reason == "max_tokens"
+
+
+@pytest.mark.integration
+@anthropic_key
+async def test_anthropic_streamed_text_over_the_cap_raises():
+    stats = StatsCollector()
+    client = real_client(stats, max_output_tokens=40)
+    await streamed_text_over_the_cap_raises(client, stats, cap=40)

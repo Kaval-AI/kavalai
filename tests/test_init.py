@@ -23,7 +23,7 @@ def test_missing_optional_dependency_names_the_package_and_the_extra(monkeypatch
         ("kavalai.llm_clients.no_such_client", "ghost"),
     )
     with pytest.raises(
-        ImportError, match=r"'ghost' package.+pip install kavalai\[common\]"
+        ImportError, match=r"'ghost' package.+pip install \"kavalai\[runtime\]\""
     ):
         kavalai.GhostClient
 

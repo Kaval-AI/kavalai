@@ -31,24 +31,27 @@
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         <div class="form-control">
           <label class="label">
-            <span class="label-text font-bold text-base-content/70">Embedding Model</span>
+            <span class="label-text font-bold text-base-content/70">Collection</span>
           </label>
-          <input type="text" id="embeddingProfile" [(ngModel)]="selectedModel"
-                 class="input input-bordered w-full" placeholder="e.g. text-embedding-3-small">
+          <select id="collectionName" [(ngModel)]="collectionName" class="select select-bordered w-full">
+            @for (col of collections; track col.name) {
+              <option [value]="col.name">
+                {{ col.name }} ({{ col.count }})
+              </option>
+            } @empty {
+              <option value="" disabled>No collections</option>
+            }
+          </select>
         </div>
 
         <div class="form-control">
           <label class="label">
-            <span class="label-text font-bold text-base-content/70">Collection</span>
+            <span class="label-text font-bold text-base-content/70">Embedding Model</span>
           </label>
-          <select id="collectionName" [(ngModel)]="collectionName" class="select select-bordered w-full">
-            <option value="">All Collections</option>
-            @for (col of ragStats?.collections; track col) {
-              <option [value]="col">
-                {{ col }}
-              </option>
-            }
-          </select>
+          <input type="text" id="embeddingModel" [value]="collectionModel ?? ''" readonly
+                 class="input input-bordered w-full bg-base-200 font-mono text-sm"
+                 placeholder="Recorded with the collection"
+                 title="The model the collection was indexed with; queries are embedded with it">
         </div>
 
         <div class="form-control">
@@ -100,7 +103,7 @@
             Compute PCA
           }
         </button>
-        <button class="btn btn-primary" (click)="onQuery()" [disabled]="loading || !queryText || !selectedModel">
+        <button class="btn btn-primary" (click)="onQuery()" [disabled]="loading || !queryText">
           @if (loading) {
             <span class="loading loading-spinner"></span>
             Querying...

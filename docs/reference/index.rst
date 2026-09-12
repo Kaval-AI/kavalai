@@ -13,5 +13,7 @@ coding agent. The generated
    eval_yaml
    tools
    providers
+   text
    config
    skills
+   widget

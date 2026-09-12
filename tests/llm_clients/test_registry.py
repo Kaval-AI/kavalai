@@ -221,6 +221,9 @@ def test_bad_registration_default_names_the_registration(clean_registry):
 
 def test_listing_builtins_imports_no_sdk():
     """``import kavalai`` must work where no provider SDK is installed."""
+    # Other tests in the session resolve providers of their own, so what is
+    # checked is that listing adds no resolution — no import — to that state.
+    resolved_before = set(registry.llm_providers._resolved)
     names = (
         registry.registered_llm_providers()
         + registry.registered_embedding_providers()
@@ -228,9 +231,7 @@ def test_listing_builtins_imports_no_sdk():
     )
 
     assert "openai" in names
-    # The registry module itself must not have dragged any SDK in. Other tests
-    # in the session will have imported them, so check the registry's own view.
-    assert registry.llm_providers._resolved.keys() <= {"openai", "anthropic"}
+    assert set(registry.llm_providers._resolved) == resolved_before
 
 
 def test_builtin_targets_are_dotted_strings_not_classes():

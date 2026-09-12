@@ -1,5 +1,11 @@
 """Launch Kaval.AI agent REST server.
 
+``SSE_PING_INTERVAL_SECONDS`` is how long a stream may stay silent before a
+keepalive comment is sent. ``SSE_HEADERS`` are the response headers every SSE
+stream carries: no caching, and no buffering by a reverse proxy.
+``PUBLIC_FAILURE_MESSAGE`` is what :func:`public_events` sends in place of a
+failed run's error text.
+
 Copyright 2026 OÜ KAVAL AI (registry code 17393877)
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,15 +28,31 @@ import secrets
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, AsyncGenerator, AsyncIterable, Callable, Optional, Union
+from typing import (
+    Annotated,
+    AsyncGenerator,
+    AsyncIterable,
+    Callable,
+    Generic,
+    Optional,
+    TypeVar,
+    Union,
+)
 from uuid import UUID
 
-import uvicorn
 from environs import Env
-from fastapi import Depends
-from fastapi import HTTPException, status, FastAPI, Response, APIRouter
-from fastapi.responses import StreamingResponse
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
+
+try:
+    import uvicorn
+    from fastapi import Depends
+    from fastapi import HTTPException, status, FastAPI, Response, APIRouter
+    from fastapi.responses import StreamingResponse
+    from fastapi.security import HTTPBasic, HTTPBasicCredentials
+except ImportError as exc:
+    raise ImportError(
+        f"The agent server requires the optional '{exc.name}' package. "
+        'Install it with: pip install "kavalai[runtime]"'
+    ) from exc
 from loguru import logger
 from pydantic import BaseModel
 from sqlalchemy import text
@@ -38,13 +60,70 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from kavalai.agent_service import AgentService
 from kavalai.db import db_manager
+from kavalai.rag import rag_service_from_uri
 from kavalai.settings import apply_normalizer_from_env, llm_parameters_from_env
+from kavalai.llm_clients.registry import register_rag_service
 from kavalai.workflow import WorkflowEngine
 from kavalai.workflow.models import WorkflowException, WorkflowStreamEvent
 from kavalai.workflow.tasklog.postgres import PostgresTaskLogger
 
 
 SSE_PING_INTERVAL_SECONDS = 15.0
+
+SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+
+PUBLIC_FAILURE_MESSAGE = "The agent could not complete this request."
+
+InputT = TypeVar("InputT", bound=BaseModel)
+
+EventFilter = Callable[[WorkflowStreamEvent], Optional[WorkflowStreamEvent]]
+
+
+class AgentRequest(BaseModel, Generic[InputT]):
+    """The request body of ``POST /run_agent`` and ``POST /stream_agent``.
+
+    ``data`` is the workflow's own input type. ``session_id`` continues a
+    session by its id; ``external_id`` continues — or starts — the session
+    carrying the caller's own key. A host that serves a workflow from a route
+    of its own types the body as ``AgentRequest[MyInput]``, so its clients
+    speak the same protocol as the SDK's router.
+    """
+
+    session_id: Optional[UUID] = None
+    external_id: Optional[str] = None
+    data: InputT
+
+
+def public_events(event: WorkflowStreamEvent) -> Optional[WorkflowStreamEvent]:
+    """An event filter for streams served to people other than the operator.
+
+    Forwards the run lifecycle and the streamed content, and withholds what
+    only the operator should see:
+
+    * ``node_started`` / ``node_completed`` events, which describe the
+      workflow's internals;
+    * token usage;
+    * the reason attached to a ``restart``;
+    * the error text of a failed run, which can carry a provider's message.
+      It is replaced by :data:`PUBLIC_FAILURE_MESSAGE` and the run id, so a
+      report can be matched to the recorded run; the detail stays in the
+      server log and on the run row.
+
+    Which nodes stream content at all is the workflow's ``stream_output``
+    setting, not this filter's.
+    """
+    if event.type in ("node_started", "node_completed"):
+        return None
+    if event.type == "workflow_failed":
+        reference = f" Reference: {event.run_id}." if event.run_id else ""
+        return event.model_copy(
+            update={"value": f"{PUBLIC_FAILURE_MESSAGE}{reference}"}
+        )
+    if event.type == "restart":
+        return event.model_copy(update={"value": None})
+    if event.type == "workflow_completed":
+        return event.model_copy(update={"token_usage": None})
+    return event
 
 
 security = HTTPBasic(auto_error=False)
@@ -151,6 +230,8 @@ def format_sse_event(event: WorkflowStreamEvent) -> str:
 async def stream_sse_events(
     events: AsyncIterable[WorkflowStreamEvent],
     ping_interval: float = SSE_PING_INTERVAL_SECONDS,
+    *,
+    event_filter: Optional[EventFilter] = None,
 ) -> AsyncGenerator[str, None]:
     """Format a workflow event stream as SSE frames with keepalive pings.
 
@@ -160,6 +241,10 @@ async def stream_sse_events(
     ends the stream quietly — the engine has already emitted the
     ``workflow_failed`` event, and an SSE response cannot change its status
     code after the headers are sent.
+
+    ``event_filter`` sees every event before it is written, and returns the
+    event to send, a modified copy, or ``None`` to drop it. See
+    :func:`public_events`.
 
     The event stream is consumed by a single pump task (an async generator's
     frames must run in one task — the engine binds task-scoped log context),
@@ -190,6 +275,10 @@ async def stream_sse_events(
                 continue
             if kind == "end":
                 return
+            if event_filter is not None:
+                event = event_filter(event)
+                if event is None:
+                    continue
             yield format_sse_event(event)
     finally:
         # On early consumer exit (client disconnect), cancel the pump so the
@@ -199,6 +288,27 @@ async def stream_sse_events(
             await pump_task
         except BaseException:  # noqa: BLE001 - teardown is best-effort
             pass
+
+
+def sse_response(
+    events: AsyncIterable[WorkflowStreamEvent],
+    *,
+    event_filter: Optional[EventFilter] = None,
+    headers: Optional[dict[str, str]] = None,
+    ping_interval: float = SSE_PING_INTERVAL_SECONDS,
+) -> StreamingResponse:
+    """Serve a workflow event stream as a Server-Sent Events response.
+
+    What the router's ``/stream_agent`` returns, available to a host that
+    serves a workflow from a route of its own — behind its own admission
+    checks — so the frames, the keepalive and the headers stay the SDK's.
+    ``headers`` are added to :data:`SSE_HEADERS`.
+    """
+    return StreamingResponse(
+        stream_sse_events(events, ping_interval, event_filter=event_filter),
+        media_type="text/event-stream",
+        headers={**SSE_HEADERS, **(headers or {})},
+    )
 
 
 def create_default_auth_dependency() -> Callable:
@@ -220,6 +330,8 @@ def create_agent_router(
     engine: WorkflowEngine,
     session_provider: Union[async_sessionmaker, None] = None,
     auth_dependency: Optional[Callable] = None,
+    *,
+    event_filter: Optional[EventFilter] = None,
 ) -> APIRouter:
     """Create a FastAPI router for a given workflow.
 
@@ -238,6 +350,10 @@ def create_agent_router(
             If None, the default HTTP Basic Auth will be used.
             Pass a custom dependency function to use your own auth, or pass
             ``lambda: None`` to disable authentication.
+        event_filter: Applied to every event ``/stream_agent`` sends. Pass
+            :func:`public_events` when the stream is served to people other
+            than the operator. ``/run_agent`` returns only the output, so it
+            is unaffected.
 
     Returns:
         An APIRouter instance with configured endpoints.
@@ -265,11 +381,10 @@ def create_agent_router(
     InputDataType = engine.get_data_type("input")
     OutputDataType = engine.get_data_type(engine.graph.output_type)
 
-    # Define the request body schema.
-    class InputType(BaseModel):
-        session_id: Optional[UUID] = None
-        external_id: Optional[str] = None
-        data: InputDataType
+    # Named, rather than used as AgentRequest[...] directly, so the OpenAPI
+    # schema keeps the name clients have always seen.
+    class InputType(AgentRequest[InputDataType]):
+        pass
 
     # Define the response body schema.
     class OutputType(BaseModel):
@@ -308,11 +423,7 @@ def create_agent_router(
             session_id=str(input_data.session_id) if input_data.session_id else None,
             external_id=input_data.external_id,
         )
-        return StreamingResponse(
-            stream_sse_events(events),
-            media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-        )
+        return sse_response(events, event_filter=event_filter)
 
     @router.get("/workflow")
     async def get_workflow(
@@ -356,6 +467,8 @@ def create_agent_app(
     engine: WorkflowEngine,
     session_provider: Union[async_sessionmaker, None] = None,
     auth_dependency: Optional[Callable] = None,
+    *,
+    event_filter: Optional[EventFilter] = None,
 ) -> FastAPI:
     """Create a FastAPI application for a given workflow.
 
@@ -369,6 +482,8 @@ def create_agent_app(
             database sessions for agent execution.
         auth_dependency: An optional FastAPI dependency for authentication.
             If None, the default HTTP Basic Auth will be used.
+        event_filter: Applied to the streamed events; see
+            :func:`create_agent_router`.
 
     Returns:
         A FastAPI application instance.
@@ -401,6 +516,7 @@ def create_agent_app(
         engine=engine,
         session_provider=session_provider,
         auth_dependency=auth_dependency,
+        event_filter=event_filter,
     )
     app.include_router(router)
 
@@ -494,6 +610,15 @@ def create_app_from_env_conf(
       call, passed to the engine as ``default_llm_parameters`` (optional).
     - KAVALAI_EMBEDDING_NORMALIZER_YAML: Normalizer installed as the default
       before the workflow loads (optional).
+    - KAVALAI_RAG_MODEL: Embedding model of the ``default`` RAG service. Setting
+      it registers that service without a setup module, over the index at
+      KAVALAI_RAG_URI (required alongside it) in KAVALAI_RAG_SCHEMA (optional),
+      with the normalizer above.
+    - KAVALAI_AGENT_PUBLIC_EVENTS: Serve streams through
+      :func:`public_events` (optional, default: false).
+    - KAVALAI_AGENT_RUN_TIMEOUT_SECONDS: Seconds after which a run is
+      cancelled and recorded as failed, passed to the engine as
+      ``run_timeout`` (optional, default: no limit).
 
     Args:
         workflow_path: Path to the workflow YAML file.
@@ -574,10 +699,37 @@ def create_app_from_env_conf(
     if normalizer is not None:
         logger.info("Default embedding normalizer loaded from the environment.")
 
+    # One index needs no setup module: KAVALAI_RAG_MODEL registers ``default``
+    # over KAVALAI_RAG_URI. Both are stated explicitly — the RAG index is not
+    # assumed to live in the agent database.
+    rag_model = env.str("KAVALAI_RAG_MODEL", "") or None
+    if rag_model:
+        rag_uri = env.str("KAVALAI_RAG_URI")
+        rag_schema = env.str("KAVALAI_RAG_SCHEMA", "") or None
+        register_rag_service(
+            "default",
+            rag_service_from_uri,
+            replace=True,
+            uri=rag_uri,
+            model=rag_model,
+            schema=rag_schema,
+            normalizer=normalizer,
+        )
+        logger.info(
+            f"Default RAG service: {mask_db_uri(rag_uri)}"
+            f" (schema {rag_schema or 'default'}, model {rag_model})"
+        )
+
     default_llm_model = env.str("KAVALAI_DEFAULT_LLM_MODEL", "") or None
     default_llm_parameters = llm_parameters_from_env()
     logger.info(f"Default LLM model: {default_llm_model or '(none)'}")
     logger.info(f"Default LLM parameters: {default_llm_parameters or '(none)'}")
+
+    run_timeout_setting = env.str("KAVALAI_AGENT_RUN_TIMEOUT_SECONDS", "")
+    run_timeout = float(run_timeout_setting) if run_timeout_setting else None
+    public = env.bool("KAVALAI_AGENT_PUBLIC_EVENTS", False)
+    logger.info(f"Run timeout: {f'{run_timeout:g} s' if run_timeout else '(none)'}")
+    logger.info(f"Public event stream: {'on' if public else 'off'}")
 
     logger.info(f"Loading workflow from {workflow_path}.")
     engine = WorkflowEngine.from_yaml_path(
@@ -586,11 +738,13 @@ def create_app_from_env_conf(
         task_logger=task_logger,
         default_llm_model=default_llm_model,
         default_llm_parameters=default_llm_parameters,
+        run_timeout=run_timeout,
     )
 
     return create_agent_app(
         engine=engine,
         session_provider=session_provider,
+        event_filter=public_events if public else None,
     )
 
 

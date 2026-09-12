@@ -143,17 +143,21 @@ events in between:
    * - ``workflow_started``
      - Once, at the start; carries ``session_id`` and ``run_id``.
    * - ``node_started`` / ``node_completed``
-     - Around each visited node; ``name`` is the node name.
+     - Around each visited node; ``name`` is the node name. A ``rag_query``
+       node's ``node_completed`` carries its hits in ``output_data``.
    * - ``partial`` / ``complete``
      - Streamed content from a node that opted in (see below).
    * - ``restart``
      - A retried LLM call is starting its stream over — discard what you have
-       accumulated under that ``name``, it will be re-sent.
+       accumulated under that ``name``, it will be re-sent. Only a node that
+       streams emits it, since only such a node has sent anything to discard.
    * - ``workflow_completed``
-     - Once, on success; carries ``output_data`` and ``token_usage``.
+     - Once, on success; carries ``run_id``, ``output_data`` and
+       ``token_usage``.
    * - ``workflow_failed``
-     - Once, on failure; the error message is in ``value``. Yielded *before* the
-       :class:`~kavalai.WorkflowException` is raised to the caller.
+     - Once, on failure; carries ``run_id``, and the error message is in
+       ``value``. Yielded *before* the :class:`~kavalai.WorkflowException` is
+       raised to the caller.
 
 Streaming is opt-in per node, because most nodes are not worth streaming. An
 ``llm`` node takes ``stream_output`` to stream its completion, and an ``agent``
@@ -176,7 +180,114 @@ flags:
 
 To serve a stream over HTTP, use the agent server's ``POST /stream_agent``
 endpoint, which renders these events as Server-Sent Events — see
-:doc:`/api/server`.
+:doc:`/api/server`. The engine's events are complete — error text, token
+counts, every node — because in-process consumers want them; what an HTTP
+client sees is decided at the server, where
+:func:`~kavalai.server.public_events` removes what only the operator should
+read (see :doc:`../tutorials/serving`).
+
+Per-run template values
+-----------------------
+
+A workflow's ``templates`` are part of its document. A run may give a declared
+template another value, from Python, with ``templates=`` on
+:meth:`~kavalai.WorkflowEngine.run` or
+:meth:`~kavalai.WorkflowEngine.run_stream`. This is how one document serves
+several tenants whose instructions differ, without a string substitution into
+the YAML:
+
+.. code-block:: python
+
+   import asyncio
+
+   from kavalai import WorkflowEngine, WorkflowTimeoutError
+   from kavalai.testing import ScriptedLlmClient
+
+   WORKFLOW = """
+   name: Village help
+   llm_model: openai/gpt-5.6-luna
+   templates:
+     - name: house_style
+       value: Answer in one short sentence.
+   data_types:
+     input: {type: object, properties: {user_message: {type: string}}}
+     output: {type: object, properties: {agent_response: {type: string}}}
+   nodes:
+     - {name: begin, type: start, next: reply}
+     - name: reply
+       type: llm
+       prompt: "{{ templates.house_style }}"
+       inputs: {input: {type: context, value: input}}
+       output: output
+       next: finish
+     - {name: finish, type: end, output: output}
+   """
+
+
+   def echo_the_prompt(messages, response_model):
+       """A stand-in model that answers with the first line of its prompt."""
+       return {"agent_response": messages[0].content.splitlines()[0]}
+
+
+   engine = WorkflowEngine.from_yaml(
+       WORKFLOW, client_factory=ScriptedLlmClient(echo_the_prompt)
+   )
+   question = {"user_message": "When is the market?"}
+
+   state = await engine.run(question)
+   print(state.output_data)
+
+   state = await engine.run(
+       question, templates={"house_style": "Vasta eesti keeles."}
+   )
+   print(state.output_data)
+
+.. code-block:: text
+
+   {'agent_response': 'Answer in one short sentence.'}
+   {'agent_response': 'Vasta eesti keeles.'}
+
+Three rules keep this safe. Only a template the document declares may be given
+a value, so the document still lists everything a prompt can reference and a
+misspelt name raises. Rendering is a single pass, so a value containing
+``{{ … }}`` reaches the prompt literally and owner-supplied text needs no
+escaping. And the values used are recorded with the run, under
+``run_templates`` in ``runs.context``, because a run cannot be explained
+without the prompt it was given. The argument exists in Python only; it is not
+a field of the agent server's request, since a request field would let a
+caller rewrite the author's instructions.
+
+Time limits
+-----------
+
+A run can be bounded in seconds. ``timeout=`` on ``run`` or ``run_stream``, or
+``run_timeout=`` on the engine as the default, cancels the run when it
+elapses — parallel branches included — and records it as failed with a
+:class:`~kavalai.WorkflowTimeoutError`:
+
+.. code-block:: python
+
+   async def never_answers(messages, response_model):
+       await asyncio.sleep(60)
+
+
+   slow = WorkflowEngine.from_yaml(
+       WORKFLOW, client_factory=ScriptedLlmClient(never_answers)
+   )
+   try:
+       await slow.run(question, timeout=0.5)
+   except WorkflowTimeoutError as error:
+       print(f"{type(error).__name__}: {error}")
+
+.. code-block:: text
+
+   WorkflowTimeoutError: The run exceeded its time limit of 0.5 s.
+
+The walk runs in a task of its own while a limit applies, so the cancellation
+reaches the node that is running and nothing else. A caller's own
+``asyncio.timeout`` around the stream would instead cancel whatever the caller
+happened to be doing between two events, and the run would not be recorded as
+failed.
 
 The WorkflowState
 -----------------

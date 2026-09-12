@@ -17,7 +17,7 @@ limitations under the License.
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
-import { RagResult, RagStats, RagQueryResponse } from '../models/rag';
+import { RagCollection, RagStats, RagQueryResponse } from '../models/rag';
 
 @Injectable({
   providedIn: 'root'
@@ -25,8 +25,12 @@ import { RagResult, RagStats, RagQueryResponse } from '../models/rag';
 export class RagService {
   constructor(private http: HttpClient) {}
 
+  /**
+   * Query a collection. `model` may be omitted: an existing collection is
+   * embedded with the model recorded for it.
+   */
   queryRag(projectId: string, queryData: {
-    model: string,
+    model?: string,
     text: string,
     collection_name?: string,
     top_k?: number,
@@ -39,6 +43,10 @@ export class RagService {
 
   getRagStats(projectId: string): Observable<RagStats> {
     return this.http.get<RagStats>(`/api/projects/${projectId}/rag/stats`);
+  }
+
+  getRagCollections(projectId: string): Observable<RagCollection[]> {
+    return this.http.get<RagCollection[]>(`/api/projects/${projectId}/rag/collections`);
   }
 
   trainPca(projectId: string, collectionName: string): Observable<string> {

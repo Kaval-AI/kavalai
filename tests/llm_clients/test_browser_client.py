@@ -14,6 +14,7 @@ from kavalai.llm_clients.base_client import (
     LlmClientParameters,
     ModelCallStat,
     ModelStatsReceiver,
+    OutputTruncatedError,
 )
 
 
@@ -314,6 +315,7 @@ def test_build_request_omits_none_params():
     assert request["messages"] == [{"role": "user", "content": "hi"}]
     assert "temperature" not in request
     assert "top_p" not in request
+    assert "max_tokens" not in request
     assert "response_format" not in request
 
 
@@ -326,3 +328,45 @@ def test_build_request_includes_explicit_sampling_params():
 
     assert request["temperature"] == 0.4
     assert request["top_p"] == 0.9
+
+
+def test_build_request_sends_the_output_cap_as_max_tokens():
+    params = LlmClientParameters(max_output_tokens=128)
+    client = BrowserLLMClient("model-x", llm_client_parameters=params)
+    chat_history = ChatHistory(messages=[ChatMessage(content="hi")])
+
+    assert client._build_request(chat_history, None)["max_tokens"] == 128
+
+
+@pytest.mark.asyncio
+async def test_a_length_finish_raises_after_streaming_the_partial(monkeypatch):
+    bridge = FakeBridge(
+        result=json.dumps(
+            {
+                "content": '{"answer": "Pa',
+                "usage": {"prompt_tokens": 4, "completion_tokens": 16},
+                "finish_reason": "length",
+            }
+        )
+    )
+    _install_bridge(monkeypatch, bridge)
+    receiver = CapturingReceiver()
+    client = BrowserLLMClient(
+        "model-x",
+        llm_client_parameters=LlmClientParameters(max_output_tokens=16),
+        model_stats_receiver=receiver,
+    )
+    chat_history = ChatHistory(messages=[ChatMessage(role="user", content="hi")])
+
+    streamer = await client.stream_chat_completions(
+        chat_history=chat_history, response_model=Answer
+    )
+    seen = []
+    with pytest.raises(OutputTruncatedError) as caught:
+        async for chunk in streamer:
+            seen.append(chunk)
+
+    assert [chunk.type for chunk in seen] == ["partial"]
+    assert (caught.value.reason, caught.value.max_output_tokens) == ("length", 16)
+    (stat,) = receiver.stats
+    assert (stat.prompt_tokens, stat.completion_tokens) == (4, 16)

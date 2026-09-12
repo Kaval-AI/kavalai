@@ -33,6 +33,7 @@ LLM_PARAMETER_VARIABLES: dict[str, tuple[str, type]] = {
     "KAVALAI_LLM_TOP_P": ("top_p", float),
     "KAVALAI_LLM_REASONING_EFFORT": ("reasoning_effort", str),
     "KAVALAI_LLM_SERVICE_TIER": ("service_tier", str),
+    "KAVALAI_LLM_MAX_OUTPUT_TOKENS": ("max_output_tokens", int),
     "KAVALAI_LLM_TIMEOUT_SECONDS": ("timeout_seconds", float),
     "KAVALAI_LLM_STREAM_TIMEOUT_SECONDS": ("stream_timeout_seconds", float),
 }
@@ -54,7 +55,10 @@ def llm_parameters_from_env(environ: Optional[dict] = None) -> dict:
         try:
             parameters[key] = parse(raw)
         except ValueError as e:
-            raise ValueError(f"{variable}={raw!r} is not a {parse.__name__}") from e
+            article = "an" if parse.__name__[0] in "aeiou" else "a"
+            raise ValueError(
+                f"{variable}={raw!r} is not {article} {parse.__name__}"
+            ) from e
     return parameters
 
 

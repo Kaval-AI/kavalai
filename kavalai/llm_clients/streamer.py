@@ -151,6 +151,7 @@ class Streamer:
         self._queue = asyncio.Queue()
         self._active_streamer_names = []
         self._stop_iteration = False
+        self._error: Optional[Exception] = None
 
     @property
     def _active_streamers(self) -> int:
@@ -197,7 +198,13 @@ class Streamer:
     async def stream_error(self, error: Exception):
         """
         Push an 'error' chunk to the queue.
+
+        The consumer's iteration then raises ``error`` itself when it is a
+        :class:`RuntimeError`, so an LLM client's own exception types (such as
+        ``OutputTruncatedError``) reach the caller intact, and otherwise a
+        ``RuntimeError`` carrying its message.
         """
+        self._error = error
         await self._queue.put(
             StreamContent(
                 type="error", name="error", value=str(error)
@@ -253,6 +260,8 @@ class Streamer:
         stream_content = StreamContent.model_validate_json(data)
         if stream_content.type == "error":
             self._stop_iteration = True
+            if isinstance(self._error, RuntimeError):
+                raise self._error
             raise RuntimeError(stream_content.value)
         if stream_content.type == "complete" and self._active_streamers == 0:
             self._stop_iteration = True

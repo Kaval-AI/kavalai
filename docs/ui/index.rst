@@ -2,8 +2,8 @@ Using the Backoffice UI
 =======================
 
 The **backoffice** is Kaval.AI's management and monitoring interface — a FastAPI
-service (:mod:`kavalai.backoffice`) backed by PostgreSQL, with an Angular front
-end. While the SDK *runs* your agents, the backoffice is where they are
+service (:mod:`kavalai.backoffice`) backed by PostgreSQL or SQLite, with an
+Angular front end. While the SDK *runs* your agents, the backoffice is where they are
 **configured, inspected and observed**: every session, run, node and model call
 a workflow produces is recorded and browsable here. It is the visual side of
 Kaval.AI's *observable* pillar.
@@ -23,9 +23,10 @@ interface without their runtime data ever meeting.
 Running the backoffice
 ----------------------
 
-Three things must exist before the interface is usable: a PostgreSQL instance
-carrying both schemas, a Google OAuth client for sign-in, and one user row to
-sign in as. They are treated in that order below.
+Three things must exist before the interface is usable: a database carrying
+both schemas, a Google OAuth client for sign-in, and one user row to sign in
+as. They are treated in that order below. PostgreSQL is the production choice;
+SQLite serves a single machine, as described at the end of this section.
 
 Setting up PostgreSQL
 ^^^^^^^^^^^^^^^^^^^^^
@@ -64,8 +65,7 @@ set creates the ``vector`` extension as its first revision:
    python -m kavalai.migrate_db backoffice
 
    # The agent runtime tables the backoffice reads: sessions, runs, tasks,
-   # model call statistics. The RAG tables are provisioned by the RAG
-   # service itself on first use.
+   # model call statistics.
    python -m kavalai.migrate_db agents
 
 Both are idempotent and both read their connection from the environment —
@@ -74,6 +74,37 @@ Both are idempotent and both read their connection from the environment —
 share one instance, as they do in the development stack, or live on entirely
 separate servers. Every variable is listed in :doc:`../reference/config`, and
 the production arrangement in :doc:`../deploy/index`.
+
+The RAG tables — the ``rag_collections`` registry and one table per
+collection — belong to neither migration set. A RAG service creates them on
+first use, which is its default. A service constructed with
+``provision=False`` issues no DDL, so that the runtime role can hold data
+privileges only; the registry and the collections are then created beforehand
+by a job running under a role with owner privileges, through
+``ensure_registry()`` and ``create_collection()``. The backoffice creates
+neither: its RAG explorer reads the collections that exist, and a project
+without any shows none.
+
+Using SQLite instead
+^^^^^^^^^^^^^^^^^^^^
+
+Both variables also accept a ``sqlite:///path`` URI, and the schema variables
+are then ignored, since SQLite has no schemas. The same two commands create
+the tables in the named files:
+
+.. code-block:: bash
+
+   KAVALAI_BO_DB_URI=sqlite:///local_data/backoffice.db \
+       python -m kavalai.migrate_db backoffice
+   KAVALAI_DB_URI=sqlite:///local_data/agents.db \
+       python -m kavalai.migrate_db agents
+
+An agent server started with the same ``KAVALAI_DB_URI`` writes its sessions,
+runs and tasks into that file, and a project of type **SQLite** pointing at
+the file shows them. This suits development, a demonstration or a laptop: the
+agent server and the backoffice must share a filesystem, and SQLite on a
+network mount is not safe for a writer, so PostgreSQL remains the choice for a
+deployment with more than one host.
 
 Configuring sign-in
 ^^^^^^^^^^^^^^^^^^^
@@ -161,9 +192,12 @@ Projects
 --------
 
 Everything in the backoffice is scoped to a **project**. A project carries a
-name, a description, the connection details of its agent database — host, port,
-user, password, database and schema — its members, and a cache in which derived
-artefacts such as trained PCA models are kept. The project page is where the
+name, a description, the connection details of its agent database, its members,
+and a cache in which derived artefacts such as trained PCA models are kept. The
+**Database Type** selects how the connection is described: a PostgreSQL project
+names host, port, user, password, database and schema; a SQLite project names
+the database file, which the backoffice must be able to read from its own
+filesystem. The project page is where the
 active project is chosen, new ones are created, and the connection is verified.
 
 .. image:: projectinfopage.png
@@ -236,6 +270,11 @@ assistant's latest output carries ``status``, ``order_id`` and ``missing``
 beside the human-readable ``subject`` and ``body``, so what the workflow decided
 is legible without reading what it wrote.
 
+The list is ordered by **last activity** — the time of a session's most recent
+run — and that is the time each entry shows. A conversation resumed today
+therefore stands above one begun today and left idle since. The date range,
+by contrast, filters on the time a session was created.
+
 
 The task debugger
 -----------------
@@ -256,6 +295,26 @@ customer's email — two items with product, quantity and unit, a customer name,
 delivery date and the intent it classified. The **Input**, **Output** and
 **Context** buttons at run level show the same for the run as a whole.
 
+A ``rag_query`` node records its retrieval in the same place. Its inputs name
+the query, the collection, ``top_k``, ``source_ids`` and ``min_similarity``;
+with ``store: content`` its output holds the joined passage text as
+``content`` and, as ``hits``, the identifier, source identifier, similarity and
+metadata of each passage, so a retrieval can be judged from the task without
+running the query again.
+
+The run's context also carries the per-run template values a caller passed,
+as ``run_templates``, since a prompt cannot be explained without them. A
+failed run is recorded too: its context holds ``status`` and ``error`` and,
+unless the engine was created with ``record_context=False``, the ``data`` the
+run had reached.
+
+Beneath the tasks, **Model Calls** lists the model calls the run made, oldest
+first — model, call type, input, output and total tokens, and duration — with
+the run's token total and a link to the same calls on the Model calls page.
+The embedding calls of the run's ``rag_query`` nodes are among them. The
+section shows the hundred most recent calls, and is absent when the run made
+none.
+
 This is the intended way to answer "why did it do that": each node's own input
 and output are stored, so a wrong answer can be traced to the step that first
 went wrong rather than inferred from the final reply. The rows come from the
@@ -274,6 +333,16 @@ deliberately so: providers report tokens rather than money, and cached input is
 priced differently enough that a derived total would be wrong rather than
 merely stale.
 
+Each call is attributed to the run that made it: a row carries the run's
+``run_id`` and ``session_id``, the embedding calls of a workflow's
+``rag_query`` nodes included, whose response payload records no vectors.
+Neither identifier is a foreign key, so the token counts outlive the
+conversation they belong to. A card links to its conversation and to the
+run's tasks, and its run identifier narrows the page to that run's calls. The
+same filters are the page's ``run_id`` and ``session_id`` query parameters,
+which is how the **Model calls** button of a conversation and the task
+debugger reach it; **Show all calls** removes them.
+
 
 RAG explorer
 ------------
@@ -281,15 +350,17 @@ RAG explorer
 The **RAG** page is the interface's answer to a question the SDK can only
 answer in a notebook: what is actually in this index, and does it retrieve what
 one would expect? It reads the project's vector collections directly through
-:class:`~kavalai.rag.PostgresRagService`, so it needs no agent, no workflow and
-no running server — only a project whose database holds an index.
+the project's RAG service — :class:`~kavalai.rag.PostgresRagService` or
+:class:`~kavalai.rag.SqliteRagService`, which share one storage model (see
+:doc:`../guides/data_model`) — so it needs no agent, no workflow and no running
+server — only a project whose database holds an index.
 
 .. image:: ragexplorerpage.png
    :alt: RAG explorer with query controls above and a ranked result table below,
          showing similarity, source ID, content, collection and metadata
    :width: 100%
 
-Two counters head the page — the number of collections in the schema and the
+Two counters head the page — the number of collections in the database and the
 total number of indexed entries across them. Beneath them sits the query form,
 whose controls correspond one for one to the arguments of
 :meth:`~kavalai.rag.BaseRagService.query`:
@@ -302,13 +373,17 @@ whose controls correspond one for one to the arguments of
      - Effect
    * - **Query Text**
      - The text to embed and search with. Pressing *Enter* submits it.
-   * - **Embedding Model**
-     - The ``provider/model`` identifier the query is embedded with. It must be
-       the model the collection was indexed with; a different model yields a
-       different vector space, and therefore meaningless neighbours.
    * - **Collection**
-     - Which collection to search. Collections are the unit of separation
-       within one schema.
+     - Which collection to search, listed with its number of entries.
+       Collections are the unit of separation within one schema, and each is
+       a table of its own, so a query searches exactly one. The ``default``
+       collection is selected when there is one, otherwise the first.
+   * - **Embedding Model**
+     - The ``provider/model`` identifier the selected collection was indexed
+       with, as recorded in the collection registry. It is shown rather than
+       chosen: the RAG service embeds every query against an existing
+       collection with that model, since a different model yields a different
+       vector space, and therefore meaningless neighbours.
    * - **Source IDs**
      - Restricts the search to given source identifiers — the way to ask what a
        specific document contains rather than what the corpus does.
@@ -349,6 +424,8 @@ is fitted over them in batches, and both the fitted model and a sample of 500
 projected points are stored in the project's cache. The work is done once per
 collection: subsequent queries reuse the stored model, and a page whose
 collection has no model yet says so plainly rather than showing an empty plot.
+A query is projected from an embedding computed with the collection's recorded
+model, the space in which the PCA was fitted.
 
 .. image:: ragpcaprojector.png
    :alt: Two-dimensional PCA projection with the query in red, its closest

@@ -21,7 +21,7 @@ VECTORS = {
 
 
 def make_fake_embedding_client(vectors=VECTORS):
-    async def compute_embeddings(texts, normalizer=None):
+    async def compute_embeddings(texts, normalize=False, normalizer=None, **kwargs):
         return [vectors[t] for t in texts], MagicMock(total_tokens=len(texts))
 
     client = MagicMock()
@@ -33,7 +33,7 @@ def make_fake_embedding_client(vectors=VECTORS):
 def service_factory(tmp_path):
     """Create SqliteRagService instances with a mocked embedding client."""
     created = []
-    with patch("kavalai.rag.sqllite.make_embedding_client") as mock_make_client:
+    with patch("kavalai.rag.collections.make_embedding_client") as mock_make_client:
         mock_make_client.side_effect = lambda model: make_fake_embedding_client()
 
         def factory(filename=None, model=MODEL, **kwargs):
@@ -111,31 +111,81 @@ def test_auto_create_false_missing_table(service_factory, tmp_path):
     conn.commit()
     conn.close()
 
-    with pytest.raises(ValueError, match="does not exist"):
+    with pytest.raises(ValueError, match="'rag_collections' does not exist"):
         service_factory(filename, auto_create=False)
 
 
-def test_invalid_table_name(service_factory):
-    with pytest.raises(ValueError, match="Invalid table name"):
-        service_factory(table_name="rag; DROP TABLE users")
+def test_legacy_single_table_layout_is_refused(service_factory, tmp_path):
+    """A file built by kavalai 1.0 (one ``rag_index`` table) is not read.
+
+    Refusing with a message beats opening it as an empty index: the registry
+    would be created next to the old table and every query would come back
+    empty with no hint why.
+    """
+    filename = str(tmp_path / "old.db")
+    conn = sqlite3.connect(filename)
+    conn.execute("CREATE TABLE rag_index (id TEXT PRIMARY KEY, collection_name TEXT)")
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(ValueError, match="kavalai 1.0.*Rebuild the index"):
+        service_factory(filename)
 
 
 @pytest.mark.asyncio
-async def test_custom_table_name(service_factory, tmp_path):
-    filename = str(tmp_path / "custom.db")
-    service = service_factory(filename, table_name="my_index")
+async def test_one_table_per_collection_in_the_registry(service_factory, tmp_path):
+    """The Postgres shape: a ``rag_collections`` row and a table per collection."""
+    filename = str(tmp_path / "shape.db")
+    service = service_factory(filename)
     await service.index(text="apple", collection_name="fruits")
+    await service.index(text="banana", collection_name="more fruits")
 
     conn = sqlite3.connect(filename)
     tables = {
         row[0]
         for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
     }
+    registry = conn.execute(
+        "SELECT name, table_name, model, embedding_size FROM rag_collections "
+        "ORDER BY name"
+    ).fetchall()
     conn.close()
-    assert "my_index" in tables
 
-    results = await service.query("apple", top_k=1)
-    assert results[0].content == "apple"
+    assert "rag_collections" in tables
+    assert {
+        SqliteRagService.table_name_for_collection(n) for n in ("fruits", "more fruits")
+    } <= tables
+    assert registry == [
+        ("fruits", SqliteRagService.table_name_for_collection("fruits"), MODEL, 3),
+        (
+            "more fruits",
+            SqliteRagService.table_name_for_collection("more fruits"),
+            MODEL,
+            3,
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_collections_have_their_own_dimension(service_factory):
+    """Each collection registers its own ``vector_init`` dimension."""
+    service = service_factory()
+    await index_fruits(service)
+
+    service.embedding_client = make_fake_embedding_client(
+        {"weird": [0.1, 0.2, 0.3, 0.4], "odd": [0.4, 0.3, 0.2, 0.1]}
+    )
+    await service.index_batch(
+        texts=["weird", "odd"], metadata_list=[{}, {}], collection_name="four"
+    )
+
+    assert [
+        r.content for r in await service.query("weird", collection_name="four")
+    ] == [
+        "weird",
+        "odd",
+    ]
+    assert [c["embedding_size"] for c in await service.list_collections()] == [4, 3]
 
 
 @pytest.mark.asyncio
@@ -179,8 +229,10 @@ async def test_dimension_mismatch(service_factory):
     # scan would silently skip them otherwise.
     four_dim = make_fake_embedding_client({"weird": [0.1, 0.2, 0.3, 0.4]})
     service.embedding_client = four_dim
-    with pytest.raises(ValueError, match="dimension 4 does not match"):
-        await service.index_batch(texts=["weird"], metadata_list=[{}])
+    with pytest.raises(ValueError, match="3-dimensional embeddings; got 4"):
+        await service.index_batch(
+            texts=["weird"], metadata_list=[{}], collection_name="fruits"
+        )
 
 
 @pytest.mark.asyncio
@@ -210,18 +262,21 @@ async def test_query_filters(service_factory):
 
 
 @pytest.mark.asyncio
-async def test_query_model_filter(service_factory, tmp_path):
+async def test_results_carry_the_collection_model(service_factory, tmp_path):
+    """The model is a property of the collection, recorded when it is created."""
     filename = str(tmp_path / "models.db")
     service_a = service_factory(filename, model="fake/model-a")
-    await service_a.index(text="apple", source_id="sid_a")
+    await service_a.index(text="apple", source_id="sid_a", collection_name="c")
 
-    service_b = service_factory(filename, model="fake/model-b")
-    results_b = await service_b.query("apple", top_k=10)
-    assert results_b == []
+    browsing = service_factory(filename, model=None)
+    assert [c["model"] for c in await browsing.list_collections()] == ["fake/model-a"]
+    # The collection's own model answers, so a model-less service can query.
+    assert [r.model for r in await browsing.query("apple", collection_name="c")] == [
+        "fake/model-a"
+    ]
 
-    results_a = await service_a.query("apple", top_k=10)
-    assert len(results_a) == 1
-    assert results_a[0].model == "fake/model-a"
+    results = await service_a.query("apple", top_k=10, collection_name="c")
+    assert [r.model for r in results] == ["fake/model-a"]
 
 
 @pytest.mark.asyncio
@@ -262,7 +317,7 @@ async def test_query_batch(service_factory):
 
     # Embeddings for the whole batch are computed in one call
     service.embedding_client.compute_embeddings.assert_awaited_with(
-        texts=["apple", "banana"], normalizer=None
+        texts=["apple", "banana"], normalize=False, normalizer=None
     )
 
     assert await service.query_batch(texts=[]) == []
@@ -273,10 +328,10 @@ async def test_delete(service_factory):
     service = service_factory()
     items = await index_fruits(service)
 
-    await service.delete(uuid.UUID(items[0]["id"]))
+    await service.delete(items[0]["id"])
 
     results = await service.query("apple", top_k=10, collection_name="fruits")
-    assert items[0]["id"] not in {str(r.id) for r in results}
+    assert items[0]["id"] not in {r.id for r in results}
     assert len(results) == 3
 
 
@@ -342,3 +397,59 @@ async def test_inherited_compute_similarity_matrix(service_factory):
     assert matrix[0][0] > matrix[0][1]  # apple closer to sid_apple than sid_banana
     assert matrix[1][1] > 0.99  # banana vs sid_banana
     assert matrix[0][2] == 0.0  # missing source
+
+
+def test_halfvec_is_a_postgres_option(service_factory):
+    with pytest.raises(ValueError, match=r"\['vector'\] embeddings, not 'halfvec'"):
+        service_factory(vector_type="halfvec")
+
+
+@pytest.mark.asyncio
+async def test_create_collection_refuses_halfvec(service_factory):
+    service = service_factory()
+    with pytest.raises(ValueError, match="not 'halfvec'"):
+        await service.create_collection("c", embedding_size=3, vector_type="halfvec")
+    assert await service.list_collections() == []
+
+
+@pytest.mark.asyncio
+async def test_metadata_keys_are_matched_whole(service_factory):
+    """A dotted key is one top-level key, not a path into nested metadata."""
+    service = service_factory()
+    await service.index_batch(
+        texts=["apple", "banana"],
+        metadata_list=[{"a.b": "x"}, {"a": {"b": "x"}}],
+        collection_name="c",
+    )
+
+    await service.delete_by_metadata("c", {"a.b": "x"})
+
+    assert [r.content for r in await service.query("banana", collection_name="c")] == [
+        "banana"
+    ]
+    assert await service.count_entries("c") == 1
+
+
+@pytest.mark.asyncio
+async def test_provision_false_on_a_new_file_creates_nothing(service_factory, tmp_path):
+    """Opening a file is not provisioning: the registry waits for DDL."""
+    filename = str(tmp_path / "runtime.db")
+    service = service_factory(filename, provision=False)
+
+    assert await service.list_collections() == []
+    conn = sqlite3.connect(filename)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master")}
+    conn.close()
+    # sqlite-vector keeps its own bookkeeping tables; Kaval.AI created none.
+    assert {name for name in tables if name.startswith("rag_")} == set()
+
+
+def test_decode_f32_blob_accepts_what_a_driver_may_return():
+    import struct
+
+    from kavalai.rag.sqllite import _decode_f32_blob
+
+    assert _decode_f32_blob(None) is None
+    assert _decode_f32_blob(struct.pack("<2f", 0.5, -1.0)) == [0.5, -1.0]
+    assert _decode_f32_blob("[0.5, -1.0]") == [0.5, -1.0]
+    assert _decode_f32_blob((0.5, -1.0)) == [0.5, -1.0]

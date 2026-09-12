@@ -17,7 +17,7 @@ limitations under the License.
 import { TestBed } from '@angular/core/testing';
 import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
 import { RagService } from './rag-service';
-import { RagResult, RagStats, RagQueryResponse } from '../models/rag';
+import { RagCollection, RagResult, RagStats, RagQueryResponse } from '../models/rag';
 
 describe('RagService', () => {
   let service: RagService;
@@ -97,5 +97,31 @@ describe('RagService', () => {
     const req = httpMock.expectOne(`/api/projects/${projectId}/rag/stats`);
     expect(req.request.method).toBe('GET');
     req.flush(mockStats);
+  });
+
+  it('should query RAG without a model', () => {
+    const queryData = { text: 'query', collection_name: 'faq' };
+
+    service.queryRag('proj123', queryData).subscribe(response => {
+      expect(response.results).toEqual([]);
+    });
+
+    const req = httpMock.expectOne('/api/projects/proj123/rag/query');
+    expect(req.request.body).toEqual(queryData);
+    req.flush({ results: [], pca_data: null });
+  });
+
+  it('should list RAG collections with their models', () => {
+    const mockCollections: RagCollection[] = [
+      { name: 'faq', model: 'openai/text-embedding-3-small', embedding_size: 1536, schema_version: 2, count: 12 }
+    ];
+
+    service.getRagCollections('proj123').subscribe(collections => {
+      expect(collections).toEqual(mockCollections);
+    });
+
+    const req = httpMock.expectOne('/api/projects/proj123/rag/collections');
+    expect(req.request.method).toBe('GET');
+    req.flush(mockCollections);
   });
 });

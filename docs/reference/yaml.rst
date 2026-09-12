@@ -53,7 +53,10 @@ Top level
      - no
      - Default sampling/reliability options merged into
        :class:`~kavalai.LlmClientParameters` (``temperature``, ``top_p``,
-       ``timeout_seconds``, …). Nodes may override individual keys.
+       ``reasoning_effort``, ``max_output_tokens``, ``timeout_seconds``, …).
+       Nodes may override individual keys. A key that is not a field of
+       ``LlmClientParameters`` fails the load — an output cap spelled
+       ``max_tokens`` would otherwise load, look set, and do nothing.
    * - ``rag_service``
      - no
      - Default RAG service name for ``rag_query`` nodes. A node may override
@@ -85,8 +88,9 @@ Top level
 Validation happens when the graph is loaded, not when it runs. A workflow is
 rejected if node names collide, if there is not exactly one ``start`` node, if
 there is no ``end`` node, if two ``end`` nodes return different data types, if a
-transition names a node that does not exist, or if a node writes to an ``output``
-that is not declared in ``data_types``.
+transition names a node that does not exist, if a node writes to an ``output``
+that is not declared in ``data_types``, or if an ``llm_kwargs`` key or value is
+not one :class:`~kavalai.LlmClientParameters` accepts.
 
 data_types
 ----------
@@ -207,10 +211,23 @@ the validated result is stored under ``output``.
    * - ``use_history``
      - Replay this session's chat history into the call. Default ``true`` —
        which is what gives a chatbot memory across turns.
+   * - ``history_limit``
+     - The most recent messages of the session sent with the prompt, the
+       current user message included. Default ``50``; ``0`` sends none.
+   * - ``history_max_chars``
+     - A ceiling on the characters of those messages. Whole messages are
+       dropped from the oldest end until the rest fits; a message is never
+       cut. Characters rather than tokens, so the budget means the same for
+       every provider and needs no tokenizer — a cost ceiling, not an exact
+       token count. Default: no ceiling.
    * - ``llm_model``
      - Overrides the workflow default for this node.
    * - ``llm_kwargs``
-     - Per-node sampling/reliability overrides.
+     - Per-node sampling/reliability overrides, with the same keys as the
+       top-level ``llm_kwargs``. ``max_output_tokens`` caps the call's
+       output; a call that reaches the cap raises
+       :class:`~kavalai.OutputTruncatedError` rather than returning a partial
+       answer.
    * - ``stream_output``
      - Emit this node's completion as ``partial`` events. Default ``false``.
    * - ``stream_delta``
@@ -236,7 +253,8 @@ already know.
      max_steps: 6
      next: write_up
 
-Takes every ``llm`` key above except ``use_history``, plus:
+Takes every ``llm`` key above except ``use_history``, ``history_limit`` and
+``history_max_chars`` — an agent loop does not replay the chat history — plus:
 
 .. list-table::
    :header-rows: 1
@@ -344,15 +362,29 @@ service passed to the engine is registered as ``"default"``.
    * - ``top_k``
      - Maximum hits. Default ``5``.
    * - ``source_ids``
-     - Restrict the search to these source identifiers.
+     - Restrict the search to these source identifiers. Absent means no
+       restriction; an empty list matches nothing, so a filter computed to be
+       empty never widens into a search of every source.
    * - ``keep_best``
      - Keep only the best hit per ``source_id``, for documents indexed as many
        chunks. Default ``false``.
+   * - ``min_similarity``
+     - Drop hits whose similarity is below this value, between ``-1`` and
+       ``1``. Similarity is higher-is-better cosine on every backend, so one
+       number means the same on each; a useful threshold still depends on the
+       embedding model. The filter applies after ``top_k``, so fewer than
+       ``top_k`` hits may remain.
    * - ``store``
      - ``results`` (default) stores the full hit list, so scores and metadata
        remain available to ``if`` / ``switch`` nodes. ``content`` stores just
        the hit texts joined by blank lines, which is what a following ``llm``
        node's prompt usually wants.
+
+Whatever ``store`` says, the node records its hits — each one's ``id``,
+``source_id``, ``similarity`` and ``metadata``, without the text — on its task
+row and in the ``output_data`` of its ``node_completed`` event, so the passages
+behind an answer can be cited and audited. The query embedding is reported to
+the run's token count and recorded as a model call of the run.
 
 The service itself is supplied by the caller
 (``WorkflowEngine(..., rag_services=my_service)``) or registered with
@@ -499,6 +531,15 @@ Dicts and lists are inserted as JSON. An unresolvable reference raises rather
 than rendering empty, so a typo fails loudly instead of silently weakening the
 prompt.
 
+Rendering is a single pass: a value that is inserted is never rendered again,
+so text containing ``{{ … }}`` arrives in the prompt literally. This is what
+makes per-run template values safe. A template declared in the document may be
+given another value for one run from Python —
+``engine.run(data, templates={"house_style": text})`` — and the values used are
+recorded with the run. Only declared templates may be overridden, and the
+override is a Python argument, never a field of the HTTP request: a request
+field would let a caller rewrite the author's instructions.
+
 .. note::
 
    This is a small, fixed substitution — not Jinja2. Only those three prefixes
@@ -578,6 +619,14 @@ are allowed, so this is what makes them safe.
 .. code-block:: python
 
    engine = WorkflowEngine.from_yaml_path("workflow.yaml", max_node_visits=50)
+
+A run can also be bounded in time. ``run_timeout`` on the engine, or
+``timeout`` on a single ``run`` / ``run_stream`` call, is the number of seconds
+after which the run is cancelled — parallel branches included — and recorded as
+failed with a :class:`~kavalai.WorkflowTimeoutError`. The agent server fills
+``run_timeout`` from ``KAVALAI_AGENT_RUN_TIMEOUT_SECONDS``. Neither is a YAML
+key: how long a run may take is a property of the deployment, not of the
+graph.
 
 A complete example
 ------------------

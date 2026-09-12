@@ -49,3 +49,12 @@ export interface RagStats {
   total_collections: number;
   collections: string[];
 }
+
+/** A registered collection; `model` is the one its entries were embedded with. */
+export interface RagCollection {
+  name: string;
+  model: string;
+  embedding_size: number;
+  schema_version: number;
+  count: number;
+}

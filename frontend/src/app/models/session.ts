@@ -31,6 +31,7 @@ export interface SessionSummary {
   first_message: string | null;
   last_message: string | null;
   created_at: string;
+  /** Last activity: moved by every run, and the order of the conversation list. */
   updated_at: string;
 }
 

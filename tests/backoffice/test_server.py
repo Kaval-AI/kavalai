@@ -204,15 +204,61 @@ async def test_projects_get_llm_call_stats(client, backoffice_db):
         mock_sm.return_value = mock_sessionmaker
         mock_session.__aenter__.return_value = mock_session
 
+        agent_id, session_id, run_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
         with patch(
             "kavalai.agent_service.AgentService.get_model_call_stats",
             return_value=[],
         ) as mock_get_stats:
-            response = await client.get(f"/projects/{project_id}/llm-call-stats")
+            response = await client.get(
+                f"/projects/{project_id}/llm-call-stats",
+                params={
+                    "call_type": "embedding",
+                    "limit": 5,
+                    "offset": 10,
+                    "agent_id": str(agent_id),
+                    "session_id": str(session_id),
+                    "run_id": str(run_id),
+                },
+            )
 
             assert response.status_code == 200
             assert response.json() == []
-            mock_get_stats.assert_called_once()
+            mock_get_stats.assert_called_once_with(
+                call_type="embedding",
+                limit=5,
+                offset=10,
+                agent_id=agent_id,
+                session_id=session_id,
+                run_id=run_id,
+            )
+
+
+@pytest.mark.asyncio
+async def test_a_rag_query_without_text_is_refused(client):
+    """Only the text is required; the collection supplies the model."""
+    project = db.Project(
+        id=uuid.uuid4(),
+        name="P1",
+        db_user="u",
+        db_password="p",
+        db_host="h",
+        db_port=5432,
+        db_name="d",
+    )
+    with (
+        patch("kavalai.backoffice.server.assert_logged_in"),
+        patch(
+            "kavalai.backoffice.server.get_project_and_assert_access",
+            return_value=project,
+        ),
+    ):
+        response = await client.post(
+            f"/projects/{project.id}/rag/query",
+            json={"model": "fake/model", "collection_name": "facts"},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "text is required"
 
 
 @pytest.mark.asyncio
@@ -431,3 +477,122 @@ async def test_user_details_keeps_valid_active_project(client, backoffice_db):
 
     assert response.status_code == 200
     assert response.json()["active_project_id"] == str(project.id)
+
+
+def test_rag_service_for_project_follows_the_database_type(tmp_path):
+    """One helper picks the backend, so every explorer endpoint agrees."""
+    from kavalai.backoffice.server import rag_service_for_project
+    from kavalai.rag import PostgresRagService, SqliteRagService
+
+    sqlite_project = db.Project(
+        name="local", db_type="sqlite", db_name=str(tmp_path / "agents.db")
+    )
+    service = rag_service_for_project(sqlite_project, model="fake/model")
+    assert isinstance(service, SqliteRagService)
+    assert service.model == "fake/model"
+    service.close()
+
+    postgres_project = db.Project(
+        name="pg",
+        db_host="h",
+        db_port=5432,
+        db_user="u",
+        db_password="p",
+        db_name="d",
+        db_schema="agents",
+    )
+    factory = MagicMock()
+    service = rag_service_for_project(postgres_project, session_factory=factory)
+    assert isinstance(service, PostgresRagService)
+    assert service.session_maker is factory
+    assert service.schema == "agents"
+    assert service.model is None
+
+
+@pytest.mark.asyncio
+async def test_a_sqlite_project_is_browsed_from_its_file(
+    client, backoffice_db, tmp_path
+):
+    """End to end on a SQLite project: the agent tables an agent server
+    created with ``init_sqlite`` and a RAG index in the same file are read by
+    the stats, model-call, connection-test and RAG endpoints."""
+    from kavalai.agent_service import AgentService
+    from kavalai.backoffice.project_service import project_sessionmaker
+    from kavalai.db import ModelCallStat, db_manager
+    from kavalai.rag import SqliteRagService
+    from kavalai.testing import FakeEmbeddingClient, fake_providers
+
+    path = str(tmp_path / "agents.db")
+    await db_manager.init_sqlite(db_path=path)
+    index = SqliteRagService(path, model="fake/model")
+    index.embedding_client = MagicMock(
+        compute_embeddings=AsyncMock(
+            return_value=(
+                [[1.0, 0.0], [0.0, 1.0]],
+                MagicMock(total_tokens=2, batch_size=2),
+            )
+        )
+    )
+    await index.index_batch(
+        texts=["a", "b"], metadata_list=[{}, {}], collection_name="facts"
+    )
+    index.close()
+
+    project = db.Project(id=uuid.uuid4(), name="local", db_type="sqlite", db_name=path)
+    backoffice_db.add(project)
+    await backoffice_db.commit()
+
+    session_id, run_id = uuid.uuid4(), uuid.uuid4()
+    await AgentService(project_sessionmaker(project)).add_model_call_stats(
+        ModelCallStat(call_type="embedding", model="fake/model", total_tokens=2),
+        session_id=session_id,
+        run_id=run_id,
+    )
+
+    with (
+        patch("kavalai.backoffice.server.assert_logged_in"),
+        patch(
+            "kavalai.backoffice.server.get_project_and_assert_access",
+            return_value=project,
+        ),
+    ):
+        response = await client.get(f"/projects/{project.id}/rag/stats")
+        assert response.status_code == 200
+        assert response.json() == {
+            "total_entries": 2,
+            "total_collections": 1,
+            "collections": ["facts"],
+        }
+
+        response = await client.get(
+            f"/projects/{project.id}/llm-call-stats", params={"run_id": str(run_id)}
+        )
+        assert response.status_code == 200
+        [call] = response.json()
+        assert (call["session_id"], call["run_id"]) == (str(session_id), str(run_id))
+
+        response = await client.get(
+            f"/projects/{project.id}/llm-call-stats",
+            params={"run_id": str(uuid.uuid4())},
+        )
+        assert response.json() == []
+
+        response = await client.get(f"/projects/{project.id}/rag/collections")
+        assert response.status_code == 200
+        assert [(c["name"], c["model"], c["count"]) for c in response.json()] == [
+            ("facts", "fake/model", 2)
+        ]
+
+        # No model in the request: the collection is embedded with its own.
+        with fake_providers(embedding=FakeEmbeddingClient(dimension=2)):
+            response = await client.post(
+                f"/projects/{project.id}/rag/query",
+                json={"text": "a", "collection_name": "facts"},
+            )
+        assert response.status_code == 200
+        assert response.json()["pca_data"] is None
+        assert {r["model"] for r in response.json()["results"]} == {"fake/model"}
+
+        response = await client.post(f"/projects/test-connection/{project.id}")
+        assert response.status_code == 200
+        assert response.json()["status"] == "success"

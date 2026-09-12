@@ -21,6 +21,7 @@ import { UserService } from '../../services/user-service';
 import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
 import { of, BehaviorSubject, throwError } from 'rxjs';
 import { Task } from '../../models/task';
+import { LLMCallStat } from '../../models/llm-call-stat';
 import { TasksList } from '../tasks-list/tasks-list';
 
 describe('RunTasksPage', () => {
@@ -38,7 +39,8 @@ describe('RunTasksPage', () => {
   ];
 
   beforeEach(async () => {
-    agentServiceSpy = jasmine.createSpyObj('AgentService', ['getSessionDetails']);
+    agentServiceSpy = jasmine.createSpyObj('AgentService', ['getSessionDetails', 'getLLMCallStats']);
+    agentServiceSpy.getLLMCallStats.and.returnValue(of([]));
     userDetailsSubject = new BehaviorSubject({ active_project_id: 'proj1' });
     userServiceSpy = {
       userDetails: userDetailsSubject.asObservable()
@@ -63,6 +65,56 @@ describe('RunTasksPage', () => {
     component = fixture.componentInstance;
     router = TestBed.inject(Router);
     spyOn(router, 'navigate');
+  });
+
+  describe('model calls', () => {
+    const call = (id: string, createdAt: string, totalTokens: number | null): LLMCallStat => ({
+      id, call_type: 'llm', model: 'openai/gpt-5-mini', agent_id: 'agent1',
+      session_id: 'sess1', run_id: 'run1', response_code: 200,
+      prompt_tokens: totalTokens, completion_tokens: null, total_tokens: totalTokens,
+      cached_prompt_tokens: null, reasoning_tokens: null, duration_seconds: 0.25,
+      request_data: null, response_data: null, created_at: createdAt, updated_at: createdAt
+    });
+
+    beforeEach(() => {
+      agentServiceSpy.getSessionDetails.and.returnValue(of({ session_id: 'sess1', tasks: mockTasks, messages: [], runs: [] }));
+    });
+
+    it('loads the calls of this run only, oldest first', () => {
+      agentServiceSpy.getLLMCallStats.and.returnValue(of([
+        call('newer', '2026-09-01T10:00:02Z', 30),
+        call('older', '2026-09-01T10:00:01Z', null)
+      ]));
+      fixture.detectChanges();
+
+      expect(agentServiceSpy.getLLMCallStats).toHaveBeenCalledWith('proj1', undefined, 100, 0, { runId: 'run1' });
+      expect(component.modelCalls.map(c => c.id)).toEqual(['older', 'newer']);
+      expect(component.modelCallTokens).toBe(30);
+
+      const section: HTMLElement = fixture.nativeElement.querySelector('.run-model-calls');
+      expect(section.textContent).toContain('Model Calls (2)');
+      expect(section.textContent).toContain('30 tokens in total');
+      expect(section.textContent).toContain('250 ms');
+    });
+
+    it('omits the section when the run made no model call', () => {
+      fixture.detectChanges();
+      expect(fixture.nativeElement.querySelector('.run-model-calls')).toBeNull();
+    });
+
+    it('keeps the tasks when the calls cannot be loaded', () => {
+      spyOn(console, 'error');
+      agentServiceSpy.getLLMCallStats.and.returnValue(throwError(() => new Error('boom')));
+      fixture.detectChanges();
+
+      expect(component.modelCalls).toEqual([]);
+      expect(component.tasks.length).toBe(2);
+      expect(component.error).toBeNull();
+    });
+
+    it('formats a missing duration as a dash', () => {
+      expect(component.formatDuration(null)).toBe('-');
+    });
   });
 
   it('should create', () => {
