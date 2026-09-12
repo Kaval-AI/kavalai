@@ -4,8 +4,8 @@ Versions
 The main changes in each release of the ``kavalai`` package. Releases are
 tagged ``vX.Y.Z`` in the repository and published to PyPI.
 
-Unreleased
-----------
+1.0.4 — 2026-09-12
+------------------
 
 Added
 ^^^^^
@@ -145,6 +145,12 @@ Added
   for their transaction on pgvector 0.8 or later, so a filter whose rows lie
   away from the query still returns ``top_k`` rows.
 * ``rag_service_from_uri`` forwards further keyword options to the service.
+* ``KAVALAI_RAG_MODEL`` registers the ``default`` RAG service when the agent
+  server starts, over the index at ``KAVALAI_RAG_URI`` (a Postgres URI or
+  ``sqlite:///file``) in the optional ``KAVALAI_RAG_SCHEMA``, with the
+  normalizer from ``KAVALAI_EMBEDDING_NORMALIZER_YAML``; a deployment with one
+  index needs no setup module. The URI is required with the model: the index
+  is not assumed to live in the agent database.
 * ``model_call_stats.session_id`` and ``run_id`` (agents migration ``0005``):
   every model call a run makes — the query embedding of a ``rag_query`` node
   included — is attributed to its agent, session and run, so cost per run and
@@ -239,7 +245,9 @@ Changed
   or models, the one whose registry row lost raises ``ValueError`` instead of
   carrying on.
 * ``examples/ragindex/index_csv.py --replace`` uses ``replace``, one source
-  per transaction.
+  per transaction. ``--index`` in ``index_csv.py`` and ``query_index.py`` is a
+  database URI or a SQLite file path; the ``postgres`` shorthand, which read
+  ``KAVALAI_DB_URI``, is gone.
 * ``sessions.updated_at`` is moved by every run and so records a session's
   last activity; before, nothing updated it after the session was created.
   Migration ``0005`` backfills it from each session's last run, adds composite
@@ -263,7 +271,6 @@ Changed
   projection uses as well. The RAG explorer shows the selected collection's
   recorded model instead of asking for one, and drops **All Collections**,
   since a query searches exactly one collection.
-
 * ``SqliteRagService`` uses the shared storage model: a registry and a table
   per collection, each with its own embedding dimension, instead of a single
   ``rag_index`` table with one dimension per file. A file in the old layout is
@@ -316,6 +323,9 @@ Fixed
   launcher, greeting and choice chips, and the ``hidden`` attribute is
   honoured, so the typing indicator and a closed window no longer show.
   Conversation ids are generated on pages without a secure context.
+* A ``normalizer`` given to a RAG service was never applied: the services
+  passed it to the embedding client without asking for normalisation. It is
+  now applied on the index side and on the query side alike.
 * SQLite ``delete_by_metadata`` does not treat JSON ``true`` as the number 1,
   matching PostgreSQL.
 * The Postgres insert casts embeddings to the schema-qualified
@@ -351,6 +361,9 @@ Upgrading
 * ``model=`` on a RAG service now names the model for collections it creates.
   Existing collections are embedded with their recorded model, and a service
   without a model can query them, where it used to raise.
+* An index built under 1.0.3 by a RAG service that had a ``normalizer`` holds
+  unnormalised vectors, while its queries are now normalised. Rebuild such an
+  index, or construct the service without the normalizer.
 * A caller that computes ``source_ids`` and may produce an empty list now gets
   no hits for it, rather than a search of the whole collection. Pass ``None``
   where "no restriction" is meant.
