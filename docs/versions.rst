@@ -7,6 +7,54 @@ tagged ``vX.Y.Z`` in the repository and published to PyPI.
 1.0.4 — 2026-09-12
 ------------------
 
+Security
+^^^^^^^^
+
+This release closes several ways in which an agent served to the public could
+be made to reach internal networks, to disclose what only its operator should
+see, or to spend without bound. Each change is described in full under the
+headings that follow.
+
+* **Server-side request forgery.** ``http_request`` and ``crawl_url`` refuse
+  loopback, private, link-local, carrier-grade NAT, multicast, reserved and
+  cloud metadata targets, and any IPv6 address that maps, translates or
+  tunnels to such an IPv4 address. ``http_request`` connects to the address
+  it checked, so DNS rebinding cannot redirect it, and checks every redirect
+  hop again (:mod:`kavalai.net`). An agent meant to reach an intranet is built
+  with ``allow_private_networks=True``, an argument of the tool factory that
+  the model cannot set.
+* **Disclosure to end users.** :func:`kavalai.server.public_events` removes
+  node events, token usage and restart reasons from a stream, and replaces a
+  failed run's error text — which can carry provider request ids, quota state
+  or SQL — with a fixed message quoting the run id.
+  ``KAVALAI_AGENT_PUBLIC_EVENTS`` applies it under ``python -m kavalai.server``.
+* **Unbounded spend per turn.** ``max_output_tokens`` caps what a call may
+  generate, and a response stopped at the cap raises
+  :class:`~kavalai.OutputTruncatedError` instead of passing as complete. An
+  ``llm_kwargs`` key the clients do not know, such as a misspelt cap, fails
+  the workflow load instead of being ignored. ``history_limit`` and
+  ``history_max_chars`` bound the history an ``llm`` node sends, and
+  ``run_timeout`` the duration of a run. ``get_chat_history`` returned the
+  oldest fifty messages of a session, so a long conversation paid for a full
+  history on every turn while the model never saw the latest exchange.
+* **Fail-open retrieval filter.** ``source_ids=[]`` searched the whole
+  collection; it now matches nothing, so a caller that derives the list from
+  what a user may see, and derives an empty one, receives no entries.
+* **Least privilege.** ``provision=False`` on the RAG services issues no DDL,
+  and read paths no longer create the registry, so the role an agent server
+  connects as needs no ``CREATE`` right on the RAG schema; collections are
+  created beforehand with ``create_collection()``.
+* **Personal data in the agent database.** ``record_payloads=False`` keeps
+  prompts, inputs, outputs and model-call payloads out of the task log, and
+  ``max_payload_bytes`` caps model-call payloads as well as node payloads.
+  ``AgentService.purge_sessions`` and ``delete_history_for_session`` blank the
+  model-call payloads of the conversations they remove, so a deleted
+  conversation does not survive as a prompt in ``model_call_stats``.
+* **Crafted input.** :mod:`kavalai.text` parses HTML and chunks text in
+  linear time, without regular expressions, so a crafted page cannot stall
+  the process that indexes it; its tests bound the time taken on adversarial
+  input.
+
 Added
 ^^^^^
 
