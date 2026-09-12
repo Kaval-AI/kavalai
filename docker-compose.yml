@@ -14,38 +14,6 @@ services:
     networks:
       - kavalai
 
-  backoffice-migrations:
-    build:
-      context: .
-      dockerfile: dockerfiles/backoffice.Dockerfile
-    command: backoffice-migrations
-    env_file: .env
-    environment:
-      - KAVALAI_BO_DB_URI=postgresql://kavalai_dev:kavalai_dev@postgres_db:5432/kavalai_dev
-      - KAVALAI_BO_DB_SCHEMA=backoffice
-    depends_on:
-      - postgres_db
-    networks:
-      - kavalai
-
-  backoffice:
-    build:
-      context: .
-      dockerfile: dockerfiles/backoffice.Dockerfile
-    command: backoffice-server
-    ports:
-      - "8000:80"
-    env_file: .env
-    environment:
-      - KAVALAI_BO_DB_URI=postgresql://kavalai_dev:kavalai_dev@postgres_db:5432/kavalai_dev
-      - KAVALAI_BO_DB_SCHEMA=backoffice
-      - KAVALAI_BO_FRONTEND_URL=http://localhost:8000
-    depends_on:
-      - backoffice-migrations
-    networks:
-      - kavalai
-
-
   ollama:
     image: ollama/ollama:latest
     container_name: ollama
@@ -55,7 +23,6 @@ services:
       - ./local_data/ollama:/root/.ollama
     networks:
       - kavalai
-
 
   crawl4ai:
     image: unclecode/crawl4ai:latest
@@ -67,19 +34,6 @@ services:
     shm_size: "1g"
     networks:
       - kavalai
-
-
-  torproxy:
-    image: dperson/torproxy
-    restart: always
-    ports:
-      - "8118:8118"
-      - "9050:9050"
-    environment:
-      - TZ=UTC
-    networks:
-      - kavalai
-
 networks:
   kavalai:
     driver: bridge
