@@ -107,6 +107,12 @@ html_static_path = ["_static"]
 # root, and docs/_build is gitignored, so we ship it from source on every build.
 html_extra_path = ["_extra"]
 html_css_files = ["custom.css"]
+html_js_files = [
+    (
+        "https://embed.kaval.ai/w/kaval-ai-docs-assistant-02341a56bbb7.js",
+        {"async": "async"},
+    ),
+]
 
 html_theme_options = {
     "icon": {
