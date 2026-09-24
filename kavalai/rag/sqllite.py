@@ -124,6 +124,7 @@ class SqliteRagService(CollectionRagService):
         provision: bool = True,
         stats_receiver: Any = None,
         vector_type: str = "vector",
+        read_only: bool = False,
     ):
         """
         Initialize the SqliteRagService.
@@ -144,6 +145,13 @@ class SqliteRagService(CollectionRagService):
                 :class:`~kavalai.rag.collections.CollectionRagService`.
             stats_receiver: Receives each embedding call's statistics.
             vector_type (str): Only ``"vector"`` is stored by this backend.
+            read_only (bool): Open the file for reading only: the connection
+                sets ``PRAGMA query_only``, so any write — an index, a delete,
+                the registry a missing file would get — fails with
+                ``sqlite3.OperationalError`` ("attempt to write a readonly
+                database"). Implies ``auto_create=False`` and
+                ``provision=False``. Querying, listing and counting work as
+                before.
 
         Raises:
             FileNotFoundError: If the file is missing and auto_create is False.
@@ -151,6 +159,9 @@ class SqliteRagService(CollectionRagService):
                         or the file holds the single-table layout of
                         kavalai 1.0, which this version does not read.
         """
+        if read_only:
+            auto_create = False
+            provision = False
         super().__init__(
             model=model,
             normalizer=normalizer,
@@ -159,6 +170,7 @@ class SqliteRagService(CollectionRagService):
             vector_type=vector_type,
         )
         self.filename = filename
+        self.read_only = read_only
 
         in_memory = filename == ":memory:"
         if not auto_create and not in_memory and not os.path.exists(filename):
@@ -168,6 +180,8 @@ class SqliteRagService(CollectionRagService):
 
         self._conn = sqlite3.connect(filename)
         self._conn.row_factory = sqlite3.Row
+        if read_only:
+            self._conn.execute("PRAGMA query_only = ON")
         self._load_vector_extension()
 
         has_registry = self._table_exists(self.REGISTRY_TABLE)

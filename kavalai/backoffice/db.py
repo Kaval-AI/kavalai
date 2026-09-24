@@ -22,7 +22,7 @@ from uuid import UUID, uuid4
 from loguru import logger
 from sqlalchemy import Enum, MetaData
 from sqlalchemy import TEXT, Boolean, ForeignKey, DateTime, Integer
-from sqlalchemy import select, Index
+from sqlalchemy import select, Index, true
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -111,7 +111,13 @@ class Project(Base):
     # Connection to the project's own agent database. ``db_type`` selects the
     # backend: ``postgresql`` uses host, port, user, password, database and
     # schema; ``sqlite`` reads ``db_name`` as the file path and ignores the
-    # rest.
+    # rest. ``rag_schema`` is the schema of the RAG collections when a
+    # deployment keeps them apart from the runtime tables; ``None`` means the
+    # same schema. ``read_only`` opens every connection to the agent database
+    # so that the database itself refuses writes (see
+    # ``DatabaseManager.get_sessionmaker``); it is on unless switched off,
+    # since the backoffice only reads and the database it is pointed at may
+    # be production.
     db_type: Mapped[str] = mapped_column(
         TEXT, nullable=False, default="postgresql", server_default="postgresql"
     )
@@ -121,6 +127,10 @@ class Project(Base):
     db_password: Mapped[str | None] = mapped_column(TEXT)
     db_name: Mapped[str | None] = mapped_column(TEXT)
     db_schema: Mapped[str | None] = mapped_column(TEXT, default="public")
+    rag_schema: Mapped[str | None] = mapped_column(TEXT)
+    read_only: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=true()
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)

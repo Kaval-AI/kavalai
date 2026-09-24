@@ -255,12 +255,22 @@ class DatabaseManager:
         echo=None,
         pool_size=None,
         max_overflow=None,
+        read_only=False,
     ):
         """Return an ``async_sessionmaker`` for the given database and schema.
 
         A ``sqlite://`` URI is served by :meth:`get_sqlite_sessionmaker`: the
         file named by the URI, foreign keys on, one shared connection, and
         ``schema`` ignored because SQLite has none.
+
+        ``read_only=True`` returns an engine of its own whose connections
+        refuse every write at the database: on PostgreSQL each connection is
+        opened with ``default_transaction_read_only=on``, so an ``INSERT``,
+        ``UPDATE``, ``DELETE`` or DDL statement fails with "cannot execute ...
+        in a read-only transaction" whatever the role may do; on SQLite each
+        connection sets ``PRAGMA query_only``. The guarantee is the
+        connection's, not the caller's discipline, which is what the
+        backoffice needs when it is pointed at a production database.
 
         ``schema`` selects the schema the ORM tables live in. The models are
         defined schema-less; the schema is applied per-engine via SQLAlchemy's
@@ -285,22 +295,35 @@ class DatabaseManager:
         # no schemas, so ``schema`` and the pool options do not apply.
         if is_sqlite_uri(url):
             return self.get_sqlite_sessionmaker(
-                db_path=sqlite_path_from_uri(url), echo=bool(echo)
+                db_path=sqlite_path_from_uri(url),
+                echo=bool(echo),
+                read_only=read_only,
             )
 
-        # Cache per (url, schema): translate maps are engine-level options.
-        key = (url, schema)
+        # Cache per (url, schema, read_only): translate maps and connection
+        # settings are engine-level options.
+        key = (url, schema, bool(read_only))
         requested = {"echo": echo, "pool_size": pool_size, "max_overflow": max_overflow}
         if key not in self._engines:
             effective = {
                 name: default if requested[name] is None else requested[name]
                 for name, default in _ENGINE_OPTION_DEFAULTS.items()
             }
+            connect_args = (
+                {
+                    "connect_args": {
+                        "server_settings": {"default_transaction_read_only": "on"}
+                    }
+                }
+                if read_only
+                else {}
+            )
             engine = create_async_engine(
                 url,
                 echo=effective["echo"],
                 pool_size=effective["pool_size"],
                 max_overflow=effective["max_overflow"],
+                **connect_args,
             )
             if schema:
                 engine = engine.execution_options(schema_translate_map={None: schema})
@@ -358,7 +381,16 @@ class DatabaseManager:
         finally:
             cursor.close()
 
-    def get_sqlite_engine(self, *, db_path=None, echo=False):
+    @staticmethod
+    def _query_only_pragma_listener(dbapi_connection, _record):
+        """Connect listener that makes a SQLite connection refuse writes."""
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA query_only=ON")
+        finally:
+            cursor.close()
+
+    def get_sqlite_engine(self, *, db_path=None, echo=False, read_only=False):
         """Return a cached **async** SQLite engine backed by ``db_path``.
 
         Requires ``greenlet`` (SQLAlchemy's async engine dependency), so this is
@@ -367,21 +399,28 @@ class DatabaseManager:
         ``db_path`` defaults to the IndexedDB-backed file under Pyodide and to an
         in-memory database otherwise. SQLite foreign keys are enabled. A
         :class:`~sqlalchemy.pool.StaticPool` keeps a single shared connection so
-        an in-memory database survives across sessions.
+        an in-memory database survives across sessions. ``read_only=True`` is
+        a second engine on the same file whose connection has
+        ``PRAGMA query_only`` set, so a write fails with "attempt to write a
+        readonly database".
         """
         db_path = self._resolve_sqlite_path(db_path)
-        key = f"sqlite-async::{db_path}"
+        key = f"sqlite-async{'-ro' if read_only else ''}::{db_path}"
         if key not in self._engines:
             engine = create_async_engine(
                 f"sqlite+aiosqlite:///{db_path}", echo=echo, poolclass=StaticPool
             )
             event.listen(engine.sync_engine, "connect", self._fk_pragma_listener)
+            if read_only:
+                event.listen(
+                    engine.sync_engine, "connect", self._query_only_pragma_listener
+                )
             self._engines[key] = engine
         return self._engines[key]
 
-    def get_sqlite_sessionmaker(self, *, db_path=None, echo=False):
+    def get_sqlite_sessionmaker(self, *, db_path=None, echo=False, read_only=False):
         """Return an ``async_sessionmaker`` bound to the async SQLite engine."""
-        engine = self.get_sqlite_engine(db_path=db_path, echo=echo)
+        engine = self.get_sqlite_engine(db_path=db_path, echo=echo, read_only=read_only)
         return async_sessionmaker(
             bind=engine, class_=AsyncSession, expire_on_commit=False
         )
