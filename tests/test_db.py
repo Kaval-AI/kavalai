@@ -284,6 +284,71 @@ def test_sqlite_uri_helpers():
 
 
 @pytest.mark.asyncio
+async def test_a_read_only_sqlite_engine_refuses_writes(tmp_path):
+    """``read_only=True`` is a second engine on the file with
+    ``PRAGMA query_only``: reads as before, a write refused by SQLite."""
+    from sqlalchemy.exc import OperationalError
+
+    db_path = tmp_path / "agents.db"
+    await db_manager.init_sqlite(db_path=str(db_path))
+    writer = db_manager.get_sessionmaker(uri=f"sqlite:///{db_path}")
+    reader = db_manager.get_sessionmaker(uri=f"sqlite:///{db_path}", read_only=True)
+    assert reader.kw["bind"] is not writer.kw["bind"]
+    assert (
+        reader.kw["bind"]
+        is db_manager.get_sqlite_sessionmaker(db_path=str(db_path), read_only=True).kw[
+            "bind"
+        ]
+    )
+
+    async with writer() as session:
+        agent = await insert(session, Agent, {"name": "bot"})
+    async with reader() as session:
+        assert (await session.execute(text("PRAGMA query_only"))).scalar() == 1
+        assert (await session.execute(text("PRAGMA foreign_keys"))).scalar() == 1
+        assert (await get_one(session, Agent, agent.id)).name == "bot"
+        with pytest.raises(OperationalError, match="readonly database"):
+            await delete(session, Agent, agent.id)
+    async with writer() as session:
+        assert (await get_one(session, Agent, agent.id)).name == "bot"
+
+
+@pytest.mark.asyncio
+async def test_a_read_only_postgres_engine_refuses_writes(request):
+    """``read_only=True`` opens each connection with
+    ``default_transaction_read_only=on``, so the server refuses a write
+    whatever the role may do — the backoffice's guarantee on production."""
+    from sqlalchemy.exc import DBAPIError
+
+    config = request.getfixturevalue("agents_db_config")
+    request.getfixturevalue("migrated_agents_db")
+    writer = db_manager.get_sessionmaker(uri=config["uri"], schema=config["schema"])
+    reader = db_manager.get_sessionmaker(
+        uri=config["uri"], schema=config["schema"], read_only=True
+    )
+    assert reader.kw["bind"] is not writer.kw["bind"]
+    assert (
+        reader.kw["bind"]
+        is db_manager.get_sessionmaker(
+            uri=config["uri"], schema=config["schema"], read_only=True
+        ).kw["bind"]
+    )
+
+    async with writer() as session:
+        agent = await insert(session, Agent, {"name": "bot"})
+    async with reader() as session:
+        assert (
+            await session.execute(text("SHOW default_transaction_read_only"))
+        ).scalar() == "on"
+        assert (await get_one(session, Agent, agent.id)).name == "bot"
+        with pytest.raises(DBAPIError, match="read-only transaction"):
+            await delete(session, Agent, agent.id)
+    async with writer() as session:
+        assert (await get_one(session, Agent, agent.id)).name == "bot"
+        await delete(session, Agent, agent.id)
+
+
+@pytest.mark.asyncio
 async def test_get_sessionmaker_serves_sqlite_uris(tmp_path):
     """A ``sqlite://`` URI lands on the SQLite engine: schema ignored, the
     same shared engine as ``get_sqlite_sessionmaker`` and foreign keys on."""

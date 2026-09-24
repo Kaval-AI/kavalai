@@ -52,6 +52,10 @@
               <label for="db_schema">Schema</label>
               <input id="db_schema" type="text" formControlName="db_schema">
             </div>
+            <div class="form-field">
+              <label for="rag_schema">RAG Schema</label>
+              <input id="rag_schema" type="text" formControlName="rag_schema" placeholder="same as schema">
+            </div>
           </div>
 
           <div class="form-row">
@@ -65,6 +69,15 @@
             </div>
           </div>
         }
+
+        <div class="form-row">
+          <div class="form-field">
+            <label for="read_only" class="checkbox-label">
+              <input id="read_only" type="checkbox" formControlName="read_only">
+              Read-only: every connection the backoffice opens refuses writes at the database
+            </label>
+          </div>
+        </div>
 
         @if (projectId) {
           <div class="test-connection-row">

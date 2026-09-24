@@ -26,6 +26,37 @@ from kavalai.crud import insert, update, delete
 from kavalai.db import build_db_uri, db_manager
 
 
+PROJECT_FIELDS = frozenset(
+    {
+        "name",
+        "description",
+        "db_type",
+        "db_host",
+        "db_port",
+        "db_user",
+        "db_password",
+        "db_name",
+        "db_schema",
+        "rag_schema",
+        "read_only",
+    }
+)
+"""The fields of a project a client may set: its name, description and
+connection settings. Everything else a project row carries — ``id``, the
+timestamps, the caller's ``role`` the list endpoint adds — is the server's."""
+
+
+def project_fields(data: Dict[str, Any]) -> Dict[str, Any]:
+    """The part of a request body that may become project columns.
+
+    The projects page sends the whole project back as it listed it, so a
+    body may carry ``created_at`` as an ISO string, which the database
+    refuses for a timestamp column; keys outside :data:`PROJECT_FIELDS` are
+    dropped rather than written.
+    """
+    return {key: value for key, value in data.items() if key in PROJECT_FIELDS}
+
+
 class ProjectService:
     def __init__(self, session_maker: async_sessionmaker[AsyncSession]):
         self.session_maker = session_maker
@@ -36,7 +67,7 @@ class ProjectService:
 
     async def create_project(self, data: Dict[str, Any], owner_id: UUID) -> db.Project:
         async with self.session_maker() as session:
-            new_project = await insert(session, db.Project, data)
+            new_project = await insert(session, db.Project, project_fields(data))
             # The creator is the project's first owner.
             membership_data = {
                 "user_id": owner_id,
@@ -50,7 +81,7 @@ class ProjectService:
         self, project_id: UUID, data: Dict[str, Any]
     ) -> Optional[db.Project]:
         async with self.session_maker() as session:
-            return await update(session, db.Project, project_id, data)
+            return await update(session, db.Project, project_id, project_fields(data))
 
     async def delete_project(self, project_id: UUID) -> bool:
         async with self.session_maker() as session:
@@ -215,18 +246,44 @@ def project_schema(project: db.Project) -> Optional[str]:
     return None if project.db_type == "sqlite" else project.db_schema
 
 
+def project_rag_schema(project: db.Project) -> Optional[str]:
+    """The schema of the project's RAG collections: ``rag_schema`` when set,
+    otherwise the agent database's own schema (``None`` for SQLite)."""
+    if project.db_type == "sqlite":
+        return None
+    return project.rag_schema or project_schema(project)
+
+
+def project_read_only(project: db.Project) -> bool:
+    """Whether the backoffice may only read the project's agent database.
+
+    On unless the project says ``False``: a project built from a form
+    (``Project(**data)`` on the connection test) carries no column default,
+    and the safe reading of "unsaid" is read-only.
+    """
+    return project.read_only is not False
+
+
 def project_sessionmaker(project: db.Project) -> async_sessionmaker[AsyncSession]:
-    """A sessionmaker for the agent database the project points at."""
+    """A sessionmaker for the agent database the project points at.
+
+    A read-only project gets connections the database itself holds to reads
+    (:meth:`~kavalai.db.DatabaseManager.get_sessionmaker`).
+    """
     return db_manager.get_sessionmaker(
-        uri=project_db_uri(project), schema=project_schema(project)
+        uri=project_db_uri(project),
+        schema=project_schema(project),
+        read_only=project_read_only(project),
     )
 
 
 def describe_project_database(project: db.Project) -> str:
     """A log-safe description of the project's database (no password)."""
+    access = "read-only" if project_read_only(project) else "read-write"
     if project.db_type == "sqlite":
-        return f"sqlite file={project.db_name}"
+        return f"sqlite file={project.db_name}, {access}"
     return (
         f"host={project.db_host}, port={project.db_port}, db={project.db_name}, "
-        f"user={project.db_user}, schema={project.db_schema}"
+        f"user={project.db_user}, schema={project.db_schema}, "
+        f"rag_schema={project_rag_schema(project)}, {access}"
     )

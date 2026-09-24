@@ -430,6 +430,45 @@ async def test_metadata_keys_are_matched_whole(service_factory):
     assert await service.count_entries("c") == 1
 
 
+@pytest.mark.asyncio
+async def test_a_read_only_service_reads_and_refuses_every_write(
+    service_factory, tmp_path
+):
+    """``read_only=True`` sets ``PRAGMA query_only``, implies no provisioning
+    and no auto-create, and leaves querying, listing and counting as they were."""
+    path = str(tmp_path / "index.db")
+    writer = service_factory(path)
+    await writer.index_batch(
+        texts=["apple", "banana"],
+        metadata_list=[{"k": 1}, {"k": 2}],
+        collection_name="c",
+    )
+    writer.close()
+
+    reader = service_factory(path, read_only=True)
+    assert reader.read_only is True
+    assert reader.provision is False
+    assert [
+        r.content
+        for r in await reader.query("apple", collection_name="c", match={"k": 2})
+    ] == ["banana"]
+    assert [c["name"] for c in await reader.list_collections()] == ["c"]
+    assert await reader.count_entries("c") == 2
+    for attempt in (
+        reader.index("cherry", collection_name="c"),
+        reader.delete_by_metadata("c", {"k": 1}),
+        reader.create_collection("d", embedding_size=8),
+    ):
+        with pytest.raises(sqlite3.OperationalError, match="readonly database"):
+            await attempt
+    assert await reader.count_entries("c") == 2
+    reader.close()
+
+    with pytest.raises(FileNotFoundError):
+        service_factory(str(tmp_path / "missing.db"), read_only=True)
+    assert not (tmp_path / "missing.db").exists()
+
+
 def test_metadata_match_sql_qualifies_the_column_for_the_scan_and_the_delete():
     """The scan filters the joined table's column; the delete its own."""
     from kavalai.rag.sqllite import _metadata_match_sql

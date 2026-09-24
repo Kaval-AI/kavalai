@@ -197,8 +197,22 @@ and a cache in which derived artefacts such as trained PCA models are kept. The
 **Database Type** selects how the connection is described: a PostgreSQL project
 names host, port, user, password, database and schema; a SQLite project names
 the database file, which the backoffice must be able to read from its own
-filesystem. The project page is where the
-active project is chosen, new ones are created, and the connection is verified.
+filesystem. A PostgreSQL project may also name a **RAG Schema**, for a
+deployment that keeps its RAG collections in a schema of their own beside the
+runtime tables; left empty, the collections are looked for in the schema above.
+The project page is where the active project is chosen, new ones are created,
+and the connection is verified.
+
+**Read-only** is on for every project unless switched off. The backoffice only
+reads an agent database, and the database it is pointed at may be production,
+so the guarantee is placed where it cannot be argued with: every connection a
+read-only project opens is set to refuse writes by the database itself —
+``default_transaction_read_only`` on PostgreSQL, ``PRAGMA query_only`` on
+SQLite — whatever the connecting role would otherwise be allowed to do, and
+the RAG explorer's service never creates a registry or a collection. A
+project can be switched to read-write, which changes nothing today, since no
+page writes; the switch exists so that a future page that must write cannot
+do so on a project nobody opened for it.
 
 .. image:: projectinfopage.png
    :alt: Project page with the active-project selector, database access details

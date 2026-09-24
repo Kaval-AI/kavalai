@@ -226,6 +226,17 @@ describe('ProjectsPage', () => {
     expect(uri).not.toContain('••••••••');
   });
 
+  it('should carry the RAG schema and the access switch into the editable copy', () => {
+    component.selectedProject = {
+      id: '1', name: 'p', db_schema: 'agents_production', rag_schema: 'rag_production', read_only: true
+    } as Project;
+
+    component.editProject();
+
+    expect(component.editableProject.rag_schema).toBe('rag_production');
+    expect(component.editableProject.read_only).toBeTrue();
+  });
+
   it('should render file URIs for a SQLite project', () => {
     component.selectedProject = { db_type: 'sqlite', db_name: '/data/agents.db' } as Project;
 

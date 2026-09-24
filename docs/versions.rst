@@ -10,6 +10,17 @@ Unreleased
 Added
 ^^^^^
 
+* **Read-only projects in the backoffice.** ``projects.read_only`` (backoffice
+  revision 0004, on for every existing project) makes each connection the
+  backoffice opens to a project's agent database refuse writes at the
+  database: ``default_transaction_read_only=on`` on PostgreSQL, ``PRAGMA
+  query_only`` on SQLite, through
+  ``DatabaseManager.get_sessionmaker(read_only=True)`` and
+  ``SqliteRagService(read_only=True)``, both new. The RAG service the explorer
+  builds no longer provisions on any project. ``projects.rag_schema`` names
+  the schema of a project's RAG collections when a deployment keeps them
+  apart from the runtime tables; empty means the agent schema, as before.
+
 * **Metadata filtering in retrieval.** ``query`` and ``query_batch`` take
   ``match``, a mapping of top-level metadata keys to string, number or boolean
   values, and return only the entries whose metadata has every one of them

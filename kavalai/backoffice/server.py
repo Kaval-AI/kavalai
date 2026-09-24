@@ -48,7 +48,13 @@ from kavalai.backoffice import db
 from kavalai.backoffice import sessions as agent_sessions
 from kavalai.backoffice.db import is_member, is_owner
 from kavalai.backoffice.embedding_projector import train_pca
-from kavalai.backoffice.project_service import ProjectService, project_sessionmaker
+from kavalai.backoffice.project_service import (
+    ProjectService,
+    project_fields,
+    project_rag_schema,
+    project_read_only,
+    project_sessionmaker,
+)
 from kavalai.crud import delete, get_all, get_one, insert, select, update
 from kavalai.db import Agent, db_manager
 from kavalai.llm_clients.streamer import StreamContent, Streamer
@@ -560,17 +566,29 @@ def rag_service_for_project(
 
     Both backends share one storage model, so the explorer endpoints only
     differ in how they reach the database: a SQLite project's index lives in
-    the same file as its agent tables, a PostgreSQL project's in the same
-    schema, reached through ``session_factory`` (the project's sessionmaker
-    unless one is given).
+    the same file as its agent tables, a PostgreSQL project's in the project's
+    ``rag_schema`` (its agent schema unless one is set), reached through
+    ``session_factory`` (the project's sessionmaker unless one is given).
+
+    The service never provisions: the explorer only reads, and a registry or
+    collection it would create is a write to a database that may be
+    production. A read-only project's SQLite file is opened with
+    ``PRAGMA query_only`` besides.
     """
     if project.db_type == "sqlite":
-        return SqliteRagService(project.db_name, model=model, normalizer=normalizer)
+        return SqliteRagService(
+            project.db_name,
+            model=model,
+            normalizer=normalizer,
+            provision=False,
+            read_only=project_read_only(project),
+        )
     return PostgresRagService(
         session_factory or project_sessionmaker(project),
         model,
         normalizer=normalizer,
-        schema=project.db_schema,
+        schema=project_rag_schema(project),
+        provision=False,
     )
 
 
@@ -805,7 +823,7 @@ async def projects_test_connection(
     assert_logged_in(request)
 
     if project_id == "new":
-        project = db.Project(**data)
+        project = db.Project(**project_fields(data))
     else:
         project = await get_project_and_assert_access(request, UUID(project_id))
 

@@ -66,7 +66,9 @@ export class ProjectEditPage implements OnInit {
     db_user: ['', []],
     db_password: ['', []],
     db_name: ['', []],
-    db_schema: ['public', []]
+    db_schema: ['public', []],
+    rag_schema: ['', []],
+    read_only: [true, []]
   });
 
   ngOnInit() {

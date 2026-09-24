@@ -25,6 +25,8 @@ export interface Project {
   db_password?: string;
   db_name?: string;
   db_schema?: string;
+  rag_schema?: string;
+  read_only?: boolean;
   created_at?: string;
   updated_at?: string;
   role?: 'owner' | 'viewer';

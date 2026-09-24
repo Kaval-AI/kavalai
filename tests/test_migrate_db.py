@@ -367,8 +367,8 @@ _REPLACED_BY_0005 = {
 }
 
 
-def _alembic(uri, schema, action, revision):
-    """Move the agents set to ``revision``; the runner only goes to head."""
+def _alembic(uri, schema, action, revision, migration_set="agents"):
+    """Move a migration set to ``revision``; the runner only goes to head."""
     from alembic import command
     from alembic.config import Config
 
@@ -377,7 +377,7 @@ def _alembic(uri, schema, action, revision):
             connection.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
         config = Config()
         config.set_main_option(
-            "script_location", migrate_db_module.MIGRATION_SETS["agents"]
+            "script_location", migrate_db_module.MIGRATION_SETS[migration_set]
         )
         config.attributes["connection"] = connection
         config.attributes["schema"] = schema
@@ -509,6 +509,58 @@ def test_revision_0005_backfills_last_activity_and_adds_the_indexes(
     assert not {"session_id", "run_id"} & columns
     assert _REPLACED_BY_0005 <= indexes
     assert not _INDEXES_OF_0005 & indexes
+
+
+@pytest.mark.parametrize("backend", ["sqlite", "postgres"])
+def test_backoffice_revision_0004_makes_existing_projects_read_only(
+    backend, request, tmp_path
+):
+    """A project from before the column is read-only, and keeps its RAG
+    collections in its agent schema, until someone says otherwise."""
+    from datetime import datetime, timezone
+
+    if backend == "sqlite":
+        uri, schema = f"sqlite:///{tmp_path / 'backoffice.db'}", None
+    else:
+        uri, schema = request.getfixturevalue("db_uri"), "upgrade_bo_0004"
+    project_id = "0" * 32
+    # Raw SQL bypasses the translate map, so the schema is named explicitly.
+    table = f'"{schema}".projects' if schema else "projects"
+
+    _alembic(uri, schema, "upgrade", "0003", migration_set="backoffice")
+    on_connection(
+        uri,
+        lambda c: _translated(c, schema).execute(
+            text(
+                f"INSERT INTO {table} (id, name, db_type, created_at, updated_at) "
+                f"VALUES (:id, 'old', 'postgresql', :now, :now)"
+            ),
+            {"id": project_id, "now": datetime(2026, 1, 1, tzinfo=timezone.utc)},
+        ),
+    )
+
+    _alembic(uri, schema, "upgrade", "head", migration_set="backoffice")
+
+    read_only, rag_schema = on_connection(
+        uri,
+        lambda c: (
+            _translated(c, schema)
+            .execute(text(f"SELECT read_only, rag_schema FROM {table}"))
+            .one()
+        ),
+    )
+    assert bool(read_only) is True
+    assert rag_schema is None
+
+    _alembic(uri, schema, "downgrade", "0003", migration_set="backoffice")
+    columns = on_connection(
+        uri,
+        lambda c: {
+            column["name"]
+            for column in inspect(c).get_columns("projects", schema=schema)
+        },
+    )
+    assert not {"read_only", "rag_schema"} & columns
 
 
 def test_backoffice_migrations_apply_to_sqlite(tmp_path):

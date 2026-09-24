@@ -171,7 +171,32 @@
                         <div class="bg-base-200 p-3 rounded-box font-mono text-sm">{{ selectedProject.db_schema || '-' }}</div>
                       }
                     </div>
+                    <div class="form-control w-full">
+                      <label class="label pb-1"><span class="label-text opacity-70 font-bold text-xs uppercase">RAG Schema</span></label>
+                      @if (isEditing) {
+                        <input type="text" [(ngModel)]="editableProject.rag_schema" class="input input-bordered w-full" placeholder="same as schema">
+                      } @else {
+                        <div class="bg-base-200 p-3 rounded-box font-mono text-sm">{{ selectedProject.rag_schema || selectedProject.db_schema || '-' }}</div>
+                      }
+                    </div>
                     }
+                    <div class="form-control w-full">
+                      <label class="label pb-1"><span class="label-text opacity-70 font-bold text-xs uppercase">Access</span></label>
+                      @if (isEditing) {
+                        <label class="label cursor-pointer justify-start gap-3 bg-base-200 p-3 rounded-box">
+                          <input type="checkbox" class="toggle toggle-primary" [(ngModel)]="editableProject.read_only">
+                          <span class="label-text">Read-only</span>
+                        </label>
+                      } @else {
+                        <div class="bg-base-200 p-3 rounded-box font-mono text-sm">
+                          @if (selectedProject.read_only !== false) {
+                            <i class="fas fa-lock opacity-70"></i> read-only
+                          } @else {
+                            <i class="fas fa-pen opacity-70"></i> read-write
+                          }
+                        </div>
+                      }
+                    </div>
                   </div>
                 }
               </div>

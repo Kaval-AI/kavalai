@@ -108,6 +108,16 @@ describe('ProjectEditPage', () => {
     expect(routerSpy.navigate).toHaveBeenCalledWith(['/']);
   });
 
+  it('should default a new project to read-only with the RAG schema unset', () => {
+    expect(component.projectForm.value.read_only).toBeTrue();
+    expect(component.projectForm.value.rag_schema).toBe('');
+
+    component.projectForm.patchValue({ rag_schema: 'rag_production', read_only: false });
+
+    expect(component.projectForm.value.rag_schema).toBe('rag_production');
+    expect(component.projectForm.value.read_only).toBeFalse();
+  });
+
   it('should default to PostgreSQL and switch the form to a file for SQLite', () => {
     expect(component.projectForm.value.db_type).toBe('postgresql');
     expect(component.isSqlite).toBeFalse();

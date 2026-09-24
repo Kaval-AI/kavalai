@@ -24,7 +24,11 @@ Two components:
 - **`kavalai`** — the SDK and runtime. Modules live directly in the top-level
   package (`agent.py`, `db.py`, `server.py`, …).
 - **`kavalai.backoffice`** + `frontend/` — a management interface that reads
-  the runtime's tables.
+  the runtime's tables. A project's `read_only` flag (on by default) makes
+  every connection it opens refuse writes at the database
+  (`db_manager.get_sessionmaker(read_only=True)`), and `rag_schema` points the
+  RAG explorer at collections kept in a schema of their own; the RAG service
+  built for a project never provisions.
 
 ## Layout
 

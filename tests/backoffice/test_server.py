@@ -479,17 +479,29 @@ async def test_user_details_keeps_valid_active_project(client, backoffice_db):
     assert response.json()["active_project_id"] == str(project.id)
 
 
-def test_rag_service_for_project_follows_the_database_type(tmp_path):
-    """One helper picks the backend, so every explorer endpoint agrees."""
+@pytest.mark.asyncio
+async def test_rag_service_for_project_follows_the_database_type(tmp_path):
+    """One helper picks the backend, so every explorer endpoint agrees, and
+    neither backend may provision: the explorer only reads."""
     from kavalai.backoffice.server import rag_service_for_project
     from kavalai.rag import PostgresRagService, SqliteRagService
 
-    sqlite_project = db.Project(
-        name="local", db_type="sqlite", db_name=str(tmp_path / "agents.db")
-    )
+    path = str(tmp_path / "agents.db")
+    index = SqliteRagService(path, model="fake/model")
+    await index.ensure_registry()
+    index.close()
+    sqlite_project = db.Project(name="local", db_type="sqlite", db_name=path)
     service = rag_service_for_project(sqlite_project, model="fake/model")
     assert isinstance(service, SqliteRagService)
     assert service.model == "fake/model"
+    assert service.read_only is True
+    assert service.provision is False
+    service.close()
+
+    sqlite_project.read_only = False
+    service = rag_service_for_project(sqlite_project, model="fake/model")
+    assert service.read_only is False
+    assert service.provision is False
     service.close()
 
     postgres_project = db.Project(
@@ -507,6 +519,24 @@ def test_rag_service_for_project_follows_the_database_type(tmp_path):
     assert service.session_maker is factory
     assert service.schema == "agents"
     assert service.model is None
+    assert service.provision is False
+
+    postgres_project.rag_schema = "rag"
+    service = rag_service_for_project(postgres_project, session_factory=factory)
+    assert service.schema == "rag"
+
+
+def test_a_read_only_sqlite_project_does_not_get_its_index_file_created(tmp_path):
+    """A missing file is an error, not a new empty index on disk."""
+    from kavalai.backoffice.server import rag_service_for_project
+
+    project = db.Project(
+        name="local", db_type="sqlite", db_name=str(tmp_path / "missing.db")
+    )
+
+    with pytest.raises(FileNotFoundError):
+        rag_service_for_project(project, model="fake/model")
+    assert not (tmp_path / "missing.db").exists()
 
 
 @pytest.mark.asyncio
@@ -517,7 +547,6 @@ async def test_a_sqlite_project_is_browsed_from_its_file(
     created with ``init_sqlite`` and a RAG index in the same file are read by
     the stats, model-call, connection-test and RAG endpoints."""
     from kavalai.agent_service import AgentService
-    from kavalai.backoffice.project_service import project_sessionmaker
     from kavalai.db import ModelCallStat, db_manager
     from kavalai.rag import SqliteRagService
     from kavalai.testing import FakeEmbeddingClient, fake_providers
@@ -542,8 +571,12 @@ async def test_a_sqlite_project_is_browsed_from_its_file(
     backoffice_db.add(project)
     await backoffice_db.commit()
 
+    # Written the way an agent server writes: through the file's shared
+    # engine. The project's own sessionmaker is read-only.
     session_id, run_id = uuid.uuid4(), uuid.uuid4()
-    await AgentService(project_sessionmaker(project)).add_model_call_stats(
+    await AgentService(
+        db_manager.get_sqlite_sessionmaker(db_path=path)
+    ).add_model_call_stats(
         ModelCallStat(call_type="embedding", model="fake/model", total_tokens=2),
         session_id=session_id,
         run_id=run_id,
