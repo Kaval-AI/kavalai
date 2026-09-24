@@ -31,7 +31,7 @@ HOOKS = [
     ("_delete_rows_by_metadata", (None, INFO, {"k": "v"})),
     ("_iter_rows", (None, INFO, 10)),
     ("_fetch_embeddings", (None, INFO, [])),
-    ("_scan", (None, INFO, [], 5, None, False)),
+    ("_scan", (None, INFO, [], 5, None, False, None)),
 ]
 
 

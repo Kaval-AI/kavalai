@@ -163,6 +163,37 @@ async def test_render_prompt_rejects_an_unresolvable_reference():
 
 
 @pytest.mark.asyncio
+async def test_render_value_keeps_the_type_of_a_lone_placeholder():
+    rc = RunContext(
+        data={"input": {"size": 42, "flag": False, "obj": {"a": 1}, "name": "x"}},
+        templates={"shop": "main"},
+    )
+
+    assert await rc.render_value("{{ context.input.size }}") == 42
+    assert await rc.render_value("  {{context.input.flag}} ") is False
+    assert await rc.render_value("{{ context.input.obj }}") == {"a": 1}
+    assert await rc.render_value("{{ context.input.name }}") == "x"
+    assert await rc.render_value("{{ templates.shop }}") == "main"
+
+
+@pytest.mark.asyncio
+async def test_render_value_renders_anything_else_as_text():
+    rc = RunContext(data={"input": {"size": 42}})
+
+    assert await rc.render_value("size {{ context.input.size }}") == "size 42"
+    assert await rc.render_value("{{ context.input.size }} cm") == "42 cm"
+    assert await rc.render_value("plain") == "plain"
+    assert await rc.render_value("42") == "42"
+
+
+@pytest.mark.asyncio
+async def test_render_value_rejects_an_unresolvable_reference():
+    rc = RunContext(data={})
+    with pytest.raises(ValueError, match="Could not resolve context.missing"):
+        await rc.render_value("{{ context.missing }}")
+
+
+@pytest.mark.asyncio
 async def test_resolve_history_value_without_a_session(caplog):
     rc = RunContext(agent_service=AsyncMock())
     assert await rc.resolve_history_value("key") is None

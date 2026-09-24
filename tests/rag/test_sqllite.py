@@ -430,6 +430,23 @@ async def test_metadata_keys_are_matched_whole(service_factory):
     assert await service.count_entries("c") == 1
 
 
+def test_metadata_match_sql_qualifies_the_column_for_the_scan_and_the_delete():
+    """The scan filters the joined table's column; the delete its own."""
+    from kavalai.rag.sqllite import _metadata_match_sql
+
+    clauses, params = _metadata_match_sql(
+        {"page": "p1", "n": 2, "flag": True}, "t.metadata"
+    )
+
+    assert clauses == [
+        "json_extract(t.metadata, ?) = ?",
+        "json_type(t.metadata, ?) IN ('integer', 'real') "
+        "AND json_extract(t.metadata, ?) = ?",
+        "json_type(t.metadata, ?) = ?",
+    ]
+    assert params == ['$."page"', "p1", '$."n"', '$."n"', 2, '$."flag"', "true"]
+
+
 @pytest.mark.asyncio
 async def test_provision_false_on_a_new_file_creates_nothing(service_factory, tmp_path):
     """Opening a file is not provisioning: the registry waits for DDL."""

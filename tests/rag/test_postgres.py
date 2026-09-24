@@ -469,6 +469,16 @@ async def _assert_batch_query_cte(service, embeddings, collection):
     assert "products p" in cte_sql_filtered
     assert params_filtered["top_k"] == 10
 
+    cte_sql_match, params_match = service.build_batch_query_cte(
+        embeddings=embeddings,
+        top_k=5,
+        collection_name=collection,
+        match={"category": "boots", "size": 42},
+    )
+    assert "rag_index.metadata @> CAST(:match AS jsonb)" in cte_sql_match
+    assert params_match["match"] == '{"category": "boots", "size": 42}'
+    assert "match" not in params
+
     cte_sql_keep_best, params_keep_best = service.build_batch_query_cte(
         embeddings=embeddings,
         top_k=5,
@@ -1005,7 +1015,7 @@ async def filtered_collection(service, collection):
     for start in range(0, len(texts), 500):
         await service.index_batch(
             texts=texts[start : start + 500],
-            metadata_list=[{}] * len(texts[start : start + 500]),
+            metadata_list=[{"side": side} for side in source_ids[start : start + 500]],
             source_ids=source_ids[start : start + 500],
             collection_name=collection,
         )
@@ -1030,10 +1040,31 @@ async def test_a_filter_on_distant_rows_still_returns_top_k(
 
 
 @pytest.mark.asyncio
-async def test_without_an_iterative_scan_the_filter_comes_back_short(
-    filtered_collection, collection, monkeypatch
+async def test_a_metadata_match_on_distant_rows_still_returns_top_k(
+    filtered_collection, collection
 ):
-    """The control for the test above: the planner does use the HNSW index."""
+    """``match`` is a condition of the same iterative scan as ``source_ids``."""
+    hits = await filtered_collection.query(
+        "query", top_k=5, collection_name=collection, match={"side": "far"}
+    )
+
+    assert len(hits) == 5
+    assert {hit.rag_metadata["side"] for hit in hits} == {"far"}
+
+    joined = await filtered_collection.batch_query_with_join(
+        ["query"], top_k=5, collection_name=collection, match={"side": "far"}
+    )
+    assert [hit["source_id"] for hit in joined[0]] == ["far"] * 5
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "filter_", [{"source_ids": ["far"]}, {"match": {"side": "far"}}]
+)
+async def test_without_an_iterative_scan_the_filter_comes_back_short(
+    filtered_collection, collection, monkeypatch, filter_
+):
+    """The control for the tests above: the planner does use the HNSW index."""
 
     async def no_iterative_scan(session):
         return None
@@ -1041,7 +1072,7 @@ async def test_without_an_iterative_scan_the_filter_comes_back_short(
     monkeypatch.setattr(filtered_collection, "_enable_filtered_scan", no_iterative_scan)
 
     hits = await filtered_collection.query(
-        "query", top_k=5, collection_name=collection, source_ids=["far"]
+        "query", top_k=5, collection_name=collection, **filter_
     )
 
     assert len(hits) < 5

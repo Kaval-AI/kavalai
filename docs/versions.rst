@@ -4,6 +4,28 @@ Versions
 The main changes in each release of the ``kavalai`` package. Releases are
 tagged ``vX.Y.Z`` in the repository and published to PyPI.
 
+Unreleased
+----------
+
+Added
+^^^^^
+
+* **Metadata filtering in retrieval.** ``query`` and ``query_batch`` take
+  ``match``, a mapping of top-level metadata keys to string, number or boolean
+  values, and return only the entries whose metadata has every one of them
+  equal — the condition ``delete_by_metadata`` already deleted by. The filter
+  is a condition of the nearest-neighbour search itself, not applied to its
+  result, so ``top_k`` matching entries come back when the collection holds
+  that many: on PostgreSQL it is ``metadata @> :match`` under the collection's
+  GIN index, with pgvector's iterative index scan enabled as it is for
+  ``source_ids``; on SQLite it joins the ``WHERE`` clause of the full scan.
+  ``batch_query_with_join`` takes it too. The ``rag_query`` node and
+  ``WorkflowBuilder.rag_query`` carry it as ``match``; a string value is a
+  template, and one that is exactly one ``{{ context.* }}`` placeholder takes
+  the referenced value with its type, so a filter an earlier node extracted
+  passes through unchanged. The rendered filter is recorded with the node's
+  inputs on its task row.
+
 1.0.4 — 2026-09-12
 ------------------
 

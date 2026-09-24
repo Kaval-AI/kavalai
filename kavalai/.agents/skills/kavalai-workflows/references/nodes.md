@@ -110,6 +110,7 @@ rendered exactly like an `llm` prompt.
 | `collection` | Defaults to the graph's `rag_collection`. |
 | `top_k` | Maximum hits. Default `5`. |
 | `source_ids` | Restrict to these source identifiers. Absent = no filter; **`[]` matches nothing**. |
+| `match` | Metadata equality filter, applied inside the nearest-neighbour search: `{category: "{{ context.intent.category }}", in_stock: true}`. Top-level keys, scalar values; `{}` or a nested value is rejected at load. A string value that is exactly one placeholder keeps the referenced value's type; any other string renders as text. An unresolvable placeholder fails the run. |
 | `keep_best` | Keep only the best hit per `source_id`, for documents indexed as many chunks. Default `false`. |
 | `min_similarity` | Drop hits below this cosine similarity (`-1`…`1`), after `top_k`. |
 | `store` | `results` (default) keeps the full hit list with scores and metadata, so `if`/`switch` can read them; `content` stores just the hit texts joined by blank lines, which is what a following prompt usually wants. |

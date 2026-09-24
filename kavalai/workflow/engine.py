@@ -687,11 +687,15 @@ class WorkflowEngine:
         embedding is reported to the run's token accumulator, so it is
         attributed to the agent, session and run like any other model call.
         ``min_similarity`` is applied here rather than left to the service, so
-        it means the same on a backend that predates it.
+        it means the same on a backend that predates it. ``match`` is passed
+        only when the node sets one, and then as ``match=`` whatever the
+        service: a backend that cannot filter fails the call rather than
+        answering from the whole collection.
         """
         service = self._resolve_rag_service(node.service)
         query = await run_context.render_prompt(node.query)
         collection = node.collection or self.graph.rag_collection
+        match = await self._render_match(node.match, run_context)
 
         arguments: dict[str, Any] = {
             "text": query,
@@ -701,6 +705,8 @@ class WorkflowEngine:
             "keep_best": node.keep_best,
             "include_content": True,
         }
+        if match is not None:
+            arguments["match"] = match
         if run_context.token_stats is not None and _accepts_keyword(
             service.query, "stats_receiver"
         ):
@@ -733,11 +739,32 @@ class WorkflowEngine:
                 "collection": collection,
                 "top_k": node.top_k,
                 "source_ids": node.source_ids,
+                "match": match,
                 "min_similarity": node.min_similarity,
             },
             duration=duration,
             recorded_output=recorded,
         )
+
+    @staticmethod
+    async def _render_match(
+        match: Optional[dict], run_context: RunContext
+    ) -> Optional[dict]:
+        """Render a ``rag_query`` node's metadata filter for this run.
+
+        String values are templates rendered with
+        :meth:`~kavalai.run_context.RunContext.render_value`, so a value that
+        is one placeholder keeps the type of what it references; numbers and
+        booleans written in the document are passed as they are.
+        """
+        if match is None:
+            return None
+        return {
+            key: await run_context.render_value(value)
+            if isinstance(value, str)
+            else value
+            for key, value in match.items()
+        }
 
     def _store_output(
         self,

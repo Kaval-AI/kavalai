@@ -280,6 +280,7 @@ class WorkflowBuilder:
         collection: Optional[str] = None,
         top_k: int = 5,
         source_ids: Optional[list[str]] = None,
+        match: Optional[dict] = None,
         keep_best: bool = False,
         min_similarity: Optional[float] = None,
         store: str = "results",
@@ -290,6 +291,8 @@ class WorkflowBuilder:
         ``collection`` default to the workflow's ``rag_service`` /
         ``rag_collection``; leave both unset when there is only one index.
         ``source_ids=[]`` matches nothing; ``None`` does not filter.
+        ``match`` keeps only entries whose metadata has every given key equal,
+        inside the nearest-neighbour search; its string values are templates.
         ``min_similarity`` drops weaker hits. ``store="content"`` keeps just
         the hit texts, which is what a following ``llm`` node's prompt
         usually wants.
@@ -304,6 +307,7 @@ class WorkflowBuilder:
                 collection=collection,
                 top_k=top_k,
                 source_ids=source_ids,
+                match=match,
                 keep_best=keep_best,
                 min_similarity=min_similarity,
                 store=store,

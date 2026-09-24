@@ -320,9 +320,10 @@ floats only and refuses any other ``vector_type`` with ``ValueError``.
 
 **Filtered queries on PostgreSQL.** An HNSW scan visits a bounded set of
 nearest candidates (``hnsw.ef_search``, 40 by default) and applies the
-``WHERE`` clause to those, so a query restricted by ``source_ids`` whose
-matching rows lie away from the query vector can return fewer than ``top_k``
-rows, or none. A very selective filter does not suffer from this: PostgreSQL
+``WHERE`` clause to those, so a query restricted by ``source_ids`` or by a
+metadata ``match`` (``metadata @> :match``, the containment the collection's
+GIN index serves) whose matching rows lie away from the query vector can
+return fewer than ``top_k`` rows, or none. A very selective filter does not suffer from this: PostgreSQL
 then reads the matching rows through the ``source_id`` index and sorts them
 exactly. The shortfall arises when the filter matches too many rows for that
 plan — a site's pages in a collection shared by a few sites, for instance. On
@@ -331,8 +332,10 @@ iterative index scans — ``SET LOCAL hnsw.iterative_scan = relaxed_order``,
 which lasts for that query's transaction only — and the index keeps scanning
 until enough rows pass the filter or pgvector's ``hnsw.max_scan_tuples`` limit
 is reached. ``batch_query_with_join`` does the same when it is given
-``additional_where``. On an older pgvector the setting is not issued and the
-shortfall remains.
+``additional_where`` or ``match``. On an older pgvector the setting is not
+issued and the shortfall remains. The SQLite service computes every row's
+distance (``vector_full_scan``) and applies both filters before the limit, so
+a filtered query there is exact whatever the filter selects.
 
 **One table per collection, for now.** Each collection has its own table, typed
 vector column and index, which keeps a scan inside one collection and makes

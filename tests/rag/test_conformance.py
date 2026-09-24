@@ -763,6 +763,120 @@ async def test_delete_by_metadata_on_a_missing_collection_is_not_an_error(
     await rag_service.delete_by_metadata("never_created", {"page": "p1"})
 
 
+# Query: a metadata match is a condition of the scan, not of its result.
+
+
+async def test_query_match_keeps_only_the_matching_rows(with_metadata, collection):
+    hits = await with_metadata.query(
+        "apple", top_k=5, collection_name=collection, match={"page": "p2"}
+    )
+
+    assert [hit.content for hit in hits] == ["apple tart", "banana"]
+
+
+async def test_query_match_is_applied_inside_the_nearest_neighbour_search(
+    with_metadata, collection
+):
+    """The ``top_k`` nearest rows *that match* come back.
+
+    "cherry" is the only "p3" row and lies far from "apple"; a filter applied
+    to the nearest rows after the search would drop it and return nothing.
+    """
+    hits = await with_metadata.query(
+        "apple", top_k=1, collection_name=collection, match={"page": "p3"}
+    )
+
+    assert [hit.content for hit in hits] == ["cherry"]
+
+
+@pytest.mark.parametrize(
+    "match, expected",
+    [
+        ({"page": "p1", "n": 2}, ["apple pie"]),
+        ({"flag": True}, ["apple", "apple tart"]),
+        ({"flag": 1}, ["banana"]),
+        ({"n": 1}, ["apple"]),
+        ({"x": 1}, ["banana"]),
+        ({"page": "nowhere"}, []),
+    ],
+)
+async def test_query_match_types_its_values_as_delete_by_metadata_does(
+    with_metadata, collection, match, expected
+):
+    hits = await with_metadata.query(
+        "apple", top_k=5, collection_name=collection, match=match
+    )
+
+    assert [hit.content for hit in hits] == expected
+
+
+async def test_query_match_combines_with_the_other_filters(with_metadata, collection):
+    hits = await with_metadata.query(
+        "apple",
+        top_k=5,
+        collection_name=collection,
+        match={"page": "p1"},
+        source_ids=["apple pie", "banana"],
+    )
+    assert [hit.content for hit in hits] == ["apple pie"]
+
+    hits = await with_metadata.query(
+        "apple",
+        top_k=5,
+        collection_name=collection,
+        match={"page": "p1"},
+        keep_best=True,
+    )
+    assert [hit.content for hit in hits] == ["apple", "apple pie"]
+
+
+async def test_query_batch_applies_the_match_to_every_text(with_metadata, collection):
+    batches = await with_metadata.query_batch(
+        ["apple", "banana"], top_k=5, collection_name=collection, match={"page": "p2"}
+    )
+
+    assert [[hit.content for hit in hits] for hits in batches] == [
+        ["apple tart", "banana"],
+        ["banana", "apple tart"],
+    ]
+
+
+async def test_query_without_a_match_is_unfiltered(with_metadata, collection):
+    hits = await with_metadata.query(
+        "apple", top_k=10, collection_name=collection, match=None
+    )
+
+    assert len(hits) == len(METADATA_ROWS)
+
+
+@pytest.mark.parametrize(
+    "match, message",
+    [
+        ({}, "non-empty dict"),
+        ({"page": ["p1"]}, "string, number or boolean, not list"),
+        ({"page": None}, "string, number or boolean, not NoneType"),
+    ],
+)
+async def test_query_match_is_refused_on_delete_by_metadata_s_terms(
+    populated, collection, match, message
+):
+    """Refused before anything is embedded: the query cannot be answered."""
+    client = populated.embedding_client
+    client.compute_embeddings.reset_mock()
+
+    with pytest.raises(ValueError, match=message):
+        await populated.query("apple", collection_name=collection, match=match)
+    with pytest.raises(ValueError, match=message):
+        await populated.query_batch(["apple"], collection_name=collection, match=match)
+    client.compute_embeddings.assert_not_awaited()
+
+
+async def test_query_match_on_a_missing_collection_is_empty(rag_service):
+    assert (
+        await rag_service.query("apple", collection_name="never", match={"a": 1}) == []
+    )
+
+
 async def test_the_deletion_tier_is_advertised(rag_service):
     assert rag_service.supports("delete_by_metadata")
     assert rag_service.supports("replace")

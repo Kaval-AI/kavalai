@@ -190,6 +190,7 @@ class BaseRagService(ABC):
         source_ids: Optional[list[str]] = None,
         keep_best: bool = False,
         include_content: bool = True,
+        match: Optional[dict] = None,
     ) -> list[RagServiceResult]:
         """
         Query the indexed items for similarities to the input text.
@@ -201,6 +202,12 @@ class BaseRagService(ABC):
             source_ids (Optional[list[str]]): ``None`` searches every source;
                 a list restricts the search to those sources, and an empty
                 list returns no results.
+            match (Optional[dict]): Return only items whose metadata has
+                every key of ``match`` equal — top-level keys and scalar
+                values, as :meth:`delete_by_metadata` takes them. ``None``
+                does not filter. The filter is part of the nearest-neighbour
+                search, not applied to its result, so ``top_k`` matching
+                items come back when the collection holds that many.
             keep_best (bool): If True, only the best result per source_id is
                 returned. Useful when a single source is split into multiple
                 indexed items. Backends whose store cannot group server-side
@@ -226,6 +233,7 @@ class BaseRagService(ABC):
         collection_name: Optional[str] = None,
         source_ids: Optional[list[str]] = None,
         include_content: bool = True,
+        match: Optional[dict] = None,
     ) -> list[list[RagServiceResult]]:
         """
         Query the indexed items for similarities to multiple input texts.
@@ -241,6 +249,8 @@ class BaseRagService(ABC):
                 list returns an empty result list for every text.
             include_content (bool): When False, ``content`` is omitted from the
                 results. See :meth:`query`.
+            match (Optional[dict]): Metadata equality filter, as in
+                :meth:`query`; it applies to every text.
 
         Returns:
             list[list[RagServiceResult]]: A list of result lists, where each inner list contains

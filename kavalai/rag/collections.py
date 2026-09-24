@@ -313,8 +313,14 @@ class CollectionRagService(BaseRagService):
         top_k: int,
         source_ids: Optional[list[str]],
         keep_best: bool,
+        match: Optional[dict[str, MetadataValue]],
     ) -> list[list[dict]]:
-        """The nearest rows per query embedding, each with a cosine ``distance``."""
+        """The nearest rows per query embedding, each with a cosine ``distance``.
+
+        ``source_ids`` and ``match`` are conditions of the scan itself, so the
+        ``top_k`` nearest rows *that pass them* come back — never the nearest
+        rows overall with the filter applied afterwards.
+        """
         raise NotImplementedError
 
     # Registry
@@ -859,6 +865,7 @@ class CollectionRagService(BaseRagService):
         source_ids: Optional[list[str]] = None,
         keep_best: bool = False,
         include_content: bool = True,
+        match: Optional[dict[str, MetadataValue]] = None,
         *,
         min_similarity: Optional[float] = None,
         stats_receiver: Any = None,
@@ -877,6 +884,7 @@ class CollectionRagService(BaseRagService):
             source_ids=source_ids,
             keep_best=keep_best,
             include_content=include_content,
+            match=match,
             min_similarity=min_similarity,
             stats_receiver=stats_receiver,
         )
@@ -893,6 +901,7 @@ class CollectionRagService(BaseRagService):
         source_ids: Optional[list[str]] = None,
         keep_best: bool = False,
         include_content: bool = True,
+        match: Optional[dict[str, MetadataValue]] = None,
         *,
         min_similarity: Optional[float] = None,
         stats_receiver: Any = None,
@@ -909,12 +918,20 @@ class CollectionRagService(BaseRagService):
             source_ids: ``None`` searches the whole collection; a list
                 restricts the search to those sources, and an empty list
                 matches nothing.
+            match: Return only rows whose metadata has every key of ``match``
+                equal — top-level keys and scalar values, the same condition
+                :meth:`delete_by_metadata` deletes by, and refused with
+                ``ValueError`` on the same terms. Unlike ``min_similarity``
+                the filter is a condition of the scan, so ``top_k`` matching
+                rows come back when the collection holds that many.
             min_similarity: Drop results whose ``similarity`` is lower. The
                 filter applies after ``top_k``, so fewer than ``top_k``
                 results may come back.
             stats_receiver: Receives the embedding call's statistics, instead
                 of the service's own receiver.
         """
+        if match is not None:
+            validate_metadata_match(match)
         if not texts:
             return []
         if source_ids is not None and not source_ids:
@@ -930,7 +947,7 @@ class CollectionRagService(BaseRagService):
                 texts, info.model, stats_receiver
             )
             batches = await self._scan(
-                conn, info, embeddings, top_k, source_ids, keep_best
+                conn, info, embeddings, top_k, source_ids, keep_best, match
             )
             await self._commit(conn)
 

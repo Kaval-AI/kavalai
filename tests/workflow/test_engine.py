@@ -1318,6 +1318,76 @@ async def test_rag_query_passes_its_parameters_through():
     assert call["keep_best"] is True
 
 
+async def test_rag_query_without_a_match_passes_none_to_the_service():
+    """A node that sets no filter calls the pre-``match`` signature exactly."""
+    service = RecordingRagService()
+    engine = WorkflowEngine.from_dict(rag_graph(), rag_services=service)
+
+    await engine.run({"user_message": "q"})
+
+    assert "match" not in service.calls[0]
+
+
+async def test_rag_query_renders_its_match_and_keeps_the_referenced_types():
+    """One placeholder keeps its value's type; mixed text renders as text."""
+    service = RecordingRagService()
+    graph = rag_graph(
+        match={
+            "category": "{{ context.input.category }}",
+            "size": "{{ context.input.size }}",
+            "in_stock": "{{ context.input.in_stock }}",
+            "label": "size {{ context.input.size }}",
+            "shop": "main",
+            "tier": 2,
+        }
+    )
+    graph["data_types"]["input"] = {
+        "type": "object",
+        "properties": {
+            "user_message": {"type": "string"},
+            "category": {"type": "string"},
+            "size": {"type": "integer"},
+            "in_stock": {"type": "boolean"},
+        },
+    }
+    engine = WorkflowEngine.from_dict(graph, rag_services=service)
+
+    await engine.run(
+        {"user_message": "q", "category": "boots", "size": 42, "in_stock": True}
+    )
+
+    assert service.calls[0]["match"] == {
+        "category": "boots",
+        "size": 42,
+        "in_stock": True,
+        "label": "size 42",
+        "shop": "main",
+        "tier": 2,
+    }
+
+
+async def test_rag_query_with_a_match_fails_when_the_value_is_missing():
+    """A filter silently missing a value would widen the search."""
+    service = RecordingRagService()
+    graph = rag_graph(match={"category": "{{ context.intent.category }}"})
+    engine = WorkflowEngine.from_dict(graph, rag_services=service)
+
+    with pytest.raises(Exception, match="Could not resolve context.intent.category"):
+        await engine.run({"user_message": "q"})
+    assert service.calls == []
+
+
+async def test_rag_query_records_its_rendered_match_on_the_task_row():
+    service = RecordingRagService([rag_hit("a fact")])
+    graph = rag_graph(match={"topic": "{{ context.input.user_message }}"})
+    engine = WorkflowEngine.from_dict(graph, rag_services=service)
+
+    _, records = await _trajectory(engine, {"user_message": "pond"})
+
+    row = next(r for r in records if r.name == "retrieve")
+    assert row.inputs["match"] == {"topic": "pond"}
+
+
 async def test_rag_query_renders_templates_in_the_query():
     service = RecordingRagService()
     graph = rag_graph()
@@ -2134,6 +2204,7 @@ async def test_a_content_rag_query_still_records_its_hits_on_the_task_row():
     assert [h["source_id"] for h in row.output["hits"]] == ["doc-1"]
     assert row.inputs["top_k"] == 5
     assert row.inputs["source_ids"] is None
+    assert row.inputs["match"] is None
     assert row.inputs["min_similarity"] is None
 
 

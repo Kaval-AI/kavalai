@@ -85,8 +85,8 @@ await service.index(text, source_metadata={"page": 3},
 
 hits = await service.query("How do I book the hall?", top_k=5,
                            collection_name="handbook",
-                           source_ids=None, keep_best=False,
-                           include_content=True)
+                           source_ids=None, match={"page": 3},
+                           keep_best=False, include_content=True)
 for hit in hits:
     print(hit.similarity, hit.source_id, hit.content)
 ```
@@ -103,6 +103,15 @@ the caller only needs scores.
 - **`source_ids=None` searches everything; `source_ids=[]` matches nothing**
   (an empty result, without embedding). Pass an empty pre-filter through as
   `[]` — never turn it into `None`, which widens it to the whole collection.
+- `match={"category": "boots", "size": 42}` keeps only entries whose metadata
+  has every key equal — top-level keys, scalar values, the same condition as
+  `delete_by_metadata`; `{}` or a nested value raises `ValueError`. It is a
+  condition of the nearest-neighbour search (a `WHERE` on the scan, served by
+  the GIN index on PostgreSQL), **not** a filter over the `top_k` result, so
+  `top_k` matching entries come back. Put the attributes you will filter on
+  (category, language, tenant, product id) in the metadata at indexing time;
+  a value that changes (price, stock) belongs in your own database, fetched by
+  a tool from the hit's `source_id`.
 - `min_similarity=` on `query`/`query_batch` drops weaker hits *after* `top_k`,
   so fewer may come back. A useful value depends on the model and normaliser.
 - `stats_receiver=` (per call, or on the constructor as the default) receives
@@ -190,6 +199,12 @@ nodes:
 - `service` containing `://` is rejected at load. Register a name.
 - `min_similarity: 0.5` drops hits below the threshold; `source_ids: []`
   matches nothing, as on the service.
+- `match: {category: "{{ context.intent.category }}", in_stock: true}` filters
+  by metadata inside the search. String values are templates; a value that is
+  **one placeholder keeps the referenced value's type** (a number stays a
+  number), anything else renders as text. A placeholder that resolves to
+  nothing fails the run — route around an absent filter with an `if` node,
+  never by an empty `match`, which is rejected at load.
 - The node **records its hits** whatever `store` says — `id`, `source_id`,
   `similarity`, `metadata`, no text — on its task row and in the
   `node_completed` event's `output_data` (`{"hits": [...]}`). Cite from

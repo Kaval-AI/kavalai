@@ -26,6 +26,10 @@ from kavalai.resolvers import resolve_path
 from kavalai.utils import to_plain
 from kavalai.workflow.models import ArgumentInfo
 
+PLACEHOLDER_PATTERN = re.compile(r"\{\{\s*(templates|context|history)\.(.+?)\s*\}\}")
+"""One ``{{ templates.NAME }}``, ``{{ context.PATH }}`` or ``{{ history.PATH }}``
+placeholder; the only three prefixes a template may reference."""
+
 
 class RunContext(BaseModel):
     """Runtime data for a single interaction.
@@ -92,27 +96,45 @@ class RunContext(BaseModel):
         """Resolve a template value by name."""
         return self.templates.get(name)
 
+    async def resolve_placeholder(self, prefix: str, path: str):
+        """The value behind one ``{{ prefix.path }}`` placeholder.
+
+        ``prefix`` is ``templates``, ``context`` or ``history``. A reference
+        that resolves to nothing raises ``ValueError``: a prompt or filter
+        silently missing a value is worse than a failed run.
+        """
+        if prefix == "templates":
+            val = await self.resolve_template_value(path)
+        elif prefix == "context":
+            val = self.resolve_context_value(path)
+        else:
+            val = await self.resolve_history_value(path)
+        if val is None:
+            raise ValueError(f"Could not resolve {prefix}.{path}")
+        return val
+
+    async def render_value(self, template: str):
+        """Render a template that may stand for a single typed value.
+
+        A template that is exactly one placeholder resolves to the referenced
+        value itself — a number stays a number, a boolean a boolean — so a
+        value an earlier node extracted can be compared without passing
+        through text. Anything else is rendered with :meth:`render_prompt`.
+        """
+        whole = PLACEHOLDER_PATTERN.fullmatch(template.strip())
+        if whole is None:
+            return await self.render_prompt(template)
+        return await self.resolve_placeholder(whole.group(1), whole.group(2).strip())
+
     async def render_prompt(self, prompt: str) -> str:
         """
         Render a prompt string by replacing {{ templates.NAME }}, {{ context.PATH }},
         and {{ history.PATH }} with their resolved values.
         """
-        pattern = re.compile(r"\{\{\s*(templates|context|history)\.(.+?)\s*\}\}")
 
         async def replace_match(match):
-            prefix = match.group(1)
             path = match.group(2).strip()
-
-            # The pattern only matches these three prefixes.
-            if prefix == "templates":
-                val = await self.resolve_template_value(path)
-            elif prefix == "context":
-                val = self.resolve_context_value(path)
-            else:
-                val = await self.resolve_history_value(path)
-
-            if val is None:
-                raise ValueError(f"Could not resolve {prefix}.{path}")
+            val = await self.resolve_placeholder(match.group(1), path)
 
             if isinstance(val, (dict, list, BaseModel)):
                 try:
@@ -128,7 +150,7 @@ class RunContext(BaseModel):
         # re.sub cannot take an async replacement, so splice by hand.
         last_pos = 0
         pieces = []
-        for match in pattern.finditer(prompt):
+        for match in PLACEHOLDER_PATTERN.finditer(prompt):
             pieces.append(prompt[last_pos : match.start()])
             pieces.append(await replace_match(match))
             last_pos = match.end()

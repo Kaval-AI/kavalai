@@ -52,6 +52,7 @@ from kavalai.rag.collections import (
     CollectionInfo,
     CollectionRagService,
     MetadataValue,
+    validate_metadata_match,
 )
 
 __all__ = [
@@ -104,10 +105,12 @@ class PostgresRagService(CollectionRagService):
     needs pgvector 0.7 or later. An existing collection keeps the type it was
     created with.
 
-    A query restricted by ``source_ids`` enables pgvector's iterative index
-    scans (0.8 or later) for its transaction. Without them an HNSW search
-    filters its candidates after the search, so a filter whose rows lie away
-    from the query can return fewer than ``top_k`` rows, or none.
+    A query restricted by ``source_ids`` or ``match`` enables pgvector's
+    iterative index scans (0.8 or later) for its transaction. Without them an
+    HNSW search filters its candidates after the search, so a filter whose
+    rows lie away from the query can return fewer than ``top_k`` rows, or
+    none. ``match`` is ``metadata @> :match``, the containment the
+    collection's GIN index serves.
     """
 
     collection_upgrades = _COLLECTION_UPGRADES
@@ -514,6 +517,7 @@ class PostgresRagService(CollectionRagService):
         top_k: int,
         source_ids: Optional[list[str]],
         keep_best: bool,
+        match: Optional[dict[str, MetadataValue]],
     ) -> list[list[dict]]:
         """One query for the whole batch (CROSS JOIN LATERAL over the vectors)."""
         cte_sql, params = self._build_batch_query_cte(
@@ -522,8 +526,9 @@ class PostgresRagService(CollectionRagService):
             top_k=top_k,
             source_ids=source_ids,
             keep_best=keep_best,
+            match=match,
         )
-        if source_ids:
+        if source_ids or match:
             await self._enable_filtered_scan(session)
         query_sql = (
             f"WITH {cte_sql} SELECT * FROM rag_results "
@@ -555,11 +560,13 @@ class PostgresRagService(CollectionRagService):
         source_filter_sql: Optional[str] = None,
         keep_best: bool = False,
         info: Optional[CollectionInfo] = None,
+        match: Optional[dict[str, MetadataValue]] = None,
     ) -> tuple[str, dict]:
         """
         Build a ``rag_results`` CTE for batch vector search, embeddable in
         larger queries. Requires the collection to exist (pass ``info`` or a
         ``collection_name`` previously loaded via any service call).
+        ``match`` is the metadata equality filter of :meth:`query`.
         """
         if info is None:
             info = self._collections.get(collection_name or "default")
@@ -574,6 +581,7 @@ class PostgresRagService(CollectionRagService):
             top_k=top_k,
             source_filter_sql=source_filter_sql,
             keep_best=keep_best,
+            match=match,
         )
 
     def _build_batch_query_cte(
@@ -584,6 +592,7 @@ class PostgresRagService(CollectionRagService):
         source_ids: Optional[list[str]] = None,
         source_filter_sql: Optional[str] = None,
         keep_best: bool = False,
+        match: Optional[dict[str, MetadataValue]] = None,
     ) -> tuple[str, dict]:
         params: dict = {"top_k": top_k}
         vector_parts = []
@@ -598,6 +607,9 @@ class PostgresRagService(CollectionRagService):
             params["source_ids"] = source_ids
         if source_filter_sql:
             where_clauses.append(f"({source_filter_sql})")
+        if match:
+            where_clauses.append("rag_index.metadata @> CAST(:match AS jsonb)")
+            params["match"] = json.dumps(match)
         where_clause = " AND ".join(where_clauses)
 
         # For keep_best, scan a wider window than top_k so deduplication by
@@ -663,6 +675,7 @@ class PostgresRagService(CollectionRagService):
         join_columns: Optional[list[str]] = None,
         additional_where: Optional[str] = None,
         keep_best: bool = False,
+        match: Optional[dict[str, MetadataValue]] = None,
         *,
         stats_receiver: Any = None,
     ) -> list[list[dict]]:
@@ -672,8 +685,11 @@ class PostgresRagService(CollectionRagService):
         ``join_condition`` references the CTE alias ``r`` (e.g.
         ``"p.id::text = r.source_id"``); ``additional_where`` filters the joined
         table. Inside the vector-search CTE the collection table is aliased as
-        ``rag_index`` for source filters.
+        ``rag_index`` for source filters. ``match`` is the metadata equality
+        filter of :meth:`query`.
         """
+        if match is not None:
+            validate_metadata_match(match)
         if not texts:
             return []
         collection_name = collection_name or "default"
@@ -696,6 +712,7 @@ class PostgresRagService(CollectionRagService):
                         AND {additional_where}
                     )
                 """
+            if source_filter or match:
                 await self._enable_filtered_scan(session)
 
             cte_sql, params = self._build_batch_query_cte(
@@ -704,6 +721,7 @@ class PostgresRagService(CollectionRagService):
                 top_k=top_k,
                 source_filter_sql=source_filter,
                 keep_best=keep_best,
+                match=match,
             )
 
             select_columns = [

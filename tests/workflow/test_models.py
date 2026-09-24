@@ -414,6 +414,24 @@ def test_rag_query_rejects_a_connection_string_as_a_service(service):
         make_graph(rag_nodes(service=service))
 
 
+def test_rag_query_match_is_optional_and_keeps_scalar_values():
+    assert make_graph(rag_nodes()).node_map["r"].match is None
+
+    node = make_graph(
+        rag_nodes(match={"category": "{{ context.intent.category }}", "size": 42})
+    ).node_map["r"]
+    assert node.match == {"category": "{{ context.intent.category }}", "size": 42}
+
+
+@pytest.mark.parametrize(
+    "match", [{}, {"category": ["boots"]}, {"category": None}, "boots"]
+)
+def test_rag_query_refuses_a_match_it_could_not_serve(match):
+    """An empty or non-scalar filter fails the load, as the service would."""
+    with pytest.raises(ValidationError):
+        make_graph(rag_nodes(match=match))
+
+
 @pytest.mark.parametrize("value", [-1.5, 1.5])
 def test_min_similarity_is_bounded_like_a_cosine_similarity(value):
     with pytest.raises(ValidationError):

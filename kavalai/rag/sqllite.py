@@ -68,6 +68,35 @@ def _decode_f32_blob(blob) -> "list[float] | None":
     return list(blob)
 
 
+def _metadata_match_sql(
+    match: dict[str, MetadataValue], column: str
+) -> tuple[list[str], list]:
+    """One equality per key of ``match``, typed as PostgreSQL's ``@>`` types it.
+
+    ``json_extract`` returns JSON ``true`` as the integer 1, so on its own it
+    would let ``{"flag": True}`` match ``{"flag": 1}`` and the reverse.
+    Booleans are therefore compared by ``json_type`` and numbers only against
+    JSON numbers. Returns the ``WHERE`` clauses over ``column`` and their
+    parameters, for the scan and the delete alike.
+    """
+    clauses, params = [], []
+    for key, value in match.items():
+        path = f'$."{key}"'
+        if isinstance(value, bool):
+            clauses.append(f"json_type({column}, ?) = ?")
+            params.extend([path, "true" if value else "false"])
+        elif isinstance(value, (int, float)):
+            clauses.append(
+                f"json_type({column}, ?) IN ('integer', 'real') "
+                f"AND json_extract({column}, ?) = ?"
+            )
+            params.extend([path, path, value])
+        else:
+            clauses.append(f"json_extract({column}, ?) = ?")
+            params.extend([path, value])
+    return clauses, params
+
+
 class SqliteRagService(CollectionRagService):
     """
     SQLite backed RAG service using the sqlite-vector extension
@@ -364,28 +393,7 @@ class SqliteRagService(CollectionRagService):
         info: CollectionInfo,
         match: dict[str, MetadataValue],
     ) -> None:
-        """One equality per key, typed as PostgreSQL's ``@>`` types it.
-
-        ``json_extract`` returns JSON ``true`` as the integer 1, so on its own
-        it would let ``{"flag": True}`` match ``{"flag": 1}`` and the reverse.
-        Booleans are therefore compared by ``json_type`` and numbers only
-        against JSON numbers.
-        """
-        clauses, params = [], []
-        for key, value in match.items():
-            path = f'$."{key}"'
-            if isinstance(value, bool):
-                clauses.append("json_type(metadata, ?) = ?")
-                params.extend([path, "true" if value else "false"])
-            elif isinstance(value, (int, float)):
-                clauses.append(
-                    "json_type(metadata, ?) IN ('integer', 'real') "
-                    "AND json_extract(metadata, ?) = ?"
-                )
-                params.extend([path, path, value])
-            else:
-                clauses.append("json_extract(metadata, ?) = ?")
-                params.extend([path, value])
+        clauses, params = _metadata_match_sql(match, "metadata")
         conn.execute(
             f"DELETE FROM {info.table_name} WHERE {' AND '.join(clauses)}",
             tuple(params),
@@ -433,10 +441,11 @@ class SqliteRagService(CollectionRagService):
         top_k: int,
         source_ids: Optional[list[str]],
         keep_best: bool,
+        match: Optional[dict[str, MetadataValue]] = None,
     ) -> list[list[dict]]:
         """One vector scan per query embedding."""
         sql, filter_params = self._build_scan_sql(
-            info, top_k=top_k, source_ids=source_ids, keep_best=keep_best
+            info, top_k=top_k, source_ids=source_ids, keep_best=keep_best, match=match
         )
         batches = []
         for embedding in embeddings:
@@ -465,6 +474,7 @@ class SqliteRagService(CollectionRagService):
         top_k: int,
         source_ids: Optional[list[str]],
         keep_best: bool,
+        match: Optional[dict[str, MetadataValue]] = None,
     ) -> tuple[str, list]:
         """
         Build the vector scan query.
@@ -472,6 +482,7 @@ class SqliteRagService(CollectionRagService):
         ``vector_full_scan`` is used without ``k`` so filters are applied to the
         distances of *all* rows before ``LIMIT`` — passing ``k`` to the scan
         would drop matches when the k nearest overall fall outside the filter.
+        ``match`` joins the ``WHERE`` clause on the same terms.
         """
         where_clauses = ["1 = 1"]
         params: list = []
@@ -480,6 +491,10 @@ class SqliteRagService(CollectionRagService):
             placeholders = ", ".join("?" for _ in source_ids)
             where_clauses.append(f"t.source_id IN ({placeholders})")
             params.extend(source_ids)
+        if match:
+            clauses, match_params = _metadata_match_sql(match, "t.metadata")
+            where_clauses.extend(clauses)
+            params.extend(match_params)
 
         where_clause = " AND ".join(where_clauses)
 

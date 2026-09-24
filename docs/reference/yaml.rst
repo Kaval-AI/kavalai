@@ -365,6 +365,18 @@ service passed to the engine is registered as ``"default"``.
      - Restrict the search to these source identifiers. Absent means no
        restriction; an empty list matches nothing, so a filter computed to be
        empty never widens into a search of every source.
+   * - ``match``
+     - Keep only entries whose metadata has every key of ``match`` equal —
+       top-level keys with string, number or boolean values, the condition
+       ``delete_by_metadata`` deletes by. An empty mapping or a nested value
+       is rejected when the workflow loads. Each string value is a template:
+       a value that is exactly one ``{{ context.* }}`` placeholder takes the
+       referenced value as it is, so a number or boolean an earlier node
+       extracted keeps its type, and any other string is rendered as text. A
+       placeholder that resolves to nothing fails the run rather than widening
+       the search. Unlike ``min_similarity`` the filter is a condition of the
+       nearest-neighbour search itself, so ``top_k`` matching entries come
+       back when the collection holds that many.
    * - ``keep_best``
      - Keep only the best hit per ``source_id``, for documents indexed as many
        chunks. Default ``false``.

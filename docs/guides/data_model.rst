@@ -416,8 +416,10 @@ needs no server and can be copied wherever it is needed; the file written by
 asking for the index to be rebuilt.
 
 ``source_id`` and ``rag_metadata`` behave identically in both backends, so a
-retrieval written against one runs unchanged against the other. See
-:doc:`../tutorials/rag`.
+retrieval written against one runs unchanged against the other: ``query``
+filters by ``source_ids`` and by metadata equality (``match``) inside the
+nearest-neighbour search on each, and ``delete_by_metadata`` deletes by the
+same condition. See :doc:`../tutorials/rag`.
 
 How the schema is created
 =========================

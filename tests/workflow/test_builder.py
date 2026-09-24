@@ -321,6 +321,7 @@ def test_builder_rag_query_matches_the_yaml_node():
             next="e",
             top_k=3,
             store="content",
+            match={"category": "{{ context.input.category }}"},
         )
         .end(name="e", output="output")
         .build()
@@ -329,6 +330,7 @@ def test_builder_rag_query_matches_the_yaml_node():
     node = graph.node_map["retrieve"]
     assert isinstance(node, RagQueryNode)
     assert (node.top_k, node.store) == (3, "content")
+    assert node.match == {"category": "{{ context.input.category }}"}
     assert (graph.rag_service, graph.rag_collection) == ("docs", "handbook")
 
 

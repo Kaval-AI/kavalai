@@ -432,6 +432,16 @@ class RagQueryNode(BaseNode):
         source_ids: Restrict the search to these source identifiers. Absent
             means no restriction; an empty list matches nothing, so a filter
             computed to be empty never widens into a search of everything.
+        match: Return only entries whose metadata has every key of ``match``
+            equal — top-level keys and scalar values, the condition
+            :meth:`~kavalai.rag.BaseRagService.query` takes as ``match``.
+            Each string value is a template: one that consists of a single
+            ``{{ context.* }}`` placeholder takes the referenced value as it
+            is, number or boolean included, so a filter extracted by an
+            earlier node keeps its type; any other string is rendered as
+            text. The filter is a condition of the nearest-neighbour search
+            itself, so ``top_k`` matching entries come back when the
+            collection holds that many.
         keep_best: Keep only the best hit per ``source_id``. Useful when one
             document was indexed as many chunks.
         min_similarity: Drop hits whose ``similarity`` is below this value.
@@ -459,6 +469,9 @@ class RagQueryNode(BaseNode):
     collection: Optional[str] = None
     top_k: int = 5
     source_ids: Optional[list[str]] = None
+    match: Optional[dict[str, Union[str, int, float, bool]]] = Field(
+        default=None, min_length=1
+    )
     keep_best: bool = False
     min_similarity: Optional[float] = Field(default=None, ge=-1.0, le=1.0)
     store: Literal["results", "content"] = "results"
