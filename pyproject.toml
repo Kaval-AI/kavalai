@@ -19,11 +19,11 @@ authors = [
 # packages. Everything that needs an unsupported native extension or a heavy
 # provider SDK lives under an optional extra below.
 #
-# Note on async SQLAlchemy: its async engine needs ``greenlet``, which
-# SQLAlchemy pulls in automatically (via a platform marker) on normal installs.
-# greenlet has no pyodide build, so we deliberately do NOT list it here; under
-# pyodide the IndexedDB-backed SQLite database uses SQLAlchemy's *sync* engine,
-# which does not require greenlet.
+# Note on async SQLAlchemy: its async engine needs ``greenlet``, which has no
+# pyodide build, so it is deliberately NOT listed here; under pyodide the
+# IndexedDB-backed SQLite database uses SQLAlchemy's *sync* engine, which does
+# not require greenlet. The ``runtime`` extra requests ``sqlalchemy[asyncio]``
+# to bring it in — SQLAlchemy 2.1 no longer installs greenlet by default.
 dependencies = [
     "aiosqlite",
     "alembic",
@@ -59,6 +59,7 @@ runtime = [
     "mcp",
     "ollama",
     "openai",
+    "sqlalchemy[asyncio]",
     "sqliteai-vector",
 ]
 

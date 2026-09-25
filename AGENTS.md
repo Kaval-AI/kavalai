@@ -86,7 +86,9 @@ check a change against the list before proposing it.
 6. **The base package stays Pyodide-compatible.** No greenlet, no native
    extensions beyond the prebuilt Pyodide packages. Everything else goes in an
    extra grouped by weight — `runtime`, `webtools`, `fastembed`, `backoffice` —
-   which `common` combines. Install hints name the narrowest one.
+   which `common` combines. Install hints name the narrowest one. `runtime`
+   requests `sqlalchemy[asyncio]`: the async engine needs greenlet, and
+   SQLAlchemy 2.1 no longer installs it by default.
 7. **Every boundary validates, and failures are loud.** An unresolvable prompt
    reference raises; a tool result that does not match its declared model
    raises; duplicate tool or server names raise at registration.

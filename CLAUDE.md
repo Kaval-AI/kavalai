@@ -66,8 +66,10 @@ optional packages are grouped by weight, not by provider — substituting a
 provider stays a change of one string, never a reinstall:
 
 - `runtime` — what a workflow needs to run and be served: the provider SDKs,
-  MCP, FastAPI, asyncpg (agent database, pgvector RAG and the migrations) and
-  sqlite-vector. The agent image installs only this.
+  MCP, FastAPI, asyncpg (agent database, pgvector RAG and the migrations),
+  `sqlalchemy[asyncio]` (greenlet — SQLAlchemy 2.1 no longer installs it by
+  default, and the async engine needs it) and sqlite-vector. The agent image
+  installs only this.
 - `webtools` — crawl4ai (with Playwright, patchright and litellm), behind
   `crawl_url` / `web_search`.
 - `fastembed` — local embedding models (with onnxruntime).
