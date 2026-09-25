@@ -70,8 +70,9 @@ class TaskSummary(BaseModel):
 class RunSummary(BaseModel):
     """Summary of a single workflow run for the Runs view.
 
-    Exposes the run's input/output data, resolved context and the number of
-    tasks it executed.
+    Exposes the run's input/output data, resolved context, the number of
+    tasks it executed and how long it took (``None`` for a run still in
+    progress or recorded before the runs table carried a duration).
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -81,6 +82,7 @@ class RunSummary(BaseModel):
     output_data: Any | None
     context: Any | None
     tasks_count: int
+    duration_seconds: float | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -176,6 +178,7 @@ async def get_session_details(
             Run.output_data,
             Run.context,
             func.coalesce(tasks_count_sub.c.count, 0).label("tasks_count"),
+            Run.duration_seconds,
             Run.created_at,
             Run.updated_at,
         )

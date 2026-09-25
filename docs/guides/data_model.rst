@@ -170,10 +170,22 @@ to an ``end`` node.
      - The resolved :class:`~kavalai.RunContext` — every value each node saw.
        This is the field that makes a run reproducible: the inputs to any node
        can be reconstructed from it without re-executing the graph.
+   * - ``duration_seconds``
+     - The wall-clock time of the invocation, measured by the engine with a
+       monotonic clock from the start of the run to the moment it records the
+       result, on success and on failure alike. It is ``NULL`` while the run
+       is in progress and for a run whose process died before recording
+       anything. It is not the sum of the tasks' durations: parallel branches
+       overlap, and the walk between nodes takes time too.
 
 The row is written when the run begins (``initialize_workflow_run``) and
 completed when it ends (``update_run``). There is no intermediate checkpoint,
 which is why durable resume is not offered: a crashed process loses the run.
+
+``duration_seconds`` was added in agents revision 0006 and is not backfilled.
+A run written before it keeps ``NULL``, and the backoffice statistics fall back
+to ``updated_at - created_at`` for such a row — an approximation, since
+``updated_at`` moves whenever the row is written again.
 
 ``tasks``
 ---------

@@ -957,6 +957,7 @@ class WorkflowEngine:
             token_stats=parent.token_stats,
             seq_counter=parent.seq_counter,
             task_logger=parent.task_logger,
+            started_at=parent.started_at,
         )
 
     @staticmethod
@@ -1183,6 +1184,7 @@ class WorkflowEngine:
 
         parsed_input = self.get_data_type("input")(**input_data)
         run_context = RunContext()
+        run_context.started_at = time.perf_counter()
         run_context.token_stats = token_stats
         # One sequence per run, shared with every parallel branch. The event
         # loop is single-threaded, so allocation order is execution order.
@@ -1402,12 +1404,14 @@ class WorkflowEngine:
         output_data = to_plain(output_value) if output_value is not None else None
         state.output_data = output_data
         state.status = "completed"
+        state.duration_seconds = self._elapsed(run_context)
 
         if self.agent_service and run_context.run_id:
             await self.agent_service.update_run(
                 run_context.run_id,
                 output_data=output_data,
                 context=self._recorded_context(run_context, node.output),
+                duration_seconds=state.duration_seconds,
             )
             # Chat-shaped workflows answer in `agent_response`; for any other
             # output type record the data itself, so the chat history is never
@@ -1448,11 +1452,20 @@ class WorkflowEngine:
             context["run_templates"] = dict(run_context.template_overrides)
         return context
 
+    @staticmethod
+    def _elapsed(run_context: RunContext) -> Optional[float]:
+        """Seconds since the run started, or ``None`` for a context that was
+        never started by :meth:`run_stream` (a node executed on its own)."""
+        if run_context.started_at is None:
+            return None
+        return time.perf_counter() - run_context.started_at
+
     async def _record_failure(
         self, run_context: RunContext, state: WorkflowState
     ) -> None:
         """Persist a failed run's error and partial data so it shows up in the
         backoffice; best-effort, since the failure may be the database itself."""
+        state.duration_seconds = self._elapsed(run_context)
         if not (self.agent_service and run_context.run_id):
             return
         context: dict[str, Any] = {"status": state.status, "error": state.error}
@@ -1461,7 +1474,11 @@ class WorkflowEngine:
         if run_context.template_overrides:
             context["run_templates"] = dict(run_context.template_overrides)
         try:
-            await self.agent_service.update_run(run_context.run_id, context=context)
+            await self.agent_service.update_run(
+                run_context.run_id,
+                context=context,
+                duration_seconds=state.duration_seconds,
+            )
         except Exception:
             logger.warning(
                 f"[{state.invocation_id}] Could not persist failure state "

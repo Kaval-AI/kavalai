@@ -10,6 +10,17 @@ Unreleased
 Added
 ^^^^^
 
+* **Run duration.** ``runs.duration_seconds`` (agents revision 0006) records
+  the wall-clock time of every workflow invocation, measured by the engine
+  with a monotonic clock and written with the result, on success and on
+  failure alike; :class:`~kavalai.WorkflowState` carries it as
+  ``duration_seconds``. The backoffice shows it on each run of a
+  conversation, the daily runtime chart sums it (falling back to
+  ``updated_at - created_at`` for runs recorded before the column existed,
+  which are not backfilled), and the workflows page lays runs out in lanes by
+  when they actually ended. ``AgentService.update_run`` takes
+  ``duration_seconds``.
+
 * **Read-only projects in the backoffice.** ``projects.read_only`` (backoffice
   revision 0004, on for every existing project) makes each connection the
   backoffice opens to a project's agent database refuse writes at the

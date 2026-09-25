@@ -170,15 +170,10 @@ export class WorkflowsPage implements OnInit {
     sortedRuns.forEach(run => {
       let placed = false;
       const runStart = new Date(run.run.created_at).getTime();
-      // Estimate run end based on tasks or fixed duration if tasks not finished
-      // For now, let's use a simple overlap check based on startTime + some buffer
-      // since we don't have end_time in Run model.
-      // If we had end_time, we could be more precise.
-      const runEnd = runStart + 60000; // Assume 1 minute for overlap check if no better data
 
       for (const lane of lanes) {
         const lastRunInLane = lane.runs[lane.runs.length - 1];
-        const lastRunEnd = new Date(lastRunInLane.run.created_at).getTime() + 60000;
+        const lastRunEnd = this.runEnd(lastRunInLane.run);
 
         if (runStart > lastRunEnd) {
           lane.runs.push(run);
@@ -193,6 +188,17 @@ export class WorkflowsPage implements OnInit {
     });
 
     return lanes;
+  }
+
+  /**
+   * When a run ended, for the lane overlap check. A run that recorded no
+   * duration (still in progress, or written before runs carried one) is
+   * assumed to have taken a minute.
+   */
+  runEnd(run: Run): number {
+    const start = new Date(run.created_at).getTime();
+    const seconds = run.duration_seconds ?? 60;
+    return start + seconds * 1000;
   }
 
   selectTask(task: TaskWorkflow, sessionId: string): void {

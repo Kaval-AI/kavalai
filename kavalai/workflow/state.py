@@ -37,6 +37,8 @@ class WorkflowState(BaseModel):
     error: error message when ``status == 'failed'``.
     invocation_id: short id shared by every log line of this run (for scanning).
     token_usage: aggregate model token counts for the run.
+    duration_seconds: wall-clock time of the run once it completed or failed,
+    as recorded on the run row; ``None`` while it is in progress.
     run_id / session_id / agent_id: persistence identifiers (string UUIDs).
     """
 
@@ -50,6 +52,7 @@ class WorkflowState(BaseModel):
     error: Optional[str] = None
     invocation_id: Optional[str] = None
     token_usage: Optional[dict] = None
+    duration_seconds: Optional[float] = None
     run_id: Optional[str] = None
     session_id: Optional[str] = None
     agent_id: Optional[str] = None

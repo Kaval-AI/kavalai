@@ -22,6 +22,11 @@ observability the key fields are:
   run took through the graph.
 * ``token_usage`` — a roll-up of ``model_calls``, ``prompt_tokens``,
   ``completion_tokens``, and ``total_tokens``.
+* ``duration_seconds`` — the wall-clock time of the run, set when it completes
+  or fails and recorded on the run row as ``runs.duration_seconds``. Every
+  node visit records its own ``tasks.duration_seconds`` as well; the run-level
+  figure is what a latency objective is measured against, since it includes
+  the time between nodes and counts overlapping ``parallel`` branches once.
 * ``run_id`` / ``session_id`` / ``invocation_id`` — identifiers that tie logs,
   storage, and chat history together. The 8-char ``invocation_id`` prefixes
   every log line of the run, so the log for one run can be isolated with a

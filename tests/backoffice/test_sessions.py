@@ -37,6 +37,7 @@ async def test_get_session_details(sessions_db):
         session_id=s1.id,
         input_data={"q": "test"},
         output_data={"ans": "res"},
+        duration_seconds=1.5,
         created_at=now - timedelta(minutes=5),
     )
     m1 = ChatMessage(
@@ -70,6 +71,7 @@ async def test_get_session_details(sessions_db):
     assert len(details.runs) == 1
     assert details.runs[0].id == r1.id
     assert details.runs[0].tasks_count == 1
+    assert details.runs[0].duration_seconds == 1.5
     assert len(details.tasks) == 1
     assert details.tasks[0].id == t1.id
     assert details.tasks[0].name == "test_task"

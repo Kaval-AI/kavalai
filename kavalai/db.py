@@ -192,7 +192,7 @@ def build_db_uri(
 # created with a different version are dropped and recreated on init.
 # 2: rag_index left the shared metadata (RAG backends self-provision).
 # 5: model_call_stats.session_id / run_id and the composite indexes.
-SQLITE_SCHEMA_VERSION = 5
+SQLITE_SCHEMA_VERSION = 6
 
 
 def _drop_all_sqlite_tables(connection):
@@ -733,8 +733,16 @@ class Run(Base):
     """One workflow run within a session.
 
     A run captures a single invocation of the agent's workflow: the input it
-    was called with, the output it produced and the resolved run context. Each
-    run belongs to a session and owns the tasks executed during it.
+    was called with, the output it produced, the resolved run context and how
+    long it took. Each run belongs to a session and owns the tasks executed
+    during it.
+
+    ``duration_seconds`` is the wall-clock time of the invocation, from the
+    moment the engine starts the run until it records the result — a success
+    or a failure alike — measured with a monotonic clock. It is ``NULL`` while
+    the run is in progress, for a run whose process died before it could
+    record anything, and for every run written before this column existed.
+    ``updated_at - created_at`` approximates it for those.
     """
 
     __tablename__ = "runs"
@@ -746,6 +754,7 @@ class Run(Base):
     input_data: Mapped[dict | None] = mapped_column(json_column())
     output_data: Mapped[dict | None] = mapped_column(json_column())
     context: Mapped[dict | None] = mapped_column(json_column())
+    duration_seconds: Mapped[float | None] = mapped_column(Numeric)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

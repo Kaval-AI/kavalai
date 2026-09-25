@@ -512,6 +512,52 @@ def test_revision_0005_backfills_last_activity_and_adds_the_indexes(
 
 
 @pytest.mark.parametrize("backend", ["sqlite", "postgres"])
+def test_revision_0006_adds_the_run_duration_without_a_backfill(
+    backend, request, tmp_path
+):
+    from datetime import datetime, timezone
+
+    from sqlalchemy import select
+
+    from kavalai.db import Base, Run
+    from kavalai.migrations.common import agents_include_object
+
+    if backend == "sqlite":
+        uri, schema = f"sqlite:///{tmp_path / 'agents.db'}", None
+    else:
+        uri, schema = request.getfixturevalue("db_uri"), "upgrade_0006"
+    times = {
+        key: datetime(2026, 1, day, 12, tzinfo=timezone.utc)
+        for key, day in (("created", 1), ("first", 2), ("middle", 3), ("last", 5))
+    }
+
+    _alembic(uri, schema, "upgrade", "0005")
+    on_connection(uri, lambda c: _seed_sessions(c, schema, times))
+    _alembic(uri, schema, "upgrade", "head")
+
+    def run_columns(connection):
+        return {
+            column["name"]
+            for column in inspect(connection).get_columns("runs", schema=schema)
+        }
+
+    def durations(connection):
+        rows = _translated(connection, schema).execute(select(Run.duration_seconds))
+        return [row[0] for row in rows.all()]
+
+    assert "duration_seconds" in on_connection(uri, run_columns)
+    # Runs written before the column existed are left NULL, not estimated.
+    assert on_connection(uri, durations) == [None, None, None]
+    diffs = _parity_diffs(
+        uri, schema, Base.metadata, include_object=agents_include_object
+    )
+    assert diffs == [], f"models and migrations diverged: {diffs}"
+
+    _alembic(uri, schema, "downgrade", "0005")
+    assert "duration_seconds" not in on_connection(uri, run_columns)
+
+
+@pytest.mark.parametrize("backend", ["sqlite", "postgres"])
 def test_backoffice_revision_0004_makes_existing_projects_read_only(
     backend, request, tmp_path
 ):

@@ -133,8 +133,11 @@ async def get_daily_stats(
                     func.count(model.id).label("count"),
                     Agent.name.label("agent_name"),
                     func.sum(
-                        func.extract("epoch", model.updated_at)
-                        - func.extract("epoch", model.created_at)
+                        func.coalesce(
+                            model.duration_seconds,
+                            func.extract("epoch", model.updated_at)
+                            - func.extract("epoch", model.created_at),
+                        )
                     ).label("duration_seconds"),
                 )
                 .select_from(model)

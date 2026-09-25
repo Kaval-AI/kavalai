@@ -101,3 +101,43 @@ async def test_daily_run_series_is_grouped_per_agent(agents_db: AsyncSession):
     # Every day is represented; the runs land on the most recent one.
     assert {entry["count"] for entry in series} == {0, 2}
     assert all("duration_seconds" in entry for entry in series)
+
+
+async def test_daily_run_durations_sum_the_recorded_duration(agents_db: AsyncSession):
+    """A run's recorded duration counts; a run without one (written before the
+    column existed, or still in progress) falls back to its timestamps."""
+    from datetime import datetime, timedelta, timezone
+
+    from kavalai.db import Run, Session as DbSession
+
+    agent = await insert(agents_db, Agent, {"name": "TimedBot"})
+    session = await insert(
+        agents_db, DbSession, {"agent_id": agent.id, "external_id": "u1"}
+    )
+    now = datetime.now(timezone.utc)
+    await insert(
+        agents_db,
+        Run,
+        {
+            "session_id": session.id,
+            "duration_seconds": 2.5,
+            # Timestamps far apart, to show they are not what is summed.
+            "created_at": now - timedelta(minutes=10),
+            "updated_at": now,
+        },
+    )
+    await insert(
+        agents_db,
+        Run,
+        {
+            "session_id": session.id,
+            "created_at": now - timedelta(seconds=30),
+            "updated_at": now,
+        },
+    )
+
+    daily = await get_daily_stats(agents_db, days=7, agent_id=agent.id)
+
+    today = [e for e in daily["runs"]["TimedBot"] if e["count"] == 2]
+    assert len(today) == 1
+    assert today[0]["duration_seconds"] == pytest.approx(2.5 + 30, abs=1)

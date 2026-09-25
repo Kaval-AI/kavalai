@@ -41,7 +41,7 @@ describe('SessionDetailPage', () => {
       { id: 'm2', role: 'assistant', content: 'Hi there', created_at: '2026-03-26T10:00:05Z', run_id: 'run1' } as ChatMessage,
     ],
     runs: [
-      { id: 'run1', session_id: 'sess1', tasks_count: 1, created_at: '2026-03-26T10:00:01Z' } as Run,
+      { id: 'run1', session_id: 'sess1', tasks_count: 1, duration_seconds: 4.25, created_at: '2026-03-26T10:00:01Z' } as Run,
     ],
     tasks: [
       { id: 't1', run_id: 'run1', session_id: 'sess1', agent_id: 'a1', name: 'Task 1', created_at: '2026-03-26T10:00:02Z', updated_at: '2026-03-26T10:00:02Z', duration_seconds: 1.5, errors: [], inputs: {}, output: {}, prompt: '' } as Task,
@@ -101,6 +101,21 @@ describe('SessionDetailPage', () => {
 
     expect(component.isChatMessage(block.timeline[2])).toBeTrue();
     expect((block.timeline[2] as ChatMessage).id).toBe('m2');
+
+    const header = fixture.nativeElement.textContent as string;
+    expect(header).toContain('1 tasks executed');
+    expect(header).toContain('4.25s');
+  });
+
+  it('should show no duration for a run that recorded none', () => {
+    const details = {
+      ...mockSessionDetails,
+      runs: [{ ...mockSessionDetails.runs[0], duration_seconds: null }]
+    };
+    agentServiceSpy.getSessionDetails.and.returnValue(of(details));
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).not.toContain('4.25s');
   });
 
   it('should handle error when loading details', () => {

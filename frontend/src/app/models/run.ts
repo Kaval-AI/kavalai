@@ -21,6 +21,7 @@ export interface Run {
   output_data: any | null;
   context: any | null;
   tasks_count: number;
+  duration_seconds: number | null;
   created_at: string;
   updated_at: string;
 }

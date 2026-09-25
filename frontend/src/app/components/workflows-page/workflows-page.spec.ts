@@ -139,6 +139,40 @@ describe('WorkflowsPage', () => {
     expect(component.workflows[0].lanes[1].runs[0].run.id).toBe('run2');
   });
 
+  it('should keep runs in one lane when the recorded duration shows they did not overlap', () => {
+    const now = new Date();
+    const sessionDetails: SessionDetails = {
+      session_id: 'sess1',
+      messages: [],
+      runs: [
+        { id: 'run1', session_id: 'sess1', duration_seconds: 2, created_at: now.toISOString() } as Run,
+        { id: 'run2', session_id: 'sess1', duration_seconds: 2, created_at: new Date(now.getTime() + 5000).toISOString() } as Run
+      ],
+      tasks: [
+        { id: 'task1', run_id: 'run1' } as Task,
+        { id: 'task2', run_id: 'run2' } as Task
+      ]
+    };
+
+    agentServiceSpy.getAgentsByProject.and.returnValue(of(mockAgents));
+    agentServiceSpy.getSessions.and.returnValue(of(mockSessions));
+    agentServiceSpy.getSessionDetails.and.returnValue(of(sessionDetails));
+
+    fixture.detectChanges();
+
+    expect(component.workflows[0].lanes.length).toBe(1);
+    expect(component.workflows[0].lanes[0].runs.map(r => r.run.id)).toEqual(['run1', 'run2']);
+  });
+
+  it('should assume a minute for a run without a recorded duration', () => {
+    const start = new Date('2026-03-26T10:00:00Z');
+    const withDuration = { id: 'r', session_id: 's', duration_seconds: 2.5, created_at: start.toISOString() } as Run;
+    const withoutDuration = { id: 'r', session_id: 's', duration_seconds: null, created_at: start.toISOString() } as Run;
+
+    expect(component.runEnd(withDuration)).toBe(start.getTime() + 2500);
+    expect(component.runEnd(withoutDuration)).toBe(start.getTime() + 60000);
+  });
+
   it('should select task and show overview', () => {
     agentServiceSpy.getAgentsByProject.and.returnValue(of(mockAgents));
     agentServiceSpy.getSessions.and.returnValue(of(mockSessions));

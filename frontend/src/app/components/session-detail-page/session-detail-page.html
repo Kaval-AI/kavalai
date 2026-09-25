@@ -76,6 +76,10 @@
                 </div>
                 <div class="text-xs opacity-70 font-body">
                   <span class="font-bold">{{ block.run.tasks_count }}</span> tasks executed
+                  @if (block.run.duration_seconds != null) {
+                    <span class="mx-1">•</span>
+                    <span>{{ block.run.duration_seconds | number:'1.1-2' }}s</span>
+                  }
                   @if (getTaskNames(block).length > 0) {
                     <span class="mx-1">•</span>
                     <span class="italic">{{ getTaskNames(block) }}</span>

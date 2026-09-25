@@ -53,6 +53,10 @@ class RunContext(BaseModel):
     (``run_stream(templates=...)``); they are already merged into
     ``templates`` and are kept separately so the run record can say which
     values came from the caller rather than from the document.
+
+    ``started_at`` is the monotonic-clock reading taken when the run started,
+    shared with parallel branches, from which the run's ``duration_seconds`` is
+    measured when it completes or fails.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -66,6 +70,7 @@ class RunContext(BaseModel):
     agent_service: Optional[Any] = None
     token_stats: Optional[Any] = None
     seq_counter: Optional[Any] = None
+    started_at: Optional[float] = None
     current_seq: Optional[int] = None
     task_logger: Optional[Any] = None
 

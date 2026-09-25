@@ -174,6 +174,9 @@ async def test_linear_llm_workflow_persists_everything():
     assert str(run.id) == state.run_id
     assert run.output_data == {"agent_response": "hi there"}
     assert run.context["output"] == {"agent_response": "hi there"}
+    # The run's wall-clock time is recorded on the row and on the state.
+    assert state.duration_seconds is not None and state.duration_seconds > 0
+    assert float(run.duration_seconds) == pytest.approx(state.duration_seconds)
 
     # Chat history captured both turns.
     history = await service.get_chat_history(UUID(state.session_id))
@@ -517,11 +520,12 @@ async def test_failure_marks_state_failed_and_persists():
     with pytest.raises(WorkflowException, match="llm boom"):
         await engine.run({"user_message": "x"})
 
-    # The failure was recorded on the run row.
+    # The failure was recorded on the run row, with the time it took.
     async with service.session_maker() as db:
         run = (await db.execute(select(Run))).scalars().one()
     assert run.context["status"] == "failed"
     assert "llm boom" in run.context["error"]
+    assert run.duration_seconds is not None and float(run.duration_seconds) > 0
 
 
 async def test_from_yaml_invalid_raises():
@@ -1059,6 +1063,7 @@ async def test_run_stream_abort_records_failure():
         run = (await db.execute(select(Run))).scalars().one()
     assert run.context["status"] == "failed"
     assert "aborted" in run.context["error"]
+    assert run.duration_seconds is not None and float(run.duration_seconds) > 0
 
 
 def test_parse_streamed_output_edge_cases():
@@ -2060,6 +2065,30 @@ async def test_a_run_past_its_timeout_is_cancelled_and_recorded():
     run = await _only_run(service)
     assert run.context["status"] == "failed"
     assert "time limit" in run.context["error"]
+    # A timed-out run took at least as long as its limit.
+    assert float(run.duration_seconds) >= 0.05
+
+
+async def test_a_failed_run_without_persistence_still_knows_its_duration():
+    from kavalai.workflow import WorkflowState
+
+    engine = WorkflowEngine.from_dict(
+        graph_dict(STREAM_NODES), client_factory=make_factory(raises=True)
+    )
+    state = WorkflowState(workflow_name="w")
+
+    with pytest.raises(WorkflowException):
+        async for _ in engine.run_stream({"user_message": "x"}, state=state):
+            pass
+
+    assert state.status == "failed"
+    assert state.duration_seconds is not None and state.duration_seconds > 0
+
+
+def test_elapsed_is_none_for_a_context_that_was_never_started():
+    from kavalai.run_context import RunContext
+
+    assert WorkflowEngine._elapsed(RunContext()) is None
 
 
 async def test_the_engine_run_timeout_is_the_default():

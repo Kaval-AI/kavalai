@@ -496,6 +496,21 @@ class TestAgentService:
         )
 
         assert stored.output_data == {"agent_response": "hi"}
+        assert stored.duration_seconds is None
+
+    async def test_update_run_stores_the_duration_and_keeps_it(self, session_maker):
+        service = AgentService(session_maker)
+        agent = await service.get_or_create_agent(name="TimedBot")
+        session = await service.get_or_create_session(agent_id=agent.id)
+        run = await service.create_run(session_id=session.id)
+
+        stored = await service.update_run(run_id=run.id, duration_seconds=1.25)
+        assert float(stored.duration_seconds) == 1.25
+
+        # A later update that says nothing about the duration leaves it alone.
+        stored = await service.update_run(run_id=run.id, context={"a": 1})
+        assert float(stored.duration_seconds) == 1.25
+        assert stored.context == {"a": 1}
 
     async def test_get_history_value_skips_runs_without_context(self, session_maker):
         service = AgentService(session_maker)

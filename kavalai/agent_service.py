@@ -466,8 +466,14 @@ class AgentService:
         *,
         output_data: Optional[Dict] = None,
         context: Optional[Dict] = None,
+        duration_seconds: Optional[float] = None,
     ) -> Run:
-        """Updates an existing run with final output_data and/or context."""
+        """Updates an existing run with its output, context and/or duration.
+
+        Each argument left ``None`` keeps the stored value, so the engine can
+        record the output at the end node and the duration in the same call,
+        while a failure recording carries the context and duration only.
+        """
         async with self.session_maker() as session:
             stmt = select(Run).where(Run.id == run_id)
             result = await session.execute(stmt)
@@ -478,6 +484,8 @@ class AgentService:
                 run.output_data = to_plain(output_data)
             if context is not None:
                 run.context = to_plain(context)
+            if duration_seconds is not None:
+                run.duration_seconds = duration_seconds
             await session.commit()
             await session.refresh(run)
             return run
