@@ -4,8 +4,8 @@ Versions
 The main changes in each release of the ``kavalai`` package. Releases are
 tagged ``vX.Y.Z`` in the repository and published to PyPI.
 
-Unreleased
-----------
+1.0.5 — 2026-09-25
+------------------
 
 Added
 ^^^^^
@@ -47,6 +47,33 @@ Added
   the referenced value with its type, so a filter an earlier node extracted
   passes through unchanged. The rendered filter is recorded with the node's
   inputs on its task row.
+
+* **Documentation assistant.** The documentation site carries a chat widget
+  answering questions about Kaval.AI from the documentation, served by a
+  Kaval.AI agent.
+
+Fixed
+^^^^^
+
+* ``kavalai[runtime]`` declares ``sqlalchemy[asyncio]``. SQLAlchemy 2.1 no
+  longer installs ``greenlet`` by default, so a fresh install of the extra
+  resolved to a SQLAlchemy whose async engine failed to import. The base
+  package still lists neither, and stays importable under Pyodide.
+
+Upgrading
+^^^^^^^^^
+
+* Run the agents migrations (``python -m kavalai.migrate_db agents``) for
+  revision ``0006``, which adds the nullable ``runs.duration_seconds`` and
+  rewrites nothing. Runs recorded before it keep ``NULL`` and are reported
+  from their timestamps.
+* Run the backoffice migrations (``python -m kavalai.migrate_db backoffice``)
+  for revision ``0004``. Every existing project becomes read-only; the
+  backoffice writes nothing to a project's database, so nothing it does
+  changes. A project's RAG explorer no longer creates the ``rag_collections``
+  registry when it is missing — index a collection first.
+* Browser (Pyodide) SQLite databases are recreated on first use, since
+  ``SQLITE_SCHEMA_VERSION`` moved to ``6``.
 
 1.0.4 — 2026-09-12
 ------------------
