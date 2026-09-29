@@ -67,6 +67,9 @@ Takes every `llm` key, plus the keys below. History is sent with every step,
 between the system prompt and the step message, **without the current user
 message** (the node's `prompt` carries it), so `history_limit` counts earlier
 messages only. The agent's intermediate steps never enter the chat history.
+The node's `inputs` are the **only** context variables the agent sees (and the
+only values a tool call's `input_args` can name) — declare what the agent
+needs, and do not also interpolate it into `prompt`, or it is sent twice.
 
 | Key | Description |
 |---|---|

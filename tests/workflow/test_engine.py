@@ -1996,6 +1996,37 @@ async def test_agent_node_replays_earlier_turns_without_the_current_message():
     assert "Analyze the situation" in messages[3].content
 
 
+async def test_agent_node_lists_its_inputs_not_the_whole_run_context():
+    nodes = [
+        {"name": "s", "type": "start", "next": "classify"},
+        {
+            "name": "classify",
+            "type": "llm",
+            "prompt": "classify",
+            "output": "classification",
+            "next": "answer",
+        },
+        {
+            "name": "answer",
+            "type": "agent",
+            "prompt": "answer",
+            "inputs": {"intent": {"type": "context", "value": "classification.intent"}},
+            "output": "output",
+            "next": "e",
+        },
+        {"name": "e", "type": "end", "output": "output"},
+    ]
+    factory = make_factory({"intent": "billing-question", "agent_response": "done"})
+    engine = WorkflowEngine.from_dict(graph_dict(nodes), client_factory=factory)
+
+    await engine.run({"user_message": "a very private message"})
+
+    system = factory.created[1].calls[0].messages[0].content
+    assert "- intent: billing-question" in system
+    assert "a very private message" not in system
+    assert "agent_response" not in system
+
+
 async def test_agent_node_history_limit_counts_earlier_messages_only():
     service = make_agent_service()
     factory = make_factory({"agent_response": "r"})

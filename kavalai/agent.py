@@ -1,7 +1,7 @@
 import asyncio
 import json
 import time
-from typing import Any, AsyncGenerator, Callable, Optional, Sequence, Type
+from typing import Any, AsyncGenerator, Callable, Mapping, Optional, Sequence, Type
 import os
 
 from loguru import logger
@@ -263,6 +263,7 @@ class Agent:
         stream_partials: bool = False,
         stream_delta: bool = False,
         history: Optional[Sequence[ChatMessage]] = None,
+        inputs: Optional[Mapping[str, Any]] = None,
     ) -> AsyncGenerator[StreamContent, None]:
         """Run the agent loop, streaming progress as :class:`StreamContent`.
 
@@ -297,9 +298,16 @@ class Agent:
                 between the system prompt and the step message. The current
                 user message belongs in ``prompt``, not here — the model
                 would read it twice.
+            inputs: The context variables of this invocation: listed in the
+                system prompt and the values ``input_args`` of a tool call
+                resolve against. Defaults to the run context's ``data``. The
+                workflow engine passes the node's resolved ``inputs``, so an
+                agent node sees what its author declared and not every value
+                the run has produced so far.
         """
         StepOutput = get_step_output_type(response_model or str)
         history_messages = list(history or [])
+        variables = dict(inputs) if inputs is not None else self.run_context.data
 
         # Per-invocation working memory: tool call results keyed by call_id,
         # referenced via `planner_context_args`. Created fresh for each
@@ -313,7 +321,7 @@ class Agent:
         for step_idx in range(max_steps):
             template_vars = dict(
                 prompt=prompt,
-                data=self.run_context.data,
+                data=variables,
                 tool_descriptions=(
                     await self.kernel.get_tool_descriptions(self.allowed_tools)
                     if self.kernel
@@ -381,7 +389,7 @@ class Agent:
             if step_output.tool_calls and self.kernel:
                 results = await asyncio.gather(
                     *[
-                        self._call_tool(tc, planner_context)
+                        self._call_tool(tc, planner_context, variables)
                         for tc in step_output.tool_calls
                     ]
                 )
@@ -422,6 +430,7 @@ class Agent:
         max_steps: int = 10,
         *,
         history: Optional[Sequence[ChatMessage]] = None,
+        inputs: Optional[Mapping[str, Any]] = None,
     ) -> str | BaseModel:
         """Run the agent loop and return the final output (blocking wrapper).
 
@@ -434,6 +443,7 @@ class Agent:
             max_steps: Maximum number of reasoning/tool-calling iterations.
             history: Earlier turns of the conversation, as on
                 :meth:`prompt_stream`.
+            inputs: The context variables, as on :meth:`prompt_stream`.
 
         Returns:
             The structured ``response_model`` instance, or a string when no
@@ -441,7 +451,11 @@ class Agent:
         """
         final_value = None
         async for chunk in self.prompt_stream(
-            prompt, response_model=response_model, max_steps=max_steps, history=history
+            prompt,
+            response_model=response_model,
+            max_steps=max_steps,
+            history=history,
+            inputs=inputs,
         ):
             if chunk.type == "complete" and chunk.name == "response":
                 final_value = chunk.value
@@ -453,15 +467,21 @@ class Agent:
         return final_value
 
     def _resolve_args(
-        self, tool_call: ToolCall, planner_context: dict[str, Any]
+        self,
+        tool_call: ToolCall,
+        planner_context: dict[str, Any],
+        variables: Optional[Mapping[str, Any]] = None,
     ) -> dict:
         """Resolve a ToolCall's argument sources into a single argument dict.
 
         Arguments are merged with precedence ``literal_args`` >
         ``planner_context_args`` > ``input_args``. ``planner_context_args``
         resolves against the per-invocation ``planner_context`` (results of
-        previous tool calls); ``input_args`` against ``self.run_context.data``.
+        previous tool calls); ``input_args`` against ``variables``, the context
+        variables the prompt listed (``self.run_context.data`` when not given).
         """
+        if variables is None:
+            variables = self.run_context.data
 
         def parse(field_name: str, value: str) -> dict:
             if not value:
@@ -482,7 +502,7 @@ class Agent:
 
         input_keys = parse("input_args", tool_call.input_args)
         input_args = {
-            arg_name: self.run_context.data.get(input_key)
+            arg_name: variables.get(input_key)
             for arg_name, input_key in input_keys.items()
         }
 
@@ -502,7 +522,10 @@ class Agent:
             logger.warning(f"Agent on_step observer failed: {e}")
 
     async def _call_tool(
-        self, tool_call: ToolCall, planner_context: dict[str, Any]
+        self,
+        tool_call: ToolCall,
+        planner_context: dict[str, Any],
+        variables: Mapping[str, Any],
     ) -> tuple[ToolCall, dict, Any, float]:
         """Resolve arguments and execute a single tool call via the kernel.
 
@@ -512,7 +535,7 @@ class Agent:
         caller's ``asyncio.gather`` — that would time the slowest call in the
         batch and attribute it to all of them.
         """
-        args = self._resolve_args(tool_call, planner_context)
+        args = self._resolve_args(tool_call, planner_context, variables)
         start = time.perf_counter()
         if not _is_tool_allowed(tool_call.name, self.allowed_tools):
             # The tool was never described to the model; tell it so it can

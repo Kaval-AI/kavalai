@@ -91,6 +91,14 @@ Changed
 Fixed
 ^^^^^
 
+* An ``agent`` node listed the whole run context as its context variables —
+  the parsed input and every earlier node's output, a retrieved passage list
+  included, rendered in full on every step, and twice when the prompt
+  interpolated the same value. The node now hands the agent its resolved
+  ``inputs`` and nothing else, as the ``llm`` node does; a tool call's
+  ``input_args`` name those inputs. ``Agent.prompt`` and
+  ``Agent.prompt_stream`` take them as ``inputs``, and list the run context's
+  ``data`` when the argument is absent, as before.
 * ``kavalai[runtime]`` declares ``sqlalchemy[asyncio]``. SQLAlchemy 2.1 no
   longer installs ``greenlet`` by default, so a fresh install of the extra
   resolved to a SQLAlchemy whose async engine failed to import. The base

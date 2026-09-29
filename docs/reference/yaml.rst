@@ -259,7 +259,10 @@ and without the current user message: the node's ``prompt`` already carries
 it, so ``history_limit`` counts the earlier messages only. The agent's
 intermediate steps are not written to the chat history — the session records
 the user message and the workflow's answer, and the tool calls go to the task
-log.
+log. The node's ``inputs`` are the context variables the agent lists in its
+system prompt and the values a tool call's ``input_args`` may name; nothing
+else in the run context reaches the model. A value the prompt interpolates and
+also declares as an input is sent twice.
 
 .. list-table::
    :header-rows: 1

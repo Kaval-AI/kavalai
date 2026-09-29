@@ -232,7 +232,7 @@ async def test_tool_error_is_captured(mock_kernel, run_context):
     mock_kernel.call_tool.side_effect = RuntimeError("boom")
 
     tool_call = ToolCall(name="python://broken", call_id="c1")
-    _, _, result, duration = await agent._call_tool(tool_call, {})
+    _, _, result, duration = await agent._call_tool(tool_call, {}, {})
 
     assert result == "Error: boom"
     assert duration >= 0.0
@@ -581,6 +581,57 @@ async def test_custom_step_template_receives_the_same_variables(
     system, step = client.seen[0]
     assert system.content == "task=t"
     assert step.content == "step 0 of 3"
+
+
+@pytest.mark.asyncio
+async def test_inputs_replace_the_run_context_as_context_variables(mock_kernel):
+    StepOutput = get_step_output_type(str)
+    client = ScriptedClient([StepOutput(instructions="answer", output="done")])
+    agent = make_agent(
+        client, mock_kernel, RunContext(data={"passages": ["a", "b"], "x": 1})
+    )
+
+    await agent.prompt("task", inputs={"city": "Turku"})
+
+    system = client.seen[0][0].content
+    assert "- city: Turku" in system
+    assert "passages" not in system and "['a', 'b']" not in system
+
+
+@pytest.mark.asyncio
+async def test_without_inputs_the_run_context_is_listed(mock_kernel):
+    StepOutput = get_step_output_type(str)
+    client = ScriptedClient([StepOutput(instructions="answer", output="done")])
+    agent = make_agent(client, mock_kernel, RunContext(data={"city": "Turku"}))
+
+    await agent.prompt("task")
+
+    assert "- city: Turku" in client.seen[0][0].content
+
+
+@pytest.mark.asyncio
+async def test_input_args_resolve_against_the_inputs(mock_kernel):
+    StepOutput = get_step_output_type(str)
+    client = ScriptedClient(
+        [
+            StepOutput(
+                instructions="look",
+                tool_calls=[
+                    ToolCall(
+                        name="python://t", call_id="c1", input_args='{"q": "city"}'
+                    )
+                ],
+            ),
+            StepOutput(instructions="answer", output="done"),
+        ]
+    )
+    agent = make_agent(client, mock_kernel, RunContext(data={"city": "hidden"}))
+
+    await agent.prompt("task", inputs={"city": "Turku"})
+
+    mock_kernel.call_tool.assert_awaited_once_with(
+        tool_uri="python://t", arguments={"q": "Turku"}
+    )
 
 
 @pytest.mark.asyncio

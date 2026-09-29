@@ -48,6 +48,7 @@ Running a prompt
        response_model=MySchema,   # optional Pydantic model
        max_steps=10,
        history=earlier_turns,     # optional list of ChatMessage
+       inputs={"city": "Turku"},  # optional context variables
    )
 
 When you pass a ``response_model`` the agent returns an instance of it; without
@@ -57,6 +58,13 @@ one it returns a plain string.
 :class:`~kavalai.ChatMessage` objects. They are sent with every step, so the
 agent answers in the context of what was said before. The current user message
 belongs in the prompt, not in the history, or the model reads it twice.
+
+``inputs`` is the mapping the system prompt lists as **context variables**, and
+what a tool call's ``input_args`` resolve against. Without it the agent lists
+the run context's ``data``. The workflow engine passes an agent node's
+resolved ``inputs``, so the model sees the values the node declares — a
+retrieved passage list, a classification — and not every output the run has
+produced, which would otherwise be rendered in full on every step.
 
 The four-step cycle
 -------------------

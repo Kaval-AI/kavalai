@@ -613,6 +613,9 @@ class WorkflowEngine:
             stream_partials=node.stream_partials,
             stream_delta=node.stream_delta,
             history=history,
+            # The node's declared inputs are the agent's context variables —
+            # not the whole run context, which holds every earlier output.
+            inputs=input_data,
         ):
             if chunk.name == "response" and chunk.type == "complete":
                 result_value = chunk.value
