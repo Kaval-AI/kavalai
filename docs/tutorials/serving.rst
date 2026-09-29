@@ -93,7 +93,8 @@ Both address a row in the ``sessions`` table; see
 The response mirrors the request: your workflow's ``output`` type under ``data``,
 plus the ``session_id`` the run belongs to. Send that id back — or reuse the same
 ``external_id`` — and the next call continues the same conversation, with the
-chat history replayed into every ``llm`` node that has ``use_history`` on.
+chat history replayed into every ``llm`` and ``agent`` node that has
+``use_history`` on.
 
 Because the schemas come from the graph, the generated OpenAPI docs at
 ``/docs`` describe your actual data types, and a malformed request is rejected

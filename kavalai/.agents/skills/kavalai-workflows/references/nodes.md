@@ -63,8 +63,10 @@ validated result stored under `output`.
 A multi-step, tool-using `Agent` loop inside the graph. Use it when the model
 should decide which tools to call; use `function` when you already know.
 
-Takes every `llm` key **except `use_history`, `history_limit` and
-`history_max_chars`**, plus:
+Takes every `llm` key, plus the keys below. History is sent with every step,
+between the system prompt and the step message, **without the current user
+message** (the node's `prompt` carries it), so `history_limit` counts earlier
+messages only. The agent's intermediate steps never enter the chat history.
 
 | Key | Description |
 |---|---|

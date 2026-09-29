@@ -1948,6 +1948,84 @@ async def test_history_limit_zero_sends_no_history():
     assert _history_seen(factory) == []
 
 
+def _agent_nodes(**agent_extra):
+    return [
+        {"name": "s", "type": "start", "next": "answer"},
+        {
+            "name": "answer",
+            "type": "agent",
+            "prompt": "{{ context.input.user_message }}",
+            "output": "output",
+            "next": "e",
+            **agent_extra,
+        },
+        {"name": "e", "type": "end", "output": "output"},
+    ]
+
+
+async def _seeded_conversation(service, *turns):
+    """A session holding whole earlier turns, alternating user and assistant."""
+    agent, session, run = await service.initialize_workflow_run(agent_name="wf")
+    for index, content in enumerate(turns):
+        await service.add_chat_message(
+            agent_id=agent.id,
+            session_id=session.id,
+            run_id=run.id,
+            role="user" if index % 2 == 0 else "assistant",
+            content=content,
+        )
+    return session
+
+
+async def test_agent_node_replays_earlier_turns_without_the_current_message():
+    service = make_agent_service()
+    factory = make_factory({"agent_response": "r"})
+    engine = WorkflowEngine.from_dict(
+        graph_dict(_agent_nodes()), agent_service=service, client_factory=factory
+    )
+    session = await _seeded_conversation(service, "I am John", "Hello John")
+
+    await engine.run({"user_message": "What is my name?"}, session_id=str(session.id))
+
+    messages = factory.created[0].calls[0].messages
+    assert [m.role for m in messages] == ["system", "user", "assistant", "user"]
+    assert "What is my name?" in messages[0].content
+    assert [m.content for m in messages[1:3]] == ["I am John", "Hello John"]
+    # The current turn is in the prompt already; the step message closes.
+    assert "What is my name?" not in messages[3].content
+    assert "Analyze the situation" in messages[3].content
+
+
+async def test_agent_node_history_limit_counts_earlier_messages_only():
+    service = make_agent_service()
+    factory = make_factory({"agent_response": "r"})
+    engine = WorkflowEngine.from_dict(
+        graph_dict(_agent_nodes(history_limit=2)),
+        agent_service=service,
+        client_factory=factory,
+    )
+    session = await _seeded_conversation(service, "one", "two", "three")
+
+    await engine.run({"user_message": "now"}, session_id=str(session.id))
+
+    assert _history_seen(factory)[:-1] == ["two", "three"]
+
+
+async def test_agent_node_without_use_history_sends_no_earlier_turns():
+    service = make_agent_service()
+    factory = make_factory({"agent_response": "r"})
+    engine = WorkflowEngine.from_dict(
+        graph_dict(_agent_nodes(use_history=False)),
+        agent_service=service,
+        client_factory=factory,
+    )
+    session = await _seeded_conversation(service, "I am John", "Hello John")
+
+    await engine.run({"user_message": "now"}, session_id=str(session.id))
+
+    assert [m.role for m in factory.created[0].calls[0].messages] == ["system", "user"]
+
+
 async def test_a_node_that_does_not_stream_emits_no_restart():
     nodes = [dict(n) for n in STREAM_NODES]
     nodes[1] = {**nodes[1], "stream_output": False, "stream_delta": True}

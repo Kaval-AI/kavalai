@@ -253,8 +253,13 @@ already know.
      max_steps: 6
      next: write_up
 
-Takes every ``llm`` key above except ``use_history``, ``history_limit`` and
-``history_max_chars`` — an agent loop does not replay the chat history — plus:
+Takes every ``llm`` key above, plus the keys below. The chat history is sent
+with every step of the loop, between the system prompt and the step message,
+and without the current user message: the node's ``prompt`` already carries
+it, so ``history_limit`` counts the earlier messages only. The agent's
+intermediate steps are not written to the chat history — the session records
+the user message and the workflow's answer, and the tool calls go to the task
+log.
 
 .. list-table::
    :header-rows: 1

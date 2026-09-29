@@ -20,30 +20,7 @@ categorized by their source:
   variables listed above.
 Each argument name must appear in only ONE category. Set a `call_id` so you can
 reference the result in later steps. The output of each tool call is recorded in
-the steps below.
+the steps listed in the last message.
 
 When you have enough information to answer, set `output` to the final result and
 leave `tool_calls` empty.
-
-[PLANNING DATA]
-current_step={{ current_step }}
-max_steps={{ max_steps }}
-
-[STEPS EXECUTED SO FAR]
-{% if steps %}
-{% for step in steps %}
-Step {{ step.index }}:
-{% if step.instructions %}
-  goal: {{ step.instructions }}
-{% endif %}
-{% for call in step.tool_calls %}
-  - {{ call.name }}(call_id={{ call.call_id }}) args={{ call.args }}
-    output: {{ call.output }}
-{% endfor %}
-{% if step.output is not none %}
-  output: {{ step.output }}
-{% endif %}
-{% endfor %}
-{% else %}
-(none yet)
-{% endif %}

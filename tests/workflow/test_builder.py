@@ -83,7 +83,16 @@ def test_build_all_node_types():
         .start("decide")
         .if_("decide", condition="True", then="sw", else_="act")
         .switch("sw", expr="input.user_message", cases={"x": "act"}, default="act")
-        .agent("act", prompt="do", output="output", next="call", max_steps=2)
+        .agent(
+            "act",
+            prompt="do",
+            output="output",
+            next="call",
+            max_steps=2,
+            use_history=False,
+            history_limit=3,
+            history_max_chars=100,
+        )
         .function("call", tool="python://noop", output="output", next="end")
         .end()
         .build()
@@ -92,6 +101,12 @@ def test_build_all_node_types():
     assert isinstance(graph.node_map["sw"], SwitchNode)
     assert isinstance(graph.node_map["act"], AgentNode)
     assert graph.node_map["act"].max_steps == 2
+    act = graph.node_map["act"]
+    assert (act.use_history, act.history_limit, act.history_max_chars) == (
+        False,
+        3,
+        100,
+    )
     assert isinstance(graph.node_map["call"], FunctionNode)
     assert graph.node_map["decide"].else_ == "act"
 

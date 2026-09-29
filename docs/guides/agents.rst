@@ -21,7 +21,8 @@ Construction
        llm_client=OpenAIClient("gpt-5.6-luna"),
        kernel=FunctionKernel(),   # optional
        run_context=...,           # optional
-       prompt_template=...,       # optional Jinja2 Template
+       prompt_template=...,       # optional Jinja2 Template, system message
+       step_template=...,         # optional Jinja2 Template, step message
        allowed_tools=None,        # optional; None = every registered tool
        on_step=None,              # optional observer, called after each step
        debug=False,               # print each step's reasoning and tool calls
@@ -46,18 +47,29 @@ Running a prompt
        "Summarise the latest filings",
        response_model=MySchema,   # optional Pydantic model
        max_steps=10,
+       history=earlier_turns,     # optional list of ChatMessage
    )
 
 When you pass a ``response_model`` the agent returns an instance of it; without
 one it returns a plain string.
+
+``history`` is the earlier turns of a conversation, as
+:class:`~kavalai.ChatMessage` objects. They are sent with every step, so the
+agent answers in the context of what was said before. The current user message
+belongs in the prompt, not in the history, or the model reads it twice.
 
 The four-step cycle
 -------------------
 
 Each step of the loop performs the same four operations:
 
-#. **Render** a system prompt from the Jinja2 template, including the task,
-   the available tool descriptions, and the history of previous steps.
+#. **Render** the conversation for this step: a system message from
+   ``prompt_template`` (the task, the context variables and the tool
+   descriptions), the chat ``history`` if there is one, and a user message from
+   ``step_template`` (the steps executed so far, with their tool results, and
+   the instruction to produce the next step). Keeping the step trace in the
+   last message leaves the system prompt constant across the steps of a run,
+   which is what a provider's prompt cache can reuse.
 #. **Reason** — the LLM returns a ``StepOutput``: a list of ``tool_calls`` plus
    an optional final output.
 #. **Act** — the requested tool calls execute *in parallel* through the
@@ -89,3 +101,10 @@ The ``agent`` node in a workflow graph runs this exact same loop inside the
 graph, with its own ``max_steps``. So you can drop an agent into a larger,
 deterministic :doc:`workflow <workflows>` and still get the per-node trace and
 token accounting described in :doc:`observability`.
+
+The node fills ``history`` from the session's chat history when
+``use_history`` is on (the default), windowed by ``history_limit`` and
+``history_max_chars`` as on an ``llm`` node, and leaves out the current user
+message because the node's ``prompt`` carries it. The agent's intermediate steps
+are not written to the chat history: the session records the user message and
+the workflow's answer, and the tool calls go to the task log.

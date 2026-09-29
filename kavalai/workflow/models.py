@@ -254,6 +254,18 @@ class AgentNode(BaseNode):
         applies to the ``_instructions`` and ``_step<N>`` streams, not to the
         structured output stream.
 
+    Chat history (read only when ``use_history`` is true and the engine has an
+    ``AgentService``): the earlier turns of the session are sent with every
+    step, between the system prompt and the step message. The current user
+    message is left out — the node's ``prompt`` already carries it, and the
+    model would read it twice.
+
+    ``history_limit``
+        The most recent earlier messages sent. ``0`` sends none.
+    ``history_max_chars``
+        A ceiling on the characters of those messages, applied as on
+        :class:`LLMNode`.
+
     ``allowed_tools`` restricts what this node may call, and means the same
     here as it does in the Python API:
 
@@ -273,6 +285,9 @@ class AgentNode(BaseNode):
     next: str
     allowed_tools: Optional[list[str]] = None
     max_steps: int = 10
+    use_history: bool = True
+    history_limit: int = Field(default=50, ge=0)
+    history_max_chars: Optional[int] = Field(default=None, ge=1)
     llm_model: Optional[str] = None
     llm_kwargs: dict[str, Any] = Field(default_factory=dict)
     stream_output: bool = False

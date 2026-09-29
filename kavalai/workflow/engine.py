@@ -507,15 +507,7 @@ class WorkflowEngine:
         text = make_prompt(rendered_prompt, input_data)
 
         messages = [ChatMessage(role="system", content=text)]
-        if node.use_history and self.agent_service and run_context.session_id:
-            history = await self.agent_service.get_chat_history(
-                run_context.session_id,
-                limit=node.history_limit,
-                max_chars=node.history_max_chars,
-            )
-            messages.extend(
-                ChatMessage(role=msg.role, content=msg.content) for msg in history
-            )
+        messages.extend(await self._chat_history(node, run_context))
 
         client = self._make_llm_client(node.llm_model, node.llm_kwargs, run_context)
         output_type = self.get_data_type(node.output)
@@ -558,11 +550,39 @@ class WorkflowEngine:
             duration=duration,
         )
 
+    async def _chat_history(
+        self,
+        node: Union[LLMNode, AgentNode],
+        run_context: RunContext,
+        *,
+        exclude_current_run: bool = False,
+    ) -> list[ChatMessage]:
+        """The session's chat history as the node's settings window it.
+
+        Empty when the node has ``use_history`` off or the run is not recorded
+        (no ``AgentService`` or no session). ``exclude_current_run`` leaves out
+        the user message the engine recorded for this run, for a node whose
+        prompt already carries it.
+        """
+        if not (node.use_history and self.agent_service and run_context.session_id):
+            return []
+        history = await self.agent_service.get_chat_history(
+            run_context.session_id,
+            limit=node.history_limit,
+            max_chars=node.history_max_chars,
+            exclude_run_id=run_context.run_id if exclude_current_run else None,
+        )
+        return [ChatMessage(role=msg.role, content=msg.content) for msg in history]
+
     async def _run_agent_node(
         self, node: AgentNode, run_context: RunContext
     ) -> AsyncGenerator[WorkflowStreamEvent, None]:
         input_data = await run_context.prepare_tool_inputs(node)
         rendered_prompt = await run_context.render_prompt(node.prompt)
+        # The agent's prompt is the current turn, so the history stops before
+        # this run's user message; the LLM node sends it as the last message
+        # because its prompt is a system message alone.
+        history = await self._chat_history(node, run_context, exclude_current_run=True)
         client = self._make_llm_client(node.llm_model, node.llm_kwargs, run_context)
         output_type = self.get_data_type(node.output)
 
@@ -592,6 +612,7 @@ class WorkflowEngine:
             stream_instructions=node.stream_instructions,
             stream_partials=node.stream_partials,
             stream_delta=node.stream_delta,
+            history=history,
         ):
             if chunk.name == "response" and chunk.type == "complete":
                 result_value = chunk.value

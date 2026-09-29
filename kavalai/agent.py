@@ -1,7 +1,7 @@
 import asyncio
 import json
 import time
-from typing import Any, AsyncGenerator, Callable, Optional, Type
+from typing import Any, AsyncGenerator, Callable, Optional, Sequence, Type
 import os
 
 from loguru import logger
@@ -192,6 +192,11 @@ class StepStreamDemuxer:
         return events
 
 
+def _default_template(filename: str) -> Template:
+    with open(os.path.join(os.path.dirname(__file__), filename), "r") as f:
+        return Template(f.read())
+
+
 class Agent:
     def __init__(
         self,
@@ -200,11 +205,23 @@ class Agent:
         kernel: Optional[FunctionKernel] = None,
         run_context: Optional[RunContext] = None,
         prompt_template: Optional[Template] = None,
+        step_template: Optional[Template] = None,
         allowed_tools: Optional[list[str]] = None,
         on_step: Optional[Callable[[dict], None]] = None,
         debug: bool = False,
     ):
         """Build an agent.
+
+        Every step sends one conversation to the model: a system message
+        rendered from ``prompt_template`` (the task, the context variables and
+        the tool descriptions), then the chat ``history`` handed to
+        :meth:`prompt_stream`, then a user message rendered from
+        ``step_template`` (the steps executed so far and the instruction to
+        produce the next one). Both templates receive the same variables:
+        ``prompt``, ``data``, ``tool_descriptions``, ``steps``,
+        ``current_step`` and ``max_steps``. The defaults are
+        ``default_prompt_template.j2`` and ``default_step_template.j2``
+        beside this module.
 
         ``allowed_tools`` restricts the agent to a subset of the kernel's
         tools, given as tool URIs (``python://web.crawl``, or ``rest://api.*``
@@ -228,13 +245,12 @@ class Agent:
             run_context = RunContext()
         self.run_context = run_context
         self.llm_client = llm_client
-        if prompt_template is None:
-            with open(
-                os.path.join(os.path.dirname(__file__), "default_prompt_template.j2"),
-                "r",
-            ) as f:
-                prompt_template = Template(f.read())
-        self.prompt_template = prompt_template
+        self.prompt_template = prompt_template or _default_template(
+            "default_prompt_template.j2"
+        )
+        self.step_template = step_template or _default_template(
+            "default_step_template.j2"
+        )
 
     async def prompt_stream(
         self,
@@ -246,6 +262,7 @@ class Agent:
         stream_instructions: bool = False,
         stream_partials: bool = False,
         stream_delta: bool = False,
+        history: Optional[Sequence[ChatMessage]] = None,
     ) -> AsyncGenerator[StreamContent, None]:
         """Run the agent loop, streaming progress as :class:`StreamContent`.
 
@@ -276,8 +293,13 @@ class Agent:
             stream_partials: Stream each step's raw model output.
             stream_delta: Emit deltas instead of full accumulated values on the
                 ``instructions`` and ``step<N>`` streams.
+            history: Earlier turns of the conversation, sent with every step
+                between the system prompt and the step message. The current
+                user message belongs in ``prompt``, not here — the model
+                would read it twice.
         """
         StepOutput = get_step_output_type(response_model or str)
+        history_messages = list(history or [])
 
         # Per-invocation working memory: tool call results keyed by call_id,
         # referenced via `planner_context_args`. Created fresh for each
@@ -289,7 +311,7 @@ class Agent:
         final_output: Optional[BaseModel] = None
 
         for step_idx in range(max_steps):
-            rendered_prompt = self.prompt_template.render(
+            template_vars = dict(
                 prompt=prompt,
                 data=self.run_context.data,
                 tool_descriptions=(
@@ -301,17 +323,18 @@ class Agent:
                 current_step=step_idx,
                 max_steps=max_steps,
             )
+            rendered_prompt = self.prompt_template.render(**template_vars)
+            rendered_step = self.step_template.render(**template_vars)
 
             if self.debug:
                 print(rendered_prompt)
+                print(rendered_step)
 
             chat_history = ChatHistory(
                 messages=[
                     ChatMessage(role="system", content=rendered_prompt),
-                    ChatMessage(
-                        role="user",
-                        content="Analyze the situation and provide the next step output.",
-                    ),
+                    *history_messages,
+                    ChatMessage(role="user", content=rendered_step),
                 ]
             )
 
@@ -397,6 +420,8 @@ class Agent:
         prompt: str,
         response_model: Optional[Type[BaseModel]] = None,
         max_steps: int = 10,
+        *,
+        history: Optional[Sequence[ChatMessage]] = None,
     ) -> str | BaseModel:
         """Run the agent loop and return the final output (blocking wrapper).
 
@@ -407,6 +432,8 @@ class Agent:
             response_model: Optional Pydantic model describing the structured
                 final output. When omitted, a plain string is returned.
             max_steps: Maximum number of reasoning/tool-calling iterations.
+            history: Earlier turns of the conversation, as on
+                :meth:`prompt_stream`.
 
         Returns:
             The structured ``response_model`` instance, or a string when no
@@ -414,7 +441,7 @@ class Agent:
         """
         final_value = None
         async for chunk in self.prompt_stream(
-            prompt, response_model=response_model, max_steps=max_steps
+            prompt, response_model=response_model, max_steps=max_steps, history=history
         ):
             if chunk.type == "complete" and chunk.name == "response":
                 final_value = chunk.value

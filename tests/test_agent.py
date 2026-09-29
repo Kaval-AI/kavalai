@@ -7,7 +7,8 @@ from pydantic import BaseModel
 from kavalai.agent import Agent, StepStreamDemuxer, ToolCall, get_step_output_type
 from kavalai.run_context import RunContext
 from kavalai.functionkernel import FunctionKernel
-from kavalai.llm_clients.base_client import BaseLlmClient
+from kavalai.llm_clients.base_client import BaseLlmClient, ChatMessage
+from jinja2 import Template
 from kavalai.llm_clients.streamer import StreamContent
 
 
@@ -27,9 +28,11 @@ class ScriptedClient(BaseLlmClient):
         self.outputs = list(outputs or [])
         self.chunk_size = chunk_size
         self.await_count = 0
+        self.seen: list[list[ChatMessage]] = []
 
     async def _run_chat_completions(self, chat_history, response_model, streamer):
         self.await_count += 1
+        self.seen.append(list(chat_history.messages))
         out = self.outputs.pop(0)
         text = out if isinstance(out, str) else out.model_dump_json()
         value_streamer = streamer.get_value_streamer(
@@ -495,6 +498,89 @@ async def test_debug_prints_the_rendered_prompt(mock_kernel, run_context, capsys
 
     printed = capsys.readouterr().out
     assert "say something" in printed
+    assert "[STEPS EXECUTED SO FAR]" in printed
+
+
+@pytest.mark.asyncio
+async def test_history_sits_between_the_system_prompt_and_the_step_message(
+    mock_kernel, run_context
+):
+    StepOutput = get_step_output_type(str)
+    client = ScriptedClient([StepOutput(instructions="answer", output="done")])
+    agent = make_agent(client, mock_kernel, run_context)
+    history = [
+        ChatMessage(role="user", content="I am John"),
+        ChatMessage(role="assistant", content="Hello John"),
+    ]
+
+    assert await agent.prompt("What is my name?", history=history) == "done"
+
+    messages = client.seen[0]
+    assert [m.role for m in messages] == ["system", "user", "assistant", "user"]
+    assert "What is my name?" in messages[0].content
+    assert messages[1:3] == history
+    assert "Analyze the situation" in messages[3].content
+
+
+@pytest.mark.asyncio
+async def test_without_history_the_step_message_follows_the_system_prompt(
+    mock_kernel, run_context
+):
+    StepOutput = get_step_output_type(str)
+    client = ScriptedClient([StepOutput(instructions="answer", output="done")])
+    agent = make_agent(client, mock_kernel, run_context)
+
+    await agent.prompt("task")
+
+    assert [m.role for m in client.seen[0]] == ["system", "user"]
+
+
+@pytest.mark.asyncio
+async def test_executed_steps_are_in_the_step_message_not_the_system_prompt(
+    mock_kernel, run_context
+):
+    StepOutput = get_step_output_type(str)
+    client = ScriptedClient(
+        [
+            StepOutput(
+                instructions="look it up",
+                tool_calls=[ToolCall(name="python://lookup", call_id="c1")],
+            ),
+            StepOutput(instructions="answer", output="done"),
+        ]
+    )
+    agent = make_agent(client, mock_kernel, run_context)
+
+    assert await agent.prompt("task") == "done"
+
+    system, step = client.seen[1]
+    assert "look it up" not in system.content
+    assert "Tool result" not in system.content
+    assert "look it up" in step.content
+    assert "python://lookup(call_id=c1)" in step.content
+    assert "Tool result" in step.content
+    assert "current_step=1" in step.content
+
+
+@pytest.mark.asyncio
+async def test_custom_step_template_receives_the_same_variables(
+    mock_kernel, run_context
+):
+    StepOutput = get_step_output_type(str)
+    client = ScriptedClient([StepOutput(instructions="answer", output="done")])
+    agent = Agent(
+        llm_client=client,
+        kernel=mock_kernel,
+        run_context=run_context,
+        prompt_template=Template("task={{ prompt }}"),
+        step_template=Template("step {{ current_step }} of {{ max_steps }}"),
+    )
+
+    await agent.prompt("t", max_steps=3)
+
+    system, step = client.seen[0]
+    assert system.content == "task=t"
+    assert step.content == "step 0 of 3"
 
 
 @pytest.mark.asyncio

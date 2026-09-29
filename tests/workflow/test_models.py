@@ -494,3 +494,14 @@ def test_history_window_defaults():
 def test_history_window_bounds_are_validated(extra):
     with pytest.raises(ValidationError):
         llm_graph(**extra)
+
+
+def test_agent_node_has_the_same_history_window():
+    node = AgentNode(name="a", prompt="p", output="output", next="e")
+    assert (node.use_history, node.history_limit, node.history_max_chars) == (
+        True,
+        50,
+        None,
+    )
+    with pytest.raises(ValidationError):
+        AgentNode(name="a", prompt="p", output="output", next="e", history_limit=-1)

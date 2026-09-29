@@ -53,8 +53,8 @@ existing conversation, `external_id` keys a session by an identifier from your
 own system (a user, ticket or thread id). The response mirrors the request —
 your `output` type under `data`, plus the `session_id` the run belongs to. Send
 that id back, or reuse the same `external_id`, and the next call continues the
-conversation, with history replayed into every `llm` node that has
-`use_history` on (the default).
+conversation, with history replayed into every `llm` and `agent` node that
+has `use_history` on (the default).
 
 Because the schemas come from the graph, `/docs` describes your actual types and
 a malformed request is rejected before the model is ever called.

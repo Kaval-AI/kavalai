@@ -376,6 +376,37 @@ class TestAgentService:
         window = await service.get_chat_history(session.id, limit=2)
         assert [m.content for m in window] == ["message 3", "message 4"]
 
+    async def test_chat_history_excludes_a_run(self, session_maker):
+        service = AgentService(session_maker)
+        agent, session, earlier = await service.initialize_workflow_run(
+            agent_name="ChatExcludeTest"
+        )
+        _, _, current = await service.initialize_workflow_run(
+            agent_name="ChatExcludeTest", session_id=session.id
+        )
+        for run_id, content in (
+            (earlier.id, "earlier"),
+            (None, "unattributed"),
+            (current.id, "current"),
+        ):
+            await service.add_chat_message(
+                agent_id=agent.id,
+                session_id=session.id,
+                run_id=run_id,
+                role="user",
+                content=content,
+            )
+
+        kept = await service.get_chat_history(session.id, exclude_run_id=current.id)
+        assert [m.content for m in kept] == ["earlier", "unattributed"]
+        # The window measures what is sent, not what was skipped.
+        one = await service.get_chat_history(
+            session.id, limit=1, exclude_run_id=current.id
+        )
+        assert [m.content for m in one] == ["unattributed"]
+        everything = await service.get_chat_history(session.id)
+        assert [m.content for m in everything] == ["earlier", "unattributed", "current"]
+
     async def test_add_model_call_stats_assigns_agent(self, session_maker):
         service = AgentService(session_maker)
         agent = await service.get_or_create_agent(name="StatAgentTest")

@@ -540,7 +540,11 @@ class AgentService:
             return message
 
     async def get_chat_history(
-        self, session_id: UUID, limit: int = 50, max_chars: Optional[int] = None
+        self,
+        session_id: UUID,
+        limit: int = 50,
+        max_chars: Optional[int] = None,
+        exclude_run_id: Optional[UUID] = None,
     ) -> List[ChatMessage]:
         """The most recent messages of a session, ordered oldest to newest.
 
@@ -549,14 +553,23 @@ class AgentService:
             max_chars: At most this many characters of content. Whole messages
                 are dropped from the oldest end until the rest fits; a message
                 is never cut, and one that does not fit ends the window.
+            exclude_run_id: Leave out the messages of this run. The engine
+                records the user message before the nodes run, so a node that
+                already carries the current message in its prompt passes the
+                current run and gets the earlier turns only; ``limit`` and
+                ``max_chars`` then measure those turns alone.
         """
-        async with self.session_maker() as session:
-            stmt = (
-                select(ChatMessage)
-                .where(ChatMessage.session_id == session_id)
-                .order_by(ChatMessage.created_at.desc())
-                .limit(limit)
+        stmt = (
+            select(ChatMessage)
+            .where(ChatMessage.session_id == session_id)
+            .order_by(ChatMessage.created_at.desc())
+            .limit(limit)
+        )
+        if exclude_run_id is not None:
+            stmt = stmt.where(
+                or_(ChatMessage.run_id.is_(None), ChatMessage.run_id != exclude_run_id)
             )
+        async with self.session_maker() as session:
             result = await session.execute(stmt)
             newest_first = list(result.scalars().all())
 
