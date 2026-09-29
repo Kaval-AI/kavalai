@@ -9,6 +9,62 @@ Each release opens with a summary. **Added**, **Changed**, **Removed** and
 deployment does to move to the release — migrations to run, names to change —
 and is the section to read first when upgrading.
 
+1.0.6 — 2026-09-29
+------------------
+
+The ``agent`` node remembers the conversation and sees only its declared
+inputs. No migration.
+
+Added
+^^^^^
+
+* **Chat history in agent nodes.** The ``agent`` node takes ``use_history``
+  (default on), ``history_limit`` and ``history_max_chars`` as the ``llm`` node
+  does, so a chatbot whose answer is produced by an agent loop remembers the
+  conversation. The earlier turns are sent with every step, between the system
+  prompt and the step message, and without the current user message — the
+  node's ``prompt`` carries it — so ``history_limit`` counts the earlier
+  messages only; ``AgentService.get_chat_history`` takes ``exclude_run_id`` for
+  this. The agent's intermediate steps are not written to the chat history.
+  ``Agent.prompt`` and ``Agent.prompt_stream`` take ``history``, a sequence of
+  :class:`~kavalai.ChatMessage`, and ``WorkflowBuilder.agent`` the three node
+  keys.
+
+Changed
+^^^^^^^
+
+* The agent's prompt is two templates. ``prompt_template`` renders the system
+  message — the task, the context variables and the tool descriptions — and
+  the new ``step_template`` (``default_step_template.j2``) renders the user
+  message that closes each step's conversation: the planning data, the steps
+  executed so far and the instruction to produce the next step, which were in
+  the system prompt before. The system prompt is now the same on every step
+  of a run. Both templates receive the same variables.
+
+Fixed
+^^^^^
+
+* An ``agent`` node listed the whole run context as its context variables —
+  the parsed input and every earlier node's output, a retrieved passage list
+  included, rendered in full on every step, and twice when the prompt
+  interpolated the same value. The node now hands the agent its resolved
+  ``inputs`` and nothing else, as the ``llm`` node does; a tool call's
+  ``input_args`` name those inputs. ``Agent.prompt`` and
+  ``Agent.prompt_stream`` take them as ``inputs``, and list the run context's
+  ``data`` when the argument is absent, as before.
+
+Upgrading
+^^^^^^^^^
+
+* An ``agent`` node in a session with earlier turns now sends them to the
+  model. A node that should not — a research step whose session is reused for
+  re-runs, say — sets ``use_history: false``.
+* An ``Agent`` built with a custom ``prompt_template`` that renders ``steps``
+  keeps working, but the default ``step_template`` renders them too, so the
+  model reads the step trace twice; move the step section into a
+  ``step_template`` of your own, or pass one that renders only the closing
+  instruction.
+
 1.0.5 — 2026-09-25
 ------------------
 
@@ -65,40 +121,9 @@ Added
   answering questions about Kaval.AI from the documentation, served by a
   Kaval.AI agent.
 
-* **Chat history in agent nodes.** The ``agent`` node takes ``use_history``
-  (default on), ``history_limit`` and ``history_max_chars`` as the ``llm`` node
-  does, so a chatbot whose answer is produced by an agent loop remembers the
-  conversation. The earlier turns are sent with every step, between the system
-  prompt and the step message, and without the current user message — the
-  node's ``prompt`` carries it — so ``history_limit`` counts the earlier
-  messages only; ``AgentService.get_chat_history`` takes ``exclude_run_id`` for
-  this. The agent's intermediate steps are not written to the chat history.
-  ``Agent.prompt`` and ``Agent.prompt_stream`` take ``history``, a sequence of
-  :class:`~kavalai.ChatMessage`, and ``WorkflowBuilder.agent`` the three node
-  keys.
-
-Changed
-^^^^^^^
-
-* The agent's prompt is two templates. ``prompt_template`` renders the system
-  message — the task, the context variables and the tool descriptions — and
-  the new ``step_template`` (``default_step_template.j2``) renders the user
-  message that closes each step's conversation: the planning data, the steps
-  executed so far and the instruction to produce the next step, which were in
-  the system prompt before. The system prompt is now the same on every step
-  of a run. Both templates receive the same variables.
-
 Fixed
 ^^^^^
 
-* An ``agent`` node listed the whole run context as its context variables —
-  the parsed input and every earlier node's output, a retrieved passage list
-  included, rendered in full on every step, and twice when the prompt
-  interpolated the same value. The node now hands the agent its resolved
-  ``inputs`` and nothing else, as the ``llm`` node does; a tool call's
-  ``input_args`` name those inputs. ``Agent.prompt`` and
-  ``Agent.prompt_stream`` take them as ``inputs``, and list the run context's
-  ``data`` when the argument is absent, as before.
 * ``kavalai[runtime]`` declares ``sqlalchemy[asyncio]``. SQLAlchemy 2.1 no
   longer installs ``greenlet`` by default, so a fresh install of the extra
   resolved to a SQLAlchemy whose async engine failed to import. The base
@@ -118,14 +143,6 @@ Upgrading
   registry when it is missing — index a collection first.
 * Browser (Pyodide) SQLite databases are recreated on first use, since
   ``SQLITE_SCHEMA_VERSION`` moved to ``6``.
-* An ``agent`` node in a session with earlier turns now sends them to the
-  model. A node that should not — a research step whose session is reused for
-  re-runs, say — sets ``use_history: false``.
-* An ``Agent`` built with a custom ``prompt_template`` that renders ``steps``
-  keeps working, but the default ``step_template`` renders them too, so the
-  model reads the step trace twice; move the step section into a
-  ``step_template`` of your own, or pass one that renders only the closing
-  instruction.
 
 1.0.4 — 2026-09-12
 ------------------
