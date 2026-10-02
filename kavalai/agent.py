@@ -216,10 +216,12 @@ class Agent:
         rendered from ``prompt_template`` (the task, the context variables and
         the tool descriptions), then the chat ``history`` handed to
         :meth:`prompt_stream`, then a user message rendered from
-        ``step_template`` (the steps executed so far and the instruction to
-        produce the next one). Both templates receive the same variables:
-        ``prompt``, ``data``, ``tool_descriptions``, ``steps``,
-        ``current_step`` and ``max_steps``. The defaults are
+        ``step_template`` (the request this invocation answers, the steps
+        executed so far and the instruction to produce the next one). Both
+        templates receive the same variables: ``prompt``, ``data``,
+        ``tool_descriptions``, ``steps``, ``current_step``, ``max_steps``,
+        ``last_step`` (whether this is the final step, on which tool calls are
+        not run) and ``request``. The defaults are
         ``default_prompt_template.j2`` and ``default_step_template.j2``
         beside this module.
 
@@ -264,6 +266,7 @@ class Agent:
         stream_delta: bool = False,
         history: Optional[Sequence[ChatMessage]] = None,
         inputs: Optional[Mapping[str, Any]] = None,
+        request: Optional[str] = None,
     ) -> AsyncGenerator[StreamContent, None]:
         """Run the agent loop, streaming progress as :class:`StreamContent`.
 
@@ -304,6 +307,10 @@ class Agent:
                 workflow engine passes the node's resolved ``inputs``, so an
                 agent node sees what its author declared and not every value
                 the run has produced so far.
+            request: The request this invocation answers, stated in every
+                step message. ``history`` ends on the turn before it, so
+                without it a model reading the conversation answers that turn.
+                The workflow engine passes the run's user message.
         """
         StepOutput = get_step_output_type(response_model or str)
         history_messages = list(history or [])
@@ -330,6 +337,8 @@ class Agent:
                 steps=steps,
                 current_step=step_idx,
                 max_steps=max_steps,
+                last_step=step_idx == max_steps - 1,
+                request=request,
             )
             rendered_prompt = self.prompt_template.render(**template_vars)
             rendered_step = self.step_template.render(**template_vars)
@@ -386,7 +395,13 @@ class Agent:
                 "output": to_plain(step_output.output),
             }
 
-            if step_output.tool_calls and self.kernel:
+            # The last step has no next step to read a result in: its tool calls
+            # are not run, and the step message says so, so the model answers.
+            if step_idx == max_steps - 1 and step_output.tool_calls:
+                logger.warning(
+                    f"Agent asked for {len(step_output.tool_calls)} tool call(s) on its last step; not run"
+                )
+            elif step_output.tool_calls and self.kernel:
                 results = await asyncio.gather(
                     *[
                         self._call_tool(tc, planner_context, variables)
@@ -413,6 +428,11 @@ class Agent:
                 # Stop once the model produced an answer without more tool calls.
                 if not step_output.tool_calls:
                     break
+        else:
+            if final_output is None:
+                logger.warning(
+                    f"Agent used its {max_steps} steps without producing an output"
+                )
 
         value = None
         if final_output is not None:
@@ -431,6 +451,7 @@ class Agent:
         *,
         history: Optional[Sequence[ChatMessage]] = None,
         inputs: Optional[Mapping[str, Any]] = None,
+        request: Optional[str] = None,
     ) -> str | BaseModel:
         """Run the agent loop and return the final output (blocking wrapper).
 
@@ -444,6 +465,8 @@ class Agent:
             history: Earlier turns of the conversation, as on
                 :meth:`prompt_stream`.
             inputs: The context variables, as on :meth:`prompt_stream`.
+            request: The request this invocation answers, as on
+                :meth:`prompt_stream`.
 
         Returns:
             The structured ``response_model`` instance, or a string when no
@@ -456,6 +479,7 @@ class Agent:
             max_steps=max_steps,
             history=history,
             inputs=inputs,
+            request=request,
         ):
             if chunk.type == "complete" and chunk.name == "response":
                 final_value = chunk.value

@@ -1,3 +1,9 @@
+{% if request %}
+[CURRENT REQUEST]
+The conversation above has been answered. This is what to answer now:
+{{ request }}
+
+{% endif %}
 [PLANNING DATA]
 current_step={{ current_step }}
 max_steps={{ max_steps }}
@@ -21,4 +27,9 @@ Step {{ step.index }}:
 (none yet)
 {% endif %}
 
+{% if last_step %}
+This is the last step: tool calls will not be run. Set `output` to the final result now, from what the steps
+above found, and leave `tool_calls` empty.
+{% else %}
 Analyze the situation and provide the next step output.
+{% endif %}

@@ -616,6 +616,9 @@ class WorkflowEngine:
             # The node's declared inputs are the agent's context variables —
             # not the whole run context, which holds every earlier output.
             inputs=input_data,
+            # The history ends on the previous turn: the step message states the
+            # current one, as the LLM node sends it as the last message.
+            request=run_context.user_message,
         ):
             if chunk.name == "response" and chunk.type == "complete":
                 result_value = chunk.value
@@ -982,6 +985,7 @@ class WorkflowEngine:
             seq_counter=parent.seq_counter,
             task_logger=parent.task_logger,
             started_at=parent.started_at,
+            user_message=parent.user_message,
         )
 
     @staticmethod
@@ -1215,6 +1219,9 @@ class WorkflowEngine:
         run_context.seq_counter = itertools.count()
         run_context.task_logger = run_logger
         run_context.data["input"] = parsed_input
+        run_context.user_message = getattr(
+            parsed_input, "user_message", str(input_data)
+        )
         run_context.templates = run_templates
         run_context.template_overrides = dict(templates or {})
 
@@ -1256,13 +1263,12 @@ class WorkflowEngine:
                 state.session_id = str(session.id)
                 state.run_id = str(run.id)
 
-                user_message = getattr(parsed_input, "user_message", str(input_data))
                 await self.agent_service.add_chat_message(
                     agent_id=agent.id,
                     session_id=session.id,
                     run_id=run.id,
                     role="user",
-                    content=user_message,
+                    content=run_context.user_message,
                 )
 
             try:

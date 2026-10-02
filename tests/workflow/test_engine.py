@@ -1991,9 +1991,37 @@ async def test_agent_node_replays_earlier_turns_without_the_current_message():
     assert [m.role for m in messages] == ["system", "user", "assistant", "user"]
     assert "What is my name?" in messages[0].content
     assert [m.content for m in messages[1:3]] == ["I am John", "Hello John"]
-    # The current turn is in the prompt already; the step message closes.
-    assert "What is my name?" not in messages[3].content
-    assert "Analyze the situation" in messages[3].content
+    # The history ends on the previous turn, so the step message, the last one the model reads, states the
+    # current request: without it the model answers "I am John" again.
+    step = messages[3].content
+    assert "[CURRENT REQUEST]" in step and "What is my name?" in step
+    assert step.index("What is my name?") < step.index("[PLANNING DATA]")
+    assert "Analyze the situation" in step
+
+
+async def test_agent_node_states_the_run_input_as_the_history_records_it():
+    """An input without ``user_message`` is stated as the chat history stores it, and so are branches."""
+    service = make_agent_service()
+    factory = make_factory({"agent_response": "r"})
+    graph = graph_dict(_agent_nodes())
+    graph["data_types"]["input"] = {
+        "type": "object",
+        "properties": {"message": {"type": "string"}},
+    }
+    graph["nodes"][1]["prompt"] = "{{ context.input.message }}"
+    engine = WorkflowEngine.from_dict(
+        graph, agent_service=service, client_factory=factory
+    )
+
+    state = await engine.run({"message": "Around 800 euros"})
+
+    step = factory.created[0].calls[0].messages[-1].content
+    stored = await service.get_chat_history(UUID(state.session_id))
+    assert stored[0].content == "{'message': 'Around 800 euros'}"
+    assert (
+        f"[CURRENT REQUEST]\nThe conversation above has been answered. This is what to answer now:\n{stored[0].content}"
+        in step
+    )
 
 
 async def test_agent_node_lists_its_inputs_not_the_whole_run_context():

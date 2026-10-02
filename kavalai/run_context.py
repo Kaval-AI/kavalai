@@ -57,6 +57,11 @@ class RunContext(BaseModel):
     ``started_at`` is the monotonic-clock reading taken when the run started,
     shared with parallel branches, from which the run's ``duration_seconds`` is
     measured when it completes or fails.
+
+    ``user_message`` is the run's input as the chat history records it (the
+    input's ``user_message`` field, else the input itself as text). An agent
+    node states it in its step message: the history sent with each step ends
+    on the previous turn, so without it the model answers that turn.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -73,6 +78,7 @@ class RunContext(BaseModel):
     started_at: Optional[float] = None
     current_seq: Optional[int] = None
     task_logger: Optional[Any] = None
+    user_message: Optional[str] = None
 
     def next_seq(self) -> Optional[int]:
         """Take the next number from the run's task sequence.

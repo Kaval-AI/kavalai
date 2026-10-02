@@ -128,7 +128,8 @@ async def test_prompt_respects_max_steps(mock_kernel, run_context):
 
     assert result is None
     assert client.await_count == 3
-    assert mock_kernel.call_tool.await_count == 3
+    # The last step has no next step to read a result in: its tool calls are not run.
+    assert mock_kernel.call_tool.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -711,3 +712,64 @@ async def test_allowed_tool_call_still_runs(mock_kernel, run_context):
     mock_kernel.call_tool.assert_awaited_once_with(
         tool_uri="python://web.crawl", arguments={"url": "x"}
     )
+
+
+@pytest.mark.asyncio
+async def test_the_step_message_states_the_request_and_says_when_it_is_the_last(
+    mock_kernel, run_context
+):
+    StepOutput = get_step_output_type(MockResponse)
+    lookup = StepOutput(
+        instructions="look", tool_calls=[ToolCall(name="python://lookup", call_id="c1")]
+    )
+    client = ScriptedClient(
+        [
+            lookup,
+            lookup,
+            StepOutput(instructions="answer", output=MockResponse(answer="done")),
+        ]
+    )
+    agent = make_agent(client, mock_kernel, run_context)
+
+    await agent.prompt(
+        "task", response_model=MockResponse, max_steps=3, request="Around 800 euros"
+    )
+
+    steps = [seen[-1].content for seen in client.seen]
+    assert all(
+        "[CURRENT REQUEST]" in step and "Around 800 euros" in step for step in steps
+    )
+    assert ["This is the last step" in step for step in steps] == [False, False, True]
+    assert (
+        "Analyze the situation" in steps[0] and "Analyze the situation" not in steps[2]
+    )
+    # Without a request the step message has no such section, as before.
+    plain = ScriptedClient(
+        [StepOutput(instructions="answer", output=MockResponse(answer="done"))]
+    )
+    await make_agent(plain, mock_kernel, run_context).prompt(
+        "task", response_model=MockResponse, max_steps=2
+    )
+    assert "[CURRENT REQUEST]" not in plain.seen[0][-1].content
+
+
+@pytest.mark.asyncio
+async def test_an_answer_on_the_last_step_is_kept_though_its_tool_calls_are_not_run(
+    mock_kernel, run_context
+):
+    StepOutput = get_step_output_type(MockResponse)
+    lookup = StepOutput(
+        instructions="look", tool_calls=[ToolCall(name="python://lookup", call_id="c1")]
+    )
+    both = StepOutput(
+        instructions="answer anyway",
+        tool_calls=[ToolCall(name="python://lookup", call_id="c2")],
+        output=MockResponse(answer="from what I have"),
+    )
+    client = ScriptedClient([lookup, both])
+    agent = make_agent(client, mock_kernel, run_context)
+
+    result = await agent.prompt("task", response_model=MockResponse, max_steps=2)
+
+    assert result == MockResponse(answer="from what I have")
+    assert mock_kernel.call_tool.await_count == 1

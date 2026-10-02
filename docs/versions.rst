@@ -9,6 +9,37 @@ Each release opens with a summary. **Added**, **Changed**, **Removed** and
 deployment does to move to the release — migrations to run, names to change —
 and is the section to read first when upgrading.
 
+1.0.7 — 2026-10-02
+------------------
+
+An ``agent`` node with chat history answers the current turn, and answers on
+its last step. No migration.
+
+Fixed
+^^^^^
+
+* **An agent node answered the previous turn.** Each step sends the system
+  prompt, the earlier turns and a step message; the earlier turns end on the
+  previous user message, and the step message did not say what the current one
+  was, so a model reading the conversation answered the turn before. The step
+  message now opens with ``[CURRENT REQUEST]`` and the run's user message, as
+  the chat history records it. ``Agent.prompt`` and ``Agent.prompt_stream``
+  take ``request``; the engine passes the run's, which ``RunContext`` keeps as
+  ``user_message`` (parallel branches included).
+* **An agent node could end without an output.** A model that kept calling
+  tools used every step and the run completed with nothing. The last step's
+  message now says it is the last and that tool calls will not be run, and tool
+  calls returned on it are not run (they had no step left to be read in), so
+  the model answers from what the earlier steps found. A run that still ends
+  without an output is logged. Step templates receive ``last_step`` and
+  ``request``.
+
+Upgrading
+^^^^^^^^^
+
+* A custom ``step_template`` should state ``request`` where the agent has chat
+  history, and may use ``last_step``.
+
 1.0.6 — 2026-09-29
 ------------------
 
