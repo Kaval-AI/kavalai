@@ -227,8 +227,13 @@ class TestParseIpLiteral:
         ],
     )
     def test_examples(self, host, expected):
-        literal = parse_ip_literal(host)
-        assert (None if literal is None else str(literal)) == expected
+        """Addresses are compared, not their text.
+
+        How an IPv4-mapped address is spelt by ``str`` differs between Python
+        versions.
+        """
+        wanted = None if expected is None else ipaddress.ip_address(expected)
+        assert parse_ip_literal(host) == wanted
 
     @given(ipv4_spellings())
     def test_every_inet_aton_spelling_names_the_same_address(self, case):

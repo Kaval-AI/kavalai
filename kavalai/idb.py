@@ -80,8 +80,8 @@ async def _syncfs(populate: bool) -> None:
     import js  # type: ignore[import-not-found]
     from pyodide.ffi import create_once_callable  # type: ignore[import-not-found]
 
-    def executor(resolve, reject):
-        def callback(err=None):
+    def executor(resolve, reject) -> None:
+        def callback(err=None) -> None:
             if err:
                 reject(err)
             else:

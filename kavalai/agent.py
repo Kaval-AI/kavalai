@@ -43,7 +43,7 @@ class ToolCall(BaseModel):
     )
 
 
-def get_step_output_type(ResponseModel: Type[BaseModel]):
+def get_step_output_type(ResponseModel: Type[BaseModel]) -> Type[BaseModel]:
     class StepOutput(BaseModel):
         """Data structure that helps passing around information between consecutive agent runs."""
 
@@ -86,7 +86,7 @@ class StepStreamDemuxer:
         stream_instructions: bool = False,
         stream_partials: bool = False,
         stream_delta: bool = False,
-    ):
+    ) -> None:
         self.step_idx = step_idx
         self.stream_output = stream_output
         self.stream_instructions = stream_instructions
@@ -113,7 +113,7 @@ class StepStreamDemuxer:
             self.step_json = self.buffer
         return []
 
-    def step_completed(self, step_output) -> list[StreamContent]:
+    def step_completed(self, step_output: Any) -> list[StreamContent]:
         """Per-step closing chunks, once the parsed ``StepOutput`` is known."""
         events: list[StreamContent] = []
         if self.stream_instructions and step_output.instructions:
@@ -209,7 +209,7 @@ class Agent:
         allowed_tools: Optional[list[str]] = None,
         on_step: Optional[Callable[[dict], None]] = None,
         debug: bool = False,
-    ):
+    ) -> None:
         """Build an agent.
 
         Every step sends one conversation to the model: a system message

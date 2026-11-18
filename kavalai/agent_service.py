@@ -295,7 +295,7 @@ class AgentService:
     ``schema_translate_map``).
     """
 
-    def __init__(self, session_maker: async_sessionmaker[AsyncSession]):
+    def __init__(self, session_maker: async_sessionmaker[AsyncSession]) -> None:
         self.session_maker = session_maker
 
     async def get_or_create_agent(

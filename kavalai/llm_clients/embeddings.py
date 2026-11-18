@@ -17,7 +17,7 @@ limitations under the License.
 import json
 import os
 import time
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 from kavalai.db import ModelCallStat
 from kavalai.llm_clients.base_client import LlmClientException
@@ -37,11 +37,11 @@ class BaseEmbeddingClient:
     :class:`~kavalai.rag.postgres.PostgresRagService` can persist usage directly.
     """
 
-    def __init__(self, model: str):
+    def __init__(self, model: str) -> None:
         self.model = model
 
     @classmethod
-    def from_model(cls, model: str, **defaults) -> "BaseEmbeddingClient":
+    def from_model(cls, model: str, **defaults: Any) -> "BaseEmbeddingClient":
         """Construct this client for a resolved model name.
 
         The registry calls this rather than the constructor, because embedding
@@ -60,7 +60,7 @@ class BaseEmbeddingClient:
         texts: List[str],
         normalize: bool = False,
         normalizer: Optional[Normalizer] = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> Tuple[Embeddings, ModelCallStat]:
         raise NotImplementedError("Subclasses must implement compute_embeddings.")
 
@@ -99,7 +99,7 @@ class OpenAIEmbeddingClient(BaseEmbeddingClient):
         base_url: Optional[str] = None,
         timeout: float = 30.0,
         dimensions: Optional[int] = None,
-    ):
+    ) -> None:
         super().__init__(model)
         from openai import AsyncOpenAI
 
@@ -116,7 +116,7 @@ class OpenAIEmbeddingClient(BaseEmbeddingClient):
         texts: List[str],
         normalize: bool = False,
         normalizer: Optional[Normalizer] = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> Tuple[Embeddings, ModelCallStat]:
         start_time = time.perf_counter()
         if self.dimensions is not None:
@@ -156,7 +156,7 @@ class GeminiEmbeddingClient(BaseEmbeddingClient):
         model: str,
         api_key: Optional[str] = None,
         dimensions: Optional[int] = None,
-    ):
+    ) -> None:
         super().__init__(model)
         from google import genai
 
@@ -168,7 +168,7 @@ class GeminiEmbeddingClient(BaseEmbeddingClient):
         texts: List[str],
         normalize: bool = False,
         normalizer: Optional[Normalizer] = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> Tuple[Embeddings, ModelCallStat]:
         from google.genai import types
 
@@ -201,7 +201,9 @@ class GeminiEmbeddingClient(BaseEmbeddingClient):
 class OllamaEmbeddingClient(BaseEmbeddingClient):
     """Ollama (local) embeddings."""
 
-    def __init__(self, model: str, host: Optional[str] = None, timeout: float = 30.0):
+    def __init__(
+        self, model: str, host: Optional[str] = None, timeout: float = 30.0
+    ) -> None:
         super().__init__(model)
         import ollama
 
@@ -215,7 +217,7 @@ class OllamaEmbeddingClient(BaseEmbeddingClient):
         texts: List[str],
         normalize: bool = False,
         normalizer: Optional[Normalizer] = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> Tuple[Embeddings, ModelCallStat]:
         start_time = time.perf_counter()
         model_name = get_model_name(self.model)
@@ -248,8 +250,8 @@ class FastEmbedClient(BaseEmbeddingClient):
         model: str,
         cache_dir: Optional[str] = None,
         threads: Optional[int] = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         super().__init__(model)
         self.cache_dir = cache_dir
         self.threads = threads
@@ -257,7 +259,7 @@ class FastEmbedClient(BaseEmbeddingClient):
         self._embedding_model = None
 
     @classmethod
-    def from_model(cls, model: str, **defaults) -> "FastEmbedClient":
+    def from_model(cls, model: str, **defaults: Any) -> "FastEmbedClient":
         """Fall back to ``FASTEMBED_CACHE_DIR`` / ``FASTEMBED_THREADS``.
 
         The other embedding clients read their credential inside ``__init__``;
@@ -296,7 +298,7 @@ class FastEmbedClient(BaseEmbeddingClient):
         texts: List[str],
         normalize: bool = False,
         normalizer: Optional[Normalizer] = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> Tuple[Embeddings, ModelCallStat]:
         start_time = time.perf_counter()
         embeddings = [e.tolist() for e in self._get_model().embed(texts, **kwargs)]
@@ -337,7 +339,7 @@ class BrowserEmbeddingClient(BaseEmbeddingClient):
         texts: List[str],
         normalize: bool = False,
         normalizer: Optional[Normalizer] = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> Tuple[Embeddings, ModelCallStat]:
         from kavalai.llm_clients.browser_client import get_browser_bridge
 
@@ -375,7 +377,7 @@ class BrowserEmbeddingClient(BaseEmbeddingClient):
         return embeddings, stats
 
 
-def make_embedding_client(model: str, **kwargs) -> BaseEmbeddingClient:
+def make_embedding_client(model: str, **kwargs: Any) -> BaseEmbeddingClient:
     """Construct an embedding client from a ``provider/model`` string.
 
     The provider is the part before the first ``/``; the remainder is the model

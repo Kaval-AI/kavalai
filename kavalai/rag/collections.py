@@ -46,7 +46,7 @@ from uuid import UUID, uuid4
 
 from loguru import logger
 
-from kavalai.llm_clients.embeddings import make_embedding_client
+from kavalai.llm_clients.embeddings import BaseEmbeddingClient, make_embedding_client
 from kavalai.normalizer import Normalizer
 from kavalai.rag.base import BaseRagService, RagServiceResult
 
@@ -71,7 +71,7 @@ class CollectionInfo:
         embedding_size: int,
         schema_version: int,
         vector_type: str = "vector",
-    ):
+    ) -> None:
         self.name = name
         self.table_name = table_name
         self.model = model
@@ -161,7 +161,7 @@ class CollectionRagService(BaseRagService):
         provision: bool = True,
         stats_receiver: Any = None,
         vector_type: str = "vector",
-    ):
+    ) -> None:
         if vector_type not in self.vector_types:
             raise ValueError(
                 f"{type(self).__name__} stores {sorted(self.vector_types)} "
@@ -178,7 +178,7 @@ class CollectionRagService(BaseRagService):
         self._collections: dict[str, CollectionInfo] = {}
 
     @property
-    def embedding_client(self):
+    def embedding_client(self) -> BaseEmbeddingClient:
         """The embedding client for ``model``, created on first use.
 
         Assigning a client substitutes it for every model this service
@@ -189,10 +189,10 @@ class CollectionRagService(BaseRagService):
         return self._client_for(self._require_model("embedding text"))
 
     @embedding_client.setter
-    def embedding_client(self, client) -> None:
+    def embedding_client(self, client: BaseEmbeddingClient) -> None:
         self._embedding_override = client
 
-    def _client_for(self, model: str):
+    def _client_for(self, model: str) -> BaseEmbeddingClient:
         if self._embedding_override is not None:
             return self._embedding_override
         client = self._embedding_clients.get(model)
@@ -229,85 +229,89 @@ class CollectionRagService(BaseRagService):
         """Yield the handle every other hook receives."""
         raise NotImplementedError
 
-    async def _commit(self, conn) -> None:
+    async def _commit(self, conn: Any) -> None:
         """End the current transaction on ``conn``."""
         raise NotImplementedError
 
-    async def _rollback(self, conn) -> None:
+    async def _rollback(self, conn: Any) -> None:
         """Abandon the current transaction on ``conn``."""
         raise NotImplementedError
 
-    async def _registry_exists(self, conn) -> bool:
+    async def _registry_exists(self, conn: Any) -> bool:
         """Whether the registry table exists. Must not create it."""
         raise NotImplementedError
 
-    async def _create_registry(self, conn) -> None:
+    async def _create_registry(self, conn: Any) -> None:
         """Create the registry table (and whatever it depends on) if missing."""
         raise NotImplementedError
 
-    async def _fetch_registry_row(self, conn, name: str) -> Optional[CollectionInfo]:
+    async def _fetch_registry_row(
+        self, conn: Any, name: str
+    ) -> Optional[CollectionInfo]:
         raise NotImplementedError
 
-    async def _list_registry(self, conn) -> list[CollectionInfo]:
+    async def _list_registry(self, conn: Any) -> list[CollectionInfo]:
         """Every registry row, ordered by name."""
         raise NotImplementedError
 
-    async def _insert_registry_row(self, conn, info: CollectionInfo) -> None:
+    async def _insert_registry_row(self, conn: Any, info: CollectionInfo) -> None:
         """Insert the row unless one with the same name exists."""
         raise NotImplementedError
 
-    async def _set_registry_version(self, conn, name: str, version: int) -> None:
+    async def _set_registry_version(self, conn: Any, name: str, version: int) -> None:
         raise NotImplementedError
 
-    async def _delete_registry_row(self, conn, name: str) -> None:
+    async def _delete_registry_row(self, conn: Any, name: str) -> None:
         raise NotImplementedError
 
-    async def _create_collection_table(self, conn, info: CollectionInfo) -> None:
+    async def _create_collection_table(self, conn: Any, info: CollectionInfo) -> None:
         """Create the collection's table and its indexes."""
         raise NotImplementedError
 
-    async def _drop_collection_table(self, conn, info: CollectionInfo) -> None:
+    async def _drop_collection_table(self, conn: Any, info: CollectionInfo) -> None:
         raise NotImplementedError
 
-    async def _prepare_collection(self, conn, info: CollectionInfo) -> None:
+    async def _prepare_collection(self, conn: Any, info: CollectionInfo) -> None:
         """Per-connection set-up a backend needs before touching a collection."""
 
-    async def _count_rows(self, conn, info: CollectionInfo) -> int:
+    async def _count_rows(self, conn: Any, info: CollectionInfo) -> int:
         raise NotImplementedError
 
-    async def _insert_rows(self, conn, info: CollectionInfo, rows: list[dict]) -> None:
+    async def _insert_rows(
+        self, conn: Any, info: CollectionInfo, rows: list[dict]
+    ) -> None:
         raise NotImplementedError
 
     async def _delete_rows(
-        self, conn, info: CollectionInfo, item_ids: list[UUID]
+        self, conn: Any, info: CollectionInfo, item_ids: list[UUID]
     ) -> None:
         raise NotImplementedError
 
     async def _delete_rows_by_source_ids(
-        self, conn, info: CollectionInfo, source_ids: list[str]
+        self, conn: Any, info: CollectionInfo, source_ids: list[str]
     ) -> None:
         raise NotImplementedError
 
     async def _delete_rows_by_metadata(
-        self, conn, info: CollectionInfo, match: dict[str, MetadataValue]
+        self, conn: Any, info: CollectionInfo, match: dict[str, MetadataValue]
     ) -> None:
         """Delete the rows whose metadata has every key of ``match`` equal."""
         raise NotImplementedError
 
     def _iter_rows(
-        self, conn, info: CollectionInfo, batch_size: int
+        self, conn: Any, info: CollectionInfo, batch_size: int
     ) -> AsyncIterator[dict]:
         """Every row of the collection, embeddings included, in ``id`` order."""
         raise NotImplementedError
 
     async def _fetch_embeddings(
-        self, conn, info: CollectionInfo, ids: list[UUID]
+        self, conn: Any, info: CollectionInfo, ids: list[UUID]
     ) -> dict[UUID, list[float]]:
         raise NotImplementedError
 
     async def _scan(
         self,
-        conn,
+        conn: Any,
         info: CollectionInfo,
         embeddings: list[list[float]],
         top_k: int,
@@ -325,13 +329,13 @@ class CollectionRagService(BaseRagService):
 
     # Registry
 
-    async def _registry_available(self, conn) -> bool:
+    async def _registry_available(self, conn: Any) -> bool:
         """Whether the registry exists, without creating it."""
         if not self._registry_ready and await self._registry_exists(conn):
             self._registry_ready = True
         return self._registry_ready
 
-    async def _ensure_registry(self, conn) -> None:
+    async def _ensure_registry(self, conn: Any) -> None:
         """Create the registry if it is missing. Callers decide whether DDL is allowed."""
         if await self._registry_available(conn):
             return
@@ -350,7 +354,7 @@ class CollectionRagService(BaseRagService):
             await self._ensure_registry(conn)
 
     async def _load_collection(
-        self, conn, collection_name: str
+        self, conn: Any, collection_name: str
     ) -> Optional[CollectionInfo]:
         """Fetch a collection's registry entry (cached), upgrading if stale.
 
@@ -377,7 +381,7 @@ class CollectionRagService(BaseRagService):
         self._collections[collection_name] = info
         return info
 
-    async def _upgrade_collection(self, conn, info: CollectionInfo) -> None:
+    async def _upgrade_collection(self, conn: Any, info: CollectionInfo) -> None:
         """Bring a collection table up to ``collection_schema_version``."""
         if info.schema_version > self.collection_schema_version:
             raise ValueError(
@@ -410,7 +414,7 @@ class CollectionRagService(BaseRagService):
 
     async def _ensure_collection(
         self,
-        conn,
+        conn: Any,
         collection_name: str,
         embedding_size: int,
         model: str,
@@ -608,7 +612,7 @@ class CollectionRagService(BaseRagService):
         ]
 
     async def _collection_for_writing(
-        self, conn, collection_name: str, texts: list[str], stats_receiver: Any
+        self, conn: Any, collection_name: str, texts: list[str], stats_receiver: Any
     ) -> tuple[Optional[CollectionInfo], list[list[float]]]:
         """Embed ``texts`` for a collection, creating the collection if needed.
 
@@ -755,7 +759,7 @@ class CollectionRagService(BaseRagService):
     # Deletion
 
     async def _collections_for(
-        self, conn, collection_name: Optional[str]
+        self, conn: Any, collection_name: Optional[str]
     ) -> list[CollectionInfo]:
         """The named collection, or every registered one when ``None``."""
         if collection_name is not None:

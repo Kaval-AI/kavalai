@@ -79,7 +79,7 @@ class MemoryTaskLogger(TaskLogger):
         *,
         record_nodes: bool = True,
         record_payloads: bool = True,
-    ):
+    ) -> None:
         super().__init__(
             max_payload_bytes,
             record_nodes=record_nodes,
@@ -184,7 +184,7 @@ class TeeTaskLogger(TaskLogger):
     truncates the 4 MB crawl, or stores no payloads at all.
     """
 
-    def __init__(self, *loggers: TaskLogger):
+    def __init__(self, *loggers: TaskLogger) -> None:
         # The cap is applied by each wrapped logger; applying it here as well
         # would truncate twice and hide the untruncated value from every one.
         super().__init__(max_payload_bytes=0)

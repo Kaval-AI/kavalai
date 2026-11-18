@@ -17,7 +17,7 @@ limitations under the License.
 import asyncio
 import json
 import time
-from typing import Any, Optional, Type, Literal
+from typing import Any, Literal, Optional, Type, TypeVar, Union, overload
 
 from pydantic import BaseModel, Field
 from loguru import logger
@@ -89,6 +89,9 @@ def ensure_user_turn(messages: list[ChatMessage]) -> list[ChatMessage]:
     return [ChatMessage(role="user", content=content)]
 
 
+ModelT = TypeVar("ModelT", bound=BaseModel)
+
+
 class ModelCallStat(BaseModel):
     call_type: Literal["llm", "embedding"]
     model: Optional[str] = None
@@ -106,14 +109,14 @@ class ModelCallStat(BaseModel):
 
 
 class ModelStatsReceiver:
-    def receive_model_stats(self, stats: ModelCallStat):
+    def receive_model_stats(self, stats: ModelCallStat) -> None:
         raise NotImplementedError("You must implement this in the subclass.")
 
 
 class ModelStatsLogger(ModelStatsReceiver):
     """Logs model call statistics using a configurable format."""
 
-    def __init__(self, format_str: Optional[str] = None):
+    def __init__(self, format_str: Optional[str] = None) -> None:
         """
         Initialize the logger.
 
@@ -126,7 +129,7 @@ class ModelStatsLogger(ModelStatsReceiver):
             or "Model stats ({model}): {total_tokens} tokens, {duration_seconds:.2f}s"
         )
 
-    def receive_model_stats(self, stats: ModelCallStat):
+    def receive_model_stats(self, stats: ModelCallStat) -> None:
         logger.info(self.format_str.format(**stats.model_dump()))
 
 
@@ -178,7 +181,7 @@ class OutputTruncatedError(LlmClientException):
         completion_tokens: Optional[int] = None,
         cached_prompt_tokens: Optional[int] = None,
         reasoning_tokens: Optional[int] = None,
-    ):
+    ) -> None:
         self.model = model
         self.reason = reason
         self.max_output_tokens = max_output_tokens
@@ -242,7 +245,7 @@ class BaseLlmClient:
         self,
         llm_client_parameters: Optional[LlmClientParameters] = None,
         model_stats_receiver: Optional[ModelStatsReceiver] = None,
-    ):
+    ) -> None:
         self.parameters = llm_client_parameters or LlmClientParameters()
         self.model_stats_receiver = (
             ModelStatsLogger() if model_stats_receiver is None else model_stats_receiver
@@ -280,7 +283,7 @@ class BaseLlmClient:
 
         started = time.perf_counter()
 
-        async def _on_retry(attempt: int, error: Exception):
+        async def _on_retry(attempt: int, error: Exception) -> None:
             # The next attempt re-registers its value streamers and re-sends
             # content from scratch; tell consumers to discard what they have.
             streamer.reset_active()
@@ -289,7 +292,7 @@ class BaseLlmClient:
             await self._record_failed_call(error, time.perf_counter() - started)
             await streamer.stream_restart(f"attempt {attempt}: {error}")
 
-        async def _run():
+        async def _run() -> None:
             try:
                 await with_retry(
                     self._run_chat_completions,
@@ -307,12 +310,30 @@ class BaseLlmClient:
 
         return streamer
 
+    @overload
+    async def chat_completions(
+        self, *, chat_history: ChatHistory, response_model: Type[ModelT]
+    ) -> ModelT: ...
+
+    @overload
+    async def chat_completions(
+        self, *, chat_history: ChatHistory, response_model: None = None
+    ) -> Optional[str]: ...
+
+    @overload
+    async def chat_completions(
+        self,
+        *,
+        chat_history: ChatHistory,
+        response_model: Optional[Type[BaseModel]],
+    ) -> Union[BaseModel, str, None]: ...
+
     async def chat_completions(
         self,
         *,
         chat_history: ChatHistory,
         response_model: Optional[Type[BaseModel]] = None,
-    ):
+    ) -> Union[BaseModel, str, None]:
         streamer = await self.stream_chat_completions(
             chat_history=chat_history, response_model=response_model
         )
@@ -334,9 +355,24 @@ class BaseLlmClient:
             chat_history=history, response_model=response_model
         )
 
+    @overload
+    async def prompt(
+        self, system_message: str, response_model: Type[ModelT]
+    ) -> ModelT: ...
+
+    @overload
+    async def prompt(
+        self, system_message: str, response_model: None = None
+    ) -> Optional[str]: ...
+
+    @overload
+    async def prompt(
+        self, system_message: str, response_model: Optional[Type[BaseModel]]
+    ) -> Union[BaseModel, str, None]: ...
+
     async def prompt(
         self, system_message: str, response_model: Optional[Type[BaseModel]] = None
-    ):
+    ) -> Union[BaseModel, str, None]:
         history = ChatHistory(
             messages=[ChatMessage(role="system", content=system_message)]
         )
@@ -350,7 +386,7 @@ class BaseLlmClient:
         model: str,
         parameters: Optional[LlmClientParameters] = None,
         stats_receiver: Optional[ModelStatsReceiver] = None,
-        **defaults,
+        **defaults: Any,
     ) -> "BaseLlmClient":
         """Construct this client for a resolved model name.
 
@@ -374,7 +410,7 @@ class BaseLlmClient:
             **defaults,
         )
 
-    async def _send_model_call_stats(self, stats: ModelCallStat):
+    async def _send_model_call_stats(self, stats: ModelCallStat) -> None:
         """Subclasses should use this method to report model stats."""
         if self.model_stats_receiver is not None:
             self.model_stats_receiver.receive_model_stats(stats)
@@ -475,7 +511,7 @@ class BaseLlmClient:
         chat_history: ChatHistory,
         response_model: Optional[Type[BaseModel]],
         streamer: Streamer,
-    ):
+    ) -> None:
         """Perform the provider call and push chunks into ``streamer``.
 
         Runs as the background task started by :meth:`stream_chat_completions`;

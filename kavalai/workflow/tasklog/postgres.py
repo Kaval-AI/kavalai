@@ -48,7 +48,7 @@ class PostgresTaskLogger(TaskLogger):
         max_payload_bytes: int = DEFAULT_MAX_PAYLOAD_BYTES,
         record_nodes: bool = True,
         record_payloads: bool = True,
-    ):
+    ) -> None:
         super().__init__(
             max_payload_bytes,
             record_nodes=record_nodes,

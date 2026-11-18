@@ -16,7 +16,7 @@ limitations under the License.
 
 import json
 import time
-from typing import Optional, Type
+from typing import Any, Optional, Type
 
 from pydantic import BaseModel
 
@@ -37,7 +37,7 @@ from kavalai.llm_clients.streamer import Streamer
 BRIDGE_GLOBAL = "kavalBrowserLLM"
 
 
-def get_browser_bridge():
+def get_browser_bridge() -> Any:
     """Return the page's JS bridge object (``window.kavalBrowserLLM``).
 
     Shared by the browser LLM client (``.chat``) and the browser embedding
@@ -95,7 +95,7 @@ class BrowserLLMClient(BaseLlmClient):
         model: str,
         llm_client_parameters: Optional[LlmClientParameters] = None,
         model_stats_receiver: Optional[ModelStatsReceiver] = None,
-    ):
+    ) -> None:
         """Initialize the browser client.
 
         Args:
@@ -107,7 +107,7 @@ class BrowserLLMClient(BaseLlmClient):
         super().__init__(llm_client_parameters, model_stats_receiver)
         self.model = model
 
-    def _get_bridge(self):
+    def _get_bridge(self) -> Any:
         """Return the JS bridge object, or raise a helpful error if absent."""
         return get_browser_bridge()
 
@@ -151,7 +151,7 @@ class BrowserLLMClient(BaseLlmClient):
         chat_history: ChatHistory,
         response_model: Optional[Type[BaseModel]],
         streamer: Streamer,
-    ):
+    ) -> None:
         """Run the in-browser completion and stream the result back."""
         start_time = time.perf_counter()
         value_streamer = streamer.get_value_streamer(

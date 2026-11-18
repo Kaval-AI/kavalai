@@ -126,12 +126,14 @@ gpu = [
 test = [
     "kavalai[common]",
     "hypothesis",
+    "mypy",
     "pre-commit",
     "pytest",
     "pytest-asyncio",
     "pytest-cov",
     "python-dotenv",
     "testcontainers[postgres]",
+    "types-PyYAML",
 ]
 
 # Sphinx, the theme, and the Jupyter kernel used to execute the notebooks.
@@ -162,6 +164,9 @@ include = ["kavalai*"]
     ".agents/skills/*/SKILL.md",
     ".agents/skills/*/references/*.md",
     "*.j2",
+    # PEP 561: the package is typed, so a consumer's type checker reads its
+    # annotations instead of treating every import as `Any`.
+    "py.typed",
     "migrations/*/env.py",
     "migrations/*/script.py.mako",
     "migrations/*/versions/*.py",

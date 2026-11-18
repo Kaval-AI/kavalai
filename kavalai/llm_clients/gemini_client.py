@@ -54,7 +54,7 @@ class GeminiClient(BaseLlmClient):
         llm_client_parameters: Optional[LlmClientParameters] = None,
         model_stats_receiver: Optional[ModelStatsReceiver] = None,
         api_key: Optional[str] = None,
-    ):
+    ) -> None:
         """
         Initialize the Gemini client.
 
@@ -78,7 +78,7 @@ class GeminiClient(BaseLlmClient):
         chat_history: ChatHistory,
         response_model: Optional[Type[BaseModel]],
         streamer: Streamer,
-    ):
+    ) -> None:
         """
         Background task to handle the actual Gemini API call and stream results.
         """

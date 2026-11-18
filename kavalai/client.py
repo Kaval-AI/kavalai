@@ -15,7 +15,7 @@ limitations under the License.
 """
 
 import urllib.parse
-from typing import Optional, Type
+from typing import AsyncGenerator, Optional, Type
 
 import httpx
 from json_schema_to_pydantic import create_model
@@ -49,7 +49,7 @@ class AgentClient:
         password: Optional[str] = None,
         timeout: float = 60.0,
         transport: Optional[httpx.AsyncBaseTransport] = None,
-    ):
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self.auth = (username, password) if username and password else None
         self.timeout = timeout
@@ -64,7 +64,7 @@ class AgentClient:
             auth=self.auth, timeout=self.timeout, transport=self.transport
         )
 
-    async def discover_schemas(self):
+    async def discover_schemas(self) -> None:
         """Fetch the server's OpenAPI spec and derive the agent's schemas.
 
         Populates ``self.input_schema`` and ``self.output_schema`` with the
@@ -118,7 +118,9 @@ class AgentClient:
         self.session_id = response_json.get("session_id")
         return self.output_schema(**response_json["data"])
 
-    async def stream_agent(self, data: BaseModel, external_id: Optional[str] = None):
+    async def stream_agent(
+        self, data: BaseModel, external_id: Optional[str] = None
+    ) -> AsyncGenerator[str, None]:
         """Run the agent and stream its output incrementally.
 
         Sends ``data`` to the server's ``/stream_agent`` (Server-Sent Events)

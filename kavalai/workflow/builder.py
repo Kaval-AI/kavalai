@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-from typing import Any, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 from pydantic import BaseModel
 
@@ -35,6 +35,9 @@ from kavalai.workflow.models import (
     TemplateModel,
     WorkflowGraph,
 )
+
+if TYPE_CHECKING:
+    from kavalai.workflow.engine import WorkflowEngine
 
 # Python types accepted as a shorthand for a JSON-schema scalar type.
 _TYPE_NAMES = {
@@ -114,7 +117,7 @@ class WorkflowBuilder:
         llm_kwargs: Optional[dict[str, Any]] = None,
         rag_service: Optional[str] = None,
         rag_collection: Optional[str] = None,
-    ):
+    ) -> None:
         self.name = name
         self.description = description
         self.version = version
@@ -406,7 +409,7 @@ class WorkflowBuilder:
             templates=self._templates,
         )
 
-    def build_engine(self, **kwargs):
+    def build_engine(self, **kwargs: Any) -> "WorkflowEngine":
         """Build the graph and wrap it in a ready-to-run :class:`WorkflowEngine`.
 
         Any Pydantic models registered via :meth:`data_model` are forwarded to

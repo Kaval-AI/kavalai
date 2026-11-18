@@ -19,7 +19,7 @@ from pydantic import BaseModel, create_model, Field, ConfigDict
 
 
 class SchemaParser:
-    def __init__(self, datatypes: Dict[str, Any]):
+    def __init__(self, datatypes: Dict[str, Any]) -> None:
         self.raw_schemas = datatypes
         self.models: Dict[str, Type[BaseModel]] = {}
 

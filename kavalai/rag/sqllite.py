@@ -125,7 +125,7 @@ class SqliteRagService(CollectionRagService):
         stats_receiver: Any = None,
         vector_type: str = "vector",
         read_only: bool = False,
-    ):
+    ) -> None:
         """
         Initialize the SqliteRagService.
 

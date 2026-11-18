@@ -15,12 +15,16 @@ limitations under the License.
 """
 
 from datetime import datetime, timedelta, timezone
+from typing import Any
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from kavalai.db import Agent, ChatMessage, ModelCallStat, Run, Session, Task
 
 
-async def get_summary_stats(session: AsyncSession, agent_id: str | None = None):
+async def get_summary_stats(
+    session: AsyncSession, agent_id: str | None = None
+) -> dict[str, Any]:
     """Totals over the last 30 days, optionally for one agent."""
     end_date = datetime.now(timezone.utc)
     start_date = end_date - timedelta(days=30)
@@ -114,7 +118,7 @@ async def get_summary_stats(session: AsyncSession, agent_id: str | None = None):
 
 async def get_daily_stats(
     session: AsyncSession, days: int = 7, agent_id: str | None = None
-):
+) -> dict[str, Any]:
     """Per-day series over the last ``days`` days, optionally for one agent."""
     # Midnight of N days ago.
     end_date = datetime.now(timezone.utc)

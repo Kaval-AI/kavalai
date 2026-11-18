@@ -25,7 +25,7 @@ everything below it is stored in full. The privacy controls are
 import asyncio
 import json
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Any, Coroutine, Optional
 
 from loguru import logger
 
@@ -243,7 +243,7 @@ class TaskLogger(ABC):
             }
         )
 
-    def _spawn(self, coro) -> None:
+    def _spawn(self, coro: Coroutine[Any, Any, None]) -> None:
         task = asyncio.create_task(coro)
         self._background_tasks.add(task)
         task.add_done_callback(self._on_task_done)
@@ -322,7 +322,7 @@ class StatsBridge(ModelStatsReceiver):
         *,
         session_id: Optional[str] = None,
         run_id: Optional[str] = None,
-    ):
+    ) -> None:
         self.task_logger = task_logger
         self.agent_id = agent_id
         self.session_id = session_id
@@ -353,7 +353,7 @@ class TokenAccumulator(ModelStatsReceiver):
         *,
         session_id: Optional[str] = None,
         run_id: Optional[str] = None,
-    ):
+    ) -> None:
         self.task_logger = task_logger
         self.agent_id = agent_id
         self.session_id = session_id
