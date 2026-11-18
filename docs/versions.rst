@@ -25,7 +25,7 @@ Added
   ``response_model``; and the lazily imported provider clients
   (``OpenAIClient``, ``GeminiClient``, ``AnthropicClient``, ``OllamaClient``)
   are declared for type checkers, so a misspelt import from ``kavalai`` is an
-  error rather than ``Any``. See :doc:`tutorials/installation`.
+  error rather than ``Any``.
 
 Upgrading
 ^^^^^^^^^

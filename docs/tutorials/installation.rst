@@ -214,32 +214,3 @@ Where to next
 * :doc:`quickstart` — a model call, structured output and a workflow, in five
   minutes.
 * :doc:`../guides/concepts` — the vocabulary, if LLMs are new to you.
-
-Type checking
--------------
-
-The package is typed and ships a ``py.typed`` marker (PEP 561), so a type
-checker reads Kaval.AI's own annotations and checks the calls made into it. No
-stub package and no override for ``kavalai`` in the checker's configuration is
-needed:
-
-.. code-block:: python
-
-   from kavalai import WorkflowEngine
-
-   engine = WorkflowEngine.from_yaml_path("assistant.yaml")
-   state = await engine.run("hello")
-
-.. code-block:: text
-
-   error: Argument 1 to "run" of "WorkflowEngine" has incompatible type
-   "str"; expected "dict[Any, Any]"  [arg-type]
-
-The test suite checks a program written against the public surface with
-``mypy --strict``; other checkers read the same annotations but are not
-tested. Two things remain outside what a checker can see. The input and output
-types of a workflow are Pydantic models built from its ``data_types`` when the
-document is loaded, so they are ``BaseModel`` to a checker and their fields are
-not known statically. And a FastAPI route or a ``@pythontool`` function is
-described by its annotations at run time, which a checker does not verify
-against the workflow that calls it.
