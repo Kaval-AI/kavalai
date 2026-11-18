@@ -90,11 +90,11 @@ class RunContext(BaseModel):
             return None
         return next(self.seq_counter)
 
-    def resolve_context_value(self, path: str):
+    def resolve_context_value(self, path: str) -> Any:
         """Resolve a dotted path like 'input.user_message' from context data."""
         return resolve_path(self.data, path)
 
-    async def resolve_history_value(self, path: str):
+    async def resolve_history_value(self, path: str) -> Any:
         """Resolve a value from session history."""
         if not self.agent_service or not self.session_id:
             logger.error(
@@ -103,11 +103,11 @@ class RunContext(BaseModel):
             return None
         return await self.agent_service.get_history_value(self.session_id, str(path))
 
-    async def resolve_template_value(self, name: str):
+    async def resolve_template_value(self, name: str) -> Any:
         """Resolve a template value by name."""
         return self.templates.get(name)
 
-    async def resolve_placeholder(self, prefix: str, path: str):
+    async def resolve_placeholder(self, prefix: str, path: str) -> Any:
         """The value behind one ``{{ prefix.path }}`` placeholder.
 
         ``prefix`` is ``templates``, ``context`` or ``history``. A reference
@@ -124,7 +124,7 @@ class RunContext(BaseModel):
             raise ValueError(f"Could not resolve {prefix}.{path}")
         return val
 
-    async def render_value(self, template: str):
+    async def render_value(self, template: str) -> Any:
         """Render a template that may stand for a single typed value.
 
         A template that is exactly one placeholder resolves to the referenced
@@ -143,7 +143,7 @@ class RunContext(BaseModel):
         and {{ history.PATH }} with their resolved values.
         """
 
-        async def replace_match(match):
+        async def replace_match(match: "re.Match[str]") -> str:
             path = match.group(2).strip()
             val = await self.resolve_placeholder(match.group(1), path)
 
@@ -169,7 +169,7 @@ class RunContext(BaseModel):
 
         return "".join(pieces)
 
-    async def resolve_input_info(self, info: ArgumentInfo):
+    async def resolve_input_info(self, info: ArgumentInfo) -> Any:
         """Resolve an :class:`ArgumentInfo` to its actual value."""
         if info.type == "literal":
             return info.value

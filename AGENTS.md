@@ -160,6 +160,16 @@ cd frontend && npm test -- --watch=false
 - Run the tests at the end of every task, before reporting it done.
 - Python tools are decorated with `@kavalai.pythontool` and registered through
   `register_python_tool`.
+- **The package is typed** (`kavalai/py.typed`, PEP 561). Annotate every new or
+  changed public function fully, and update the typing surface in the same
+  change when it is affected: `tests/typecheck/consumer.py` (public usage,
+  checked with `mypy --strict`), `tests/typecheck/mistakes.py` (wrong calls,
+  each marked `# expect: <code>` on one line), the `if TYPE_CHECKING:` imports
+  of the lazy provider clients in `kavalai/__init__.py`, and `__all__`. The
+  source annotations are the stubs — add no `.pyi` files. Do not add return
+  annotations to FastAPI route handlers or annotate `@pythontool` functions
+  for the checker's sake; both are read at run time. `tests/test_typing.py`
+  guards all of it.
 - Angular: modern control flow (`@if`, `@for`), never `*ngIf` / `*ngFor`.
   Prefer `common.css`, Tailwind and DaisyUI.
 - Refactor blocks with distinct responsibilities into named functions.

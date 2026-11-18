@@ -333,7 +333,7 @@ async def _connect_async(
         await sleep(pause)
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="Kaval.AI Database Migration Tool")
     parser.add_argument(
         "type",

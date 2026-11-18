@@ -15,6 +15,7 @@ limitations under the License.
 """
 
 from datetime import datetime, timezone
+from typing import Any, Callable, Optional, Union
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
@@ -32,23 +33,30 @@ from sqlalchemy import (
     event,
 )
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID, JSONB
-from sqlalchemy.engine import make_url
+from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 from sqlalchemy.orm import (
     DeclarativeBase,
     Mapped,
     mapped_column,
     relationship,
+    Session,
     sessionmaker,
 )
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.sql.functions import GenericFunction
+from sqlalchemy.types import TypeEngine
 
 from kavalai import idb
 
 
-def uuid_column():
+def uuid_column() -> TypeEngine[Any]:
     """UUID column type.
 
     Uses PostgreSQL's native ``uuid`` on Postgres and SQLAlchemy's generic
@@ -59,7 +67,7 @@ def uuid_column():
     return PG_UUID(as_uuid=True).with_variant(Uuid(as_uuid=True), "sqlite")
 
 
-def json_column():
+def json_column() -> TypeEngine[Any]:
     """JSON column type: ``JSONB`` on Postgres, generic ``JSON`` on SQLite."""
     return JSONB().with_variant(JSON(), "sqlite")
 
@@ -117,7 +125,7 @@ class VectorType(TypeDecorator):
     impl = TEXT
     cache_ok = True
 
-    def __init__(self, dim=None):
+    def __init__(self, dim=None) -> None:
         super().__init__()
         self.dim = dim
 
@@ -131,10 +139,10 @@ class VectorType(TypeDecorator):
         from sqlalchemy.types import UserDefinedType
 
         class Vector(UserDefinedType):
-            def __init__(self, dim=None):
+            def __init__(self, dim=None) -> None:
                 self.dim = dim
 
-            def get_col_spec(self, **kw):
+            def get_col_spec(self, **kw: Any):
                 if self.dim:
                     return f"public.vector({self.dim})"
                 return "public.vector"
@@ -181,7 +189,12 @@ def sqlite_path_from_uri(uri: str) -> str:
 
 
 def build_db_uri(
-    user, password, host, port, db_name, scheme="postgresql+asyncpg"
+    user: str,
+    password: str,
+    host: str,
+    port: Union[int, str],
+    db_name: str,
+    scheme: str = "postgresql+asyncpg",
 ) -> str:
     """Builds a database URI from components."""
     return f"{scheme}://{user}:{password}@{host}:{port}/{db_name}"
@@ -195,7 +208,7 @@ def build_db_uri(
 SQLITE_SCHEMA_VERSION = 6
 
 
-def _drop_all_sqlite_tables(connection):
+def _drop_all_sqlite_tables(connection) -> None:
     """Drop every table in a SQLite database (sync connection).
 
     Used when ``PRAGMA user_version`` doesn't match ``SQLITE_SCHEMA_VERSION``:
@@ -236,7 +249,7 @@ class DatabaseManager:
     # IndexedDB (see :mod:`kavalai.idb`).
     SQLITE_PYODIDE_DB_PATH = f"{idb.MOUNT_DIR}/kavalai.db"
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._engines = {}
         # Effective creation options per Postgres engine cache key, used to
         # detect conflicting option requests on cache hits.
@@ -245,18 +258,18 @@ class DatabaseManager:
     def get_sessionmaker(
         self,
         *,
-        user=None,
-        password=None,
-        host=None,
-        port=None,
-        db_name=None,
-        uri=None,
-        schema=None,
-        echo=None,
-        pool_size=None,
-        max_overflow=None,
-        read_only=False,
-    ):
+        user: Optional[str] = None,
+        password: Optional[str] = None,
+        host: Optional[str] = None,
+        port: Optional[Union[int, str]] = None,
+        db_name: Optional[str] = None,
+        uri: Optional[str] = None,
+        schema: Optional[str] = None,
+        echo: Optional[bool] = None,
+        pool_size: Optional[int] = None,
+        max_overflow: Optional[int] = None,
+        read_only: bool = False,
+    ) -> async_sessionmaker[AsyncSession]:
         """Return an ``async_sessionmaker`` for the given database and schema.
 
         A ``sqlite://`` URI is served by :meth:`get_sqlite_sessionmaker`: the
@@ -366,14 +379,14 @@ class DatabaseManager:
     # per-user and ephemeral: on a version mismatch the database is dropped and
     # recreated rather than migrated.
 
-    def _resolve_sqlite_path(self, db_path):
+    def _resolve_sqlite_path(self, db_path: Optional[str]) -> str:
         """Resolve the SQLite database file path."""
         if db_path is None:
             db_path = self.SQLITE_PYODIDE_DB_PATH if idb.is_pyodide() else ":memory:"
         return db_path
 
     @staticmethod
-    def _fk_pragma_listener(dbapi_connection, _record):
+    def _fk_pragma_listener(dbapi_connection, _record) -> None:
         """Connect listener that enables SQLite foreign keys."""
         cursor = dbapi_connection.cursor()
         try:
@@ -382,7 +395,7 @@ class DatabaseManager:
             cursor.close()
 
     @staticmethod
-    def _query_only_pragma_listener(dbapi_connection, _record):
+    def _query_only_pragma_listener(dbapi_connection, _record) -> None:
         """Connect listener that makes a SQLite connection refuse writes."""
         cursor = dbapi_connection.cursor()
         try:
@@ -390,7 +403,13 @@ class DatabaseManager:
         finally:
             cursor.close()
 
-    def get_sqlite_engine(self, *, db_path=None, echo=False, read_only=False):
+    def get_sqlite_engine(
+        self,
+        *,
+        db_path: Optional[str] = None,
+        echo: bool = False,
+        read_only: bool = False,
+    ) -> AsyncEngine:
         """Return a cached **async** SQLite engine backed by ``db_path``.
 
         Requires ``greenlet`` (SQLAlchemy's async engine dependency), so this is
@@ -418,14 +437,22 @@ class DatabaseManager:
             self._engines[key] = engine
         return self._engines[key]
 
-    def get_sqlite_sessionmaker(self, *, db_path=None, echo=False, read_only=False):
+    def get_sqlite_sessionmaker(
+        self,
+        *,
+        db_path: Optional[str] = None,
+        echo: bool = False,
+        read_only: bool = False,
+    ) -> async_sessionmaker[AsyncSession]:
         """Return an ``async_sessionmaker`` bound to the async SQLite engine."""
         engine = self.get_sqlite_engine(db_path=db_path, echo=echo, read_only=read_only)
         return async_sessionmaker(
             bind=engine, class_=AsyncSession, expire_on_commit=False
         )
 
-    async def init_sqlite(self, *, db_path=None, echo=False):
+    async def init_sqlite(
+        self, *, db_path: Optional[str] = None, echo: bool = False
+    ) -> None:
         """Prepare the async SQLite/IndexedDB backend (mount, create tables, persist).
 
         Stamps ``PRAGMA user_version``; a database written by a different
@@ -442,7 +469,9 @@ class DatabaseManager:
             await conn.exec_driver_sql(f"PRAGMA user_version = {SQLITE_SCHEMA_VERSION}")
         await idb.flush()
 
-    def get_sqlite_sync_engine(self, *, db_path=None, echo=False):
+    def get_sqlite_sync_engine(
+        self, *, db_path: Optional[str] = None, echo: bool = False
+    ) -> Engine:
         """Return a cached **sync** SQLite engine backed by ``db_path``.
 
         This is the pyodide-friendly variant: SQLAlchemy's synchronous engine
@@ -460,13 +489,15 @@ class DatabaseManager:
             self._engines[key] = engine
         return self._engines[key]
 
-    def get_sqlite_sync_sessionmaker(self, *, db_path=None, echo=False):
+    def get_sqlite_sync_sessionmaker(
+        self, *, db_path: Optional[str] = None, echo: bool = False
+    ) -> sessionmaker[Session]:
         """Return a sync ``sessionmaker`` bound to the sync SQLite engine."""
         engine = self.get_sqlite_sync_engine(db_path=db_path, echo=echo)
         return sessionmaker(bind=engine, expire_on_commit=False)
 
     @staticmethod
-    def _ensure_sqlite_schema_sync(engine):
+    def _ensure_sqlite_schema_sync(engine) -> None:
         """Create the ORM tables on a sync SQLite engine and stamp the version.
 
         Drops a stale-version database first (browser stores are ephemeral,
@@ -479,7 +510,9 @@ class DatabaseManager:
             Base.metadata.create_all(conn)
             conn.exec_driver_sql(f"PRAGMA user_version = {SQLITE_SCHEMA_VERSION}")
 
-    async def init_sqlite_sync(self, *, db_path=None, echo=False):
+    async def init_sqlite_sync(
+        self, *, db_path: Optional[str] = None, echo: bool = False
+    ) -> None:
         """Prepare the sync SQLite/IndexedDB backend (mount, create tables, persist).
 
         Mounts IndexedDB (under Pyodide), creates all ORM tables and persists the
@@ -493,7 +526,9 @@ class DatabaseManager:
         self._ensure_sqlite_schema_sync(engine)
         await idb.flush()
 
-    def get_sqlite_compat_sessionmaker(self, *, db_path=":memory:", echo=False):
+    def get_sqlite_compat_sessionmaker(
+        self, *, db_path: str = ":memory:", echo: bool = False
+    ) -> Callable[[], "AsyncSessionShim"]:
         """Return an async-interface sessionmaker over the **sync** SQLite engine.
 
         For platforms without ``greenlet`` (Pyodide/WASM), where neither
@@ -512,7 +547,7 @@ class DatabaseManager:
         sync_maker = sessionmaker(bind=engine, expire_on_commit=False)
         return lambda: AsyncSessionShim(sync_maker())
 
-    async def flush(self):
+    async def flush(self) -> None:
         """Persist pending SQLite changes to IndexedDB (no-op outside Pyodide)."""
         await idb.flush()
 
@@ -532,51 +567,51 @@ class AsyncSessionShim:
     cannot drift apart again.
     """
 
-    def __init__(self, session):
+    def __init__(self, session: Session) -> None:
         self._session = session
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "AsyncSessionShim":
         return self
 
-    async def __aexit__(self, exc_type, exc, tb):
+    async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
         if exc_type is not None:
             self._session.rollback()
         self._session.close()
 
-    def add(self, obj):
+    def add(self, obj: Any) -> None:
         self._session.add(obj)
 
-    async def execute(self, statement):
+    async def execute(self, statement: Any) -> Any:
         return self._session.execute(statement)
 
-    async def flush(self):
+    async def flush(self) -> None:
         self._session.flush()
 
-    async def commit(self):
+    async def commit(self) -> None:
         self._session.commit()
 
-    async def rollback(self):
+    async def rollback(self) -> None:
         self._session.rollback()
 
-    async def refresh(self, obj):
+    async def refresh(self, obj: Any) -> None:
         self._session.refresh(obj)
 
-    async def get(self, entity, ident, **kwargs):
+    async def get(self, entity: Any, ident: Any, **kwargs: Any) -> Any:
         return self._session.get(entity, ident, **kwargs)
 
-    async def delete(self, obj):
+    async def delete(self, obj: Any) -> None:
         self._session.delete(obj)
 
-    async def merge(self, obj, **kwargs):
+    async def merge(self, obj: Any, **kwargs: Any) -> Any:
         return self._session.merge(obj, **kwargs)
 
-    async def scalar(self, statement, *args, **kwargs):
+    async def scalar(self, statement: Any, *args: Any, **kwargs: Any) -> Any:
         return self._session.scalar(statement, *args, **kwargs)
 
-    async def scalars(self, statement, *args, **kwargs):
+    async def scalars(self, statement: Any, *args: Any, **kwargs: Any) -> Any:
         return self._session.scalars(statement, *args, **kwargs)
 
-    async def close(self):
+    async def close(self) -> None:
         self._session.close()
 
 

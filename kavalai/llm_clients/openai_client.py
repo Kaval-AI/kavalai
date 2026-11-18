@@ -54,7 +54,7 @@ class OpenAIClient(BaseLlmClient):
         model_stats_receiver: Optional[ModelStatsReceiver] = None,
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
-    ):
+    ) -> None:
         """
         Initialize the OpenAI client.
 
@@ -79,7 +79,7 @@ class OpenAIClient(BaseLlmClient):
         chat_history: ChatHistory,
         response_model: Optional[Type[BaseModel]],
         streamer: Streamer,
-    ):
+    ) -> None:
         """
         Background task to handle the actual OpenAI API call and stream results.
         """

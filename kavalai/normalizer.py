@@ -28,7 +28,7 @@ class Normalizer:
         l1: bool = False,
         l2: bool = False,
         center: bool = False,
-    ):
+    ) -> None:
         self.center_vector = (
             np.array(center_vector) if center_vector is not None else None
         )
@@ -93,7 +93,7 @@ class Normalizer:
         }
         return yaml.dump(data)
 
-    def save_to_yaml(self, path: str):
+    def save_to_yaml(self, path: str) -> None:
         """Saves the normalizer parameters to a YAML file."""
         with open(path, "w") as f:
             f.write(self.to_yaml())

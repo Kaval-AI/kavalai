@@ -44,7 +44,7 @@ class OllamaClient(BaseLlmClient):
         llm_client_parameters: Optional[LlmClientParameters] = None,
         model_stats_receiver: Optional[ModelStatsReceiver] = None,
         host: Optional[str] = None,
-    ):
+    ) -> None:
         """
         Initialize the Ollama client.
 
@@ -65,7 +65,7 @@ class OllamaClient(BaseLlmClient):
         chat_history: ChatHistory,
         response_model: Optional[Type[BaseModel]],
         streamer: Streamer,
-    ):
+    ) -> None:
         """
         Background task to handle the actual Ollama API call and stream results.
         """

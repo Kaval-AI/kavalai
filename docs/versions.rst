@@ -9,6 +9,31 @@ Each release opens with a summary. **Added**, **Changed**, **Removed** and
 deployment does to move to the release — migrations to run, names to change —
 and is the section to read first when upgrading.
 
+Unreleased
+----------
+
+The package is typed: it ships a ``py.typed`` marker, so a type checker reads
+its annotations. No migration.
+
+Added
+^^^^^
+
+* **``py.typed`` (PEP 561).** mypy no longer reports ``kavalai`` as missing
+  library stubs, and calls into the package are checked against its real
+  signatures. The public functions that had no annotations have them;
+  ``BaseLlmClient.chat_completions`` and ``prompt`` are overloaded on
+  ``response_model``; and the lazily imported provider clients
+  (``OpenAIClient``, ``GeminiClient``, ``AnthropicClient``, ``OllamaClient``)
+  are declared for type checkers, so a misspelt import from ``kavalai`` is an
+  error rather than ``Any``. See :doc:`tutorials/installation`.
+
+Upgrading
+^^^^^^^^^
+
+* Delete any type-checker override for ``kavalai`` (``ignore_missing_imports``
+  or ``follow_untyped_imports``). Calls into the package are then checked, so
+  a project may see errors that the override had hidden.
+
 1.0.7 — 2026-10-02
 ------------------
 

@@ -86,12 +86,12 @@ def _is_rate_limited(error: Exception) -> bool:
 
 async def with_retry(
     func: Callable,
-    *args,
+    *args: Any,
     max_retries: int = 5,
     base_delay: float = 1.0,
     max_delay: float = 60.0,
     on_retry: Optional[Callable[[int, Exception], Awaitable[None]]] = None,
-    **kwargs,
+    **kwargs: Any,
 ) -> Any:
     """
     Exponential backoff retry wrapper for LLM client calls.

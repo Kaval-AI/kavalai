@@ -30,6 +30,8 @@ limitations under the License.
 # ``kavalai.db`` to keep the runtime names (``Agent`` the agent,
 # ``ModelCallStat`` the stats model) unambiguous at the top level.
 
+from typing import TYPE_CHECKING, Any
+
 from kavalai.workflow import (
     WorkflowEngine,
     WorkflowBuilder,
@@ -134,26 +136,36 @@ def _lazy_clients() -> dict[str, tuple[str, str]]:
 
 _LAZY_CLIENTS = _lazy_clients()
 
+# A type checker reads the lazy clients from here and never sees the module
+# ``__getattr__``, which would otherwise make every misspelt name importable
+# as ``Any``. ``tests/test_typing.py`` keeps the block equal to
+# ``_LAZY_CLIENTS``.
+if TYPE_CHECKING:
+    from kavalai.llm_clients.anthropic_client import AnthropicClient
+    from kavalai.llm_clients.gemini_client import GeminiClient
+    from kavalai.llm_clients.ollama_client import OllamaClient
+    from kavalai.llm_clients.openai_client import OpenAIClient
+else:
 
-def __getattr__(name: str):
-    """Lazily import optional provider clients (PEP 562)."""
-    target = _LAZY_CLIENTS.get(name)
-    if target is not None:
-        module_path, package = target
-        import importlib
+    def __getattr__(name: str) -> Any:
+        """Lazily import optional provider clients (PEP 562)."""
+        target = _LAZY_CLIENTS.get(name)
+        if target is not None:
+            module_path, package = target
+            import importlib
 
-        try:
-            module = importlib.import_module(module_path)
-        except ImportError as exc:
-            raise ImportError(
-                f"'{name}' requires the optional '{package}' package. "
-                'Install it with: pip install "kavalai[runtime]"'
-            ) from exc
-        return getattr(module, name)
-    raise AttributeError(f"module 'kavalai' has no attribute {name!r}")
+            try:
+                module = importlib.import_module(module_path)
+            except ImportError as exc:
+                raise ImportError(
+                    f"'{name}' requires the optional '{package}' package. "
+                    'Install it with: pip install "kavalai[runtime]"'
+                ) from exc
+            return getattr(module, name)
+        raise AttributeError(f"module 'kavalai' has no attribute {name!r}")
 
 
-def __dir__():
+def __dir__() -> list[str]:
     return sorted(__all__)
 
 

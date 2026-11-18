@@ -105,7 +105,7 @@ class ToolDefinition(BaseModel):
             "outputSchema": _get_schema(self.output_model),
         }
 
-    def __str__(self):
+    def __str__(self) -> str:
         return json.dumps(self.to_dict(), indent=2)
 
 
@@ -210,7 +210,7 @@ class FunctionKernel:
     Handles conversions and MCP session management.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.rest_servers: Dict[str, RestServer] = {}
         self.rest_tool_definitions: Dict[str, Dict[str, ToolDefinition]] = {}
         self.mcp_servers: Dict[str, McpServer] = {}
@@ -225,7 +225,7 @@ class FunctionKernel:
         # process and leak one of them.
         self._mcp_connect_locks: Dict[str, asyncio.Lock] = {}
 
-    def register_rest_server(self, server: RestServer):
+    def register_rest_server(self, server: RestServer) -> None:
         if server.name in self.rest_servers:
             raise FunctionKernelException(
                 f"REST server '{server.name}' is already registered."
@@ -240,7 +240,7 @@ class FunctionKernel:
         input_schema: Dict[str, Any],
         output_schema: Dict[str, Any],
         description: Optional[str] = None,
-    ):
+    ) -> None:
         if server_name not in self.rest_tool_definitions:
             self.rest_tool_definitions[server_name] = {}
 
@@ -260,14 +260,14 @@ class FunctionKernel:
             output_model=OutputModel,
         )
 
-    def register_mcp_server(self, server: McpServer):
+    def register_mcp_server(self, server: McpServer) -> None:
         if server.name in self.mcp_servers:
             raise FunctionKernelException(
                 f"MCP server '{server.name}' is already registered."
             )
         self.mcp_servers[server.name] = server
 
-    def register_python_tool(self, name: str, func: Callable):
+    def register_python_tool(self, name: str, func: Callable) -> None:
         if not getattr(func, "_is_kavalai_tool", False):
             raise FunctionKernelException(
                 f"Function '{func.__name__}' must be decorated with @kavalai.pythontool"
@@ -310,7 +310,7 @@ class FunctionKernel:
         tool_uri: str,
         arguments: Optional[Dict[str, Any]] = None,
         output_type: Optional[type] = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> Any:
         """
         Unified tool call interface.
@@ -349,7 +349,7 @@ class FunctionKernel:
         tool_name: str,
         arguments: Dict[str, Any],
         output_type: Optional[type] = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> Any:
         """Handle REST tool calls with validation if definition exists."""
         method = kwargs.get("method", "get")
@@ -368,7 +368,7 @@ class FunctionKernel:
             output_type or definition.output_model,
         )
 
-    async def close(self):
+    async def close(self) -> None:
         """Cleanup all MCP sessions."""
         # Transports and ClientSessions alike were entered by hand in
         # ``_open_mcp_session``, so they are exited in reverse order here.
@@ -516,7 +516,7 @@ class FunctionKernel:
 
     async def _refresh_mcp_tool_definitions(
         self, server_name: str, session: "ClientSession"
-    ):
+    ) -> None:
         try:
             tools_result = await session.list_tools()
             definitions = {}

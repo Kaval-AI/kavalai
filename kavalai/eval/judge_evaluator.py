@@ -103,7 +103,7 @@ class JudgeEvaluator(AgentEvaluator):
         llm_client: Optional[BaseLlmClient] = None,
         prompt: str = JUDGE_PROMPT,
         llm_parameters: Optional[dict] = None,
-    ):
+    ) -> None:
         super().__init__(
             base_url,
             username=username,

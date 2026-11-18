@@ -84,8 +84,8 @@ provider stays a change of one string, never a reinstall:
   `onnxruntime-gpu`, so the two cannot coexist and it is installed by replacing
   the CPU package. No code change is needed — FastEmbed defaults to
   `cuda=Device.AUTO` and picks the CUDA execution provider when there is one.
-- `test` — test tooling (hypothesis included); pulls in `kavalai[common]`, so
-  CI is `uv sync --extra test`.
+- `test` — test tooling (hypothesis, mypy and the stubs the typing test needs
+  included); pulls in `kavalai[common]`, so CI is `uv sync --extra test`.
 - `docs` — Sphinx, the theme and the notebook kernel.
 
 No install contains psycopg2: migrations run Alembic over asyncpg / aiosqlite.
@@ -265,6 +265,13 @@ when asked. When it is, keep to the pattern it already follows:
   comment answers *why*, not *what*; if the name already says it, or the only
   content is implementation history ("typed loosely to avoid an import cycle"),
   omit it. Say a thing once, where the reader looks first
+- **The package is typed** (`kavalai/py.typed`, PEP 561): consumers' type checkers read our annotations, so a wrong or missing one is a false error in someone else's CI. Every new or changed public function is fully annotated (parameters and return, `-> None` included), and the typing surface is updated in the same change whenever it is affected:
+  - `tests/typecheck/consumer.py` — a program written against the public API, checked with `mypy --strict`; add the new usage to it when the public surface grows or a signature changes.
+  - `tests/typecheck/mistakes.py` — wrong calls, each line marked `# expect: <code>`; mypy must report exactly those. Keep a marked statement on one line, or the formatter moves the marker off the reported line.
+  - the `if TYPE_CHECKING:` imports in `kavalai/__init__.py` — one per lazily imported provider client; a provider added to the registry needs a line there (`tests/test_typing.py` compares the block with `_LAZY_CLIENTS`).
+  - `__all__` in `kavalai/__init__.py` and the sub-packages — a name missing from it is not exported to a strict checker.
+  - No separate `.pyi` stubs exist and none should be added: the annotations in the source are the stubs. Do not annotate FastAPI route handlers' return types or `@pythontool` functions just to satisfy a checker — both are read at run time (response model, tool schema).
+  - Run `.venv/bin/python -m pytest tests/test_typing.py` after touching any of the above; `mypy --strict --follow-imports=silent tests/typecheck/consumer.py` shows what a consumer would see. The library's own internals are not yet mypy-clean and are not checked.
 - Do not update `README.md`
 - Python tools must be decorated with `@kavalai.pythontool` and registered via `register_python_tool`
 - Keep this `CLAUDE.md` current: after a task, update it for important changes to project structure, components, or workflow

@@ -249,6 +249,7 @@ class TestWheel:
         "name",
         [
             "kavalai/default_prompt_template.j2",
+            "kavalai/py.typed",
             "kavalai/migrations/agents/env.py",
             "kavalai/migrations/agents/script.py.mako",
             "kavalai/migrations/agents/versions/0001_initial_agents_schema.py",

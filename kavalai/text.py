@@ -297,7 +297,7 @@ class _PageParser(HTMLParser):
         drop_hidden: bool,
         strip_chars: str,
         robots_names: frozenset[str],
-    ):
+    ) -> None:
         super().__init__(convert_charrefs=True)
         self.content_tags = content_tags
         self.drop_tags = drop_tags
@@ -330,7 +330,7 @@ class _PageParser(HTMLParser):
         self._path: dict[int, str] = {}
         self._content_path: dict[int, str] = {}
 
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, Optional[str]]]):
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, Optional[str]]]) -> None:
         attributes = {name: value or "" for name, value in attrs}
         if tag == "meta":
             self._read_meta(attributes)
@@ -377,7 +377,7 @@ class _PageParser(HTMLParser):
             flags |= _CONTENT
         self._push(tag, flags)
 
-    def handle_endtag(self, tag: str):
+    def handle_endtag(self, tag: str) -> None:
         if tag == "title":
             if self._in_title:
                 self._in_title = False
@@ -397,7 +397,7 @@ class _PageParser(HTMLParser):
         elif tag in _BLOCK_TAGS and not self._skipping:
             self._flush()
 
-    def handle_data(self, data: str):
+    def handle_data(self, data: str) -> None:
         data = data.translate(self.strip_table)
         if self._in_title:
             self.title_parts.append(data)
@@ -412,18 +412,18 @@ class _PageParser(HTMLParser):
             self._buffer.append(_collapse_keeping_edges(data))
             self._line_has_text = self._line_has_text or not data.isspace()
 
-    def close(self):
+    def close(self) -> None:
         super().close()
         if self._heading_index is not None:
             self._finish_heading()
         self._flush()
 
-    def _read_meta(self, attributes: dict[str, str]):
+    def _read_meta(self, attributes: dict[str, str]) -> None:
         if attributes.get("name", "").strip().lower() in self.robots_names:
             for directive in attributes.get("content", "").split(","):
                 self.directives.add(directive.strip().lower())
 
-    def _void_tag(self, tag: str):
+    def _void_tag(self, tag: str) -> None:
         if self._skipping:
             return
         if tag == "br":
@@ -443,7 +443,7 @@ class _PageParser(HTMLParser):
             or (self.drop_hidden and _is_hidden(attributes))
         )
 
-    def _push(self, tag: str, flags: int):
+    def _push(self, tag: str, flags: int) -> None:
         self._open.append(tag)
         self._flags.append(flags)
         self._open_counts[tag] = self._open_counts.get(tag, 0) + 1
@@ -466,7 +466,7 @@ class _PageParser(HTMLParser):
             self._content_depth -= 1
         return tag
 
-    def _start_heading(self, level: int):
+    def _start_heading(self, level: int) -> None:
         if self._heading_index is not None:
             self._finish_heading()
         self._flush()
@@ -474,7 +474,7 @@ class _PageParser(HTMLParser):
         self._heading_index = len(self._open)
         self._heading_parts = []
 
-    def _finish_heading(self):
+    def _finish_heading(self) -> None:
         text = " ".join("".join(self._heading_parts).split())
         level = self._heading_level
         in_content = self._content_depth > 0
@@ -495,7 +495,7 @@ class _PageParser(HTMLParser):
                 )
             )
 
-    def _flush(self):
+    def _flush(self) -> None:
         if not self._buffer:
             return
         raw = "".join(self._buffer)
@@ -645,7 +645,7 @@ def chunk_blocks(
     body_target: Optional[int] = None
     body_max: Optional[int] = None
 
-    def emit():
+    def emit() -> None:
         nonlocal size
         if body:
             text = "\n\n".join(body)
@@ -747,7 +747,7 @@ def _tidy_code(raw: str) -> str:
     return "\n".join(lines).strip("\n")
 
 
-def _set_heading(path: dict[int, str], level: int, text: str):
+def _set_heading(path: dict[int, str], level: int, text: str) -> None:
     for deeper in [k for k in path if k >= level]:
         del path[deeper]
     if text:
@@ -904,7 +904,7 @@ def _markdown_blocks(markdown: str) -> list[Block]:
     lines: list[str] = []
     fence = ""
 
-    def flush(kind: str = "paragraph"):
+    def flush(kind: str = "paragraph") -> None:
         text = "\n".join(lines).strip("\n")
         lines.clear()
         if text.strip():

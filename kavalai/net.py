@@ -345,7 +345,9 @@ class _PinnedNetworkBackend(httpcore.AsyncNetworkBackend):
     socket goes.
     """
 
-    def __init__(self, resolver: Resolver, backend: httpcore.AsyncNetworkBackend):
+    def __init__(
+        self, resolver: Resolver, backend: httpcore.AsyncNetworkBackend
+    ) -> None:
         self._resolver = resolver
         self._backend = backend
 

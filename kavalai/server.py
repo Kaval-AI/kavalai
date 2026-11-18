@@ -30,6 +30,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import (
     Annotated,
+    Any,
     AsyncGenerator,
     AsyncIterable,
     Callable,
@@ -132,7 +133,7 @@ env = Env()
 env.read_env()
 
 
-def validate_auth(credentials: Optional[HTTPBasicCredentials]):
+def validate_auth(credentials: Optional[HTTPBasicCredentials]) -> bool:
     """Validate HTTP Basic Authentication.
 
     Authentication is disabled if KAVALAI_AGENT_BASIC_AUTH_USER and
@@ -179,7 +180,7 @@ def validate_auth(credentials: Optional[HTTPBasicCredentials]):
 
 
 @asynccontextmanager
-async def session_scope(session_or_factory):
+async def session_scope(session_or_factory: Any) -> AsyncGenerator[Any, None]:
     """Provide a database session from either a sessionmaker or an existing session.
 
     This context manager ensures that if a factory is provided, a new session
@@ -199,7 +200,7 @@ async def handle_agent_run(
     input_data: dict,
     session_id: Optional[UUID] = None,
     external_id: Optional[str] = None,
-):
+) -> tuple[Optional[str], Any]:
     """Execute the agent workflow with the provided input.
 
     This is a standalone handler that can be used directly or wrapped in a FastAPI route.
@@ -254,7 +255,7 @@ async def stream_sse_events(
     queue: asyncio.Queue = asyncio.Queue()
     _END = ("end", None)
 
-    async def pump():
+    async def pump() -> None:
         try:
             async for event in events:
                 await queue.put(("event", event))
@@ -774,7 +775,7 @@ def _import_setup_module(reference: str) -> None:
     spec.loader.exec_module(module)
 
 
-def run_agent_server():
+def run_agent_server() -> None:
     """Start the Kaval.AI agent server using environment configuration."""
     app = create_app_from_env_conf()
     logger.info(f"Starting agent <{app.state.engine.graph.name}>.")

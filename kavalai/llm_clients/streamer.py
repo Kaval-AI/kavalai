@@ -17,7 +17,7 @@ limitations under the License.
 import asyncio
 import io
 import json
-from typing import Callable, Optional, Type
+from typing import Any, Callable, Optional, Type
 
 from pydantic import BaseModel
 
@@ -32,7 +32,7 @@ class StreamerTimeoutException(Exception):
     the timeout elapsed.
     """
 
-    def __init__(self, names: list[str], timeout_seconds: float):
+    def __init__(self, names: list[str], timeout_seconds: float) -> None:
         self.names = names
         self.timeout_seconds = timeout_seconds
         super().__init__(
@@ -71,7 +71,7 @@ class ValueStreamer:
         response_model: Optional[Type[BaseModel]] = None,
         stream_delta: bool = False,
         on_complete_callback: Optional[Callable[[], None]] = None,
-    ):
+    ) -> None:
         """
         Args:
             name: Name/label of the value.
@@ -100,7 +100,7 @@ class ValueStreamer:
             return str(parsed)
         return self._buffer.getvalue()
 
-    async def stream_partial(self, value: str):
+    async def stream_partial(self, value: str) -> None:
         """
         Push a 'partial' chunk to the queue.
 
@@ -117,7 +117,7 @@ class ValueStreamer:
             ).model_dump_json()
         )
 
-    async def stream_complete(self):
+    async def stream_complete(self) -> None:
         """
         Push a 'complete' chunk to the queue, indicating the stream has finished.
 
@@ -145,7 +145,7 @@ class ValueStreamer:
 class Streamer:
     def __init__(
         self, stream_delta: bool = False, timeout_seconds: Optional[float] = None
-    ):
+    ) -> None:
         self._stream_delta = stream_delta
         self._timeout_seconds = timeout_seconds
         self._queue = asyncio.Queue()
@@ -169,7 +169,7 @@ class Streamer:
     ) -> ValueStreamer:
         self._active_streamer_names.append(name)
 
-        def on_complete():
+        def on_complete() -> None:
             # ``reset_active()`` may have dropped the name already (a retried
             # attempt re-registers its value streamers), so discard-if-present.
             if name in self._active_streamer_names:
@@ -183,19 +183,19 @@ class Streamer:
             on_complete,
         )
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "Streamer":
         """Async context manager entry."""
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> bool:
         """Async context manager exit; nothing to release."""
         return False
 
-    def __aiter__(self):
+    def __aiter__(self) -> "Streamer":
         """Return self as async iterator."""
         return self
 
-    async def stream_error(self, error: Exception):
+    async def stream_error(self, error: Exception) -> None:
         """
         Push an 'error' chunk to the queue.
 
@@ -220,7 +220,7 @@ class Streamer:
         """
         self._active_streamer_names.clear()
 
-    async def stream_restart(self, value: Optional[str] = None):
+    async def stream_restart(self, value: Optional[str] = None) -> None:
         """Push a 'restart' chunk to the queue.
 
         Signals that the in-flight completion is starting over (e.g. a retry

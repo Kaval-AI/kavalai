@@ -216,7 +216,7 @@ class ScriptedLlmClient(BaseLlmClient):
         provider: str = "fake",
         llm_client_parameters: Optional[LlmClientParameters] = None,
         model_stats_receiver: Optional[ModelStatsReceiver] = None,
-    ):
+    ) -> None:
         super().__init__(llm_client_parameters, model_stats_receiver)
         if chunk_size < 1:
             raise ValueError(f"chunk_size must be at least 1, got {chunk_size}.")
@@ -237,7 +237,7 @@ class ScriptedLlmClient(BaseLlmClient):
         self.calls: list[ScriptedCall] = []
 
     @classmethod
-    def from_model(cls, model: str, *args: Any, **defaults: Any):
+    def from_model(cls, model: str, *args: Any, **defaults: Any) -> "ScriptedLlmClient":
         """Refuse construction from a model name alone.
 
         A scripted client is nothing without its script, which a registry
@@ -329,7 +329,7 @@ class ScriptedLlmClient(BaseLlmClient):
         chat_history: ChatHistory,
         response_model: Optional[type[BaseModel]],
         streamer: Streamer,
-    ):
+    ) -> None:
         started = time.perf_counter()
         messages = list(chat_history.messages)
         call = ScriptedCall(
@@ -406,7 +406,7 @@ class FakeEmbeddingClient(BaseEmbeddingClient):
 
     def __init__(
         self, model: str = "hashing", dimension: int = 8, *, provider: str = "fake"
-    ):
+    ) -> None:
         super().__init__(model)
         if dimension < 1:
             raise ValueError(f"dimension must be at least 1, got {dimension}.")
@@ -441,7 +441,7 @@ class FakeEmbeddingClient(BaseEmbeddingClient):
         texts: list[str],
         normalize: bool = False,
         normalizer: Optional[Normalizer] = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> tuple[Embeddings, ModelCallRecord]:
         started = time.perf_counter()
         texts = list(texts)

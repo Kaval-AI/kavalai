@@ -75,7 +75,7 @@ class AgentEvaluator:
         timeout: float = 120.0,
         tag: Optional[str] = None,
         transport: Optional[httpx.AsyncBaseTransport] = None,
-    ):
+    ) -> None:
         self.base_url = base_url
         self.tag = tag
         self.client = AgentClient(

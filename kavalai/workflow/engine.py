@@ -111,7 +111,7 @@ class _VisitBudget:
 
     __slots__ = ("limit", "used")
 
-    def __init__(self, limit: int):
+    def __init__(self, limit: int) -> None:
         self.limit = limit
         self.used = 0
 
@@ -283,7 +283,7 @@ class WorkflowEngine:
         default_llm_parameters: Optional[dict] = None,
         record_context: bool = True,
         run_timeout: Optional[float] = None,
-    ):
+    ) -> None:
         self.graph = graph
         self.agent_service = agent_service
         self.task_logger = task_logger
@@ -338,19 +338,19 @@ class WorkflowEngine:
             self.kernel.register_python_tool(func_config.name, func)
 
     @classmethod
-    def from_yaml(cls, yaml_string: str, **kwargs) -> "WorkflowEngine":
+    def from_yaml(cls, yaml_string: str, **kwargs: Any) -> "WorkflowEngine":
         """Build an engine from a YAML workflow definition string."""
         data = yaml.load(yaml_string, Loader=yaml.SafeLoader)  # nosec B506
         return cls.from_dict(data, **kwargs)
 
     @classmethod
-    def from_yaml_path(cls, yaml_path: str, **kwargs) -> "WorkflowEngine":
+    def from_yaml_path(cls, yaml_path: str, **kwargs: Any) -> "WorkflowEngine":
         """Build an engine from a YAML workflow definition file."""
         with open(yaml_path, "r") as f:
             return cls.from_yaml(f.read(), **kwargs)
 
     @classmethod
-    def from_dict(cls, data: dict, **kwargs) -> "WorkflowEngine":
+    def from_dict(cls, data: dict, **kwargs: Any) -> "WorkflowEngine":
         """Build an engine from a parsed workflow definition dict."""
         try:
             graph = WorkflowGraph(**data)
@@ -392,7 +392,7 @@ class WorkflowEngine:
     async def __aenter__(self) -> "WorkflowEngine":
         return await self.connect()
 
-    async def __aexit__(self, exc_type, exc, tb) -> None:
+    async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
         await self.aclose()
 
     def get_data_type(self, name: Optional[str]) -> Optional[type[BaseModel]]:
@@ -428,7 +428,7 @@ class WorkflowEngine:
                 "workflow is loaded."
             )
 
-    def _resolve_rag_service(self, node_service: Optional[str]):
+    def _resolve_rag_service(self, node_service: Optional[str]) -> Any:
         """Find the RAG service a ``rag_query`` node should use.
 
         Mirrors :meth:`_resolve_model`: the node wins, then the workflow's
@@ -484,7 +484,7 @@ class WorkflowEngine:
     @staticmethod
     def _parse_streamed_output(
         output_type: Optional[type[BaseModel]], raw: Optional[str], *, raw_text: bool
-    ):
+    ) -> Any:
         """Parse a completed stream's value into the node's output type.
 
         ``raw_text`` marks a delta-mode buffer of raw model text (safe-parsed

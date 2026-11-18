@@ -129,7 +129,7 @@ class PostgresRagService(CollectionRagService):
         provision: bool = True,
         stats_receiver: Any = None,
         vector_type: str = "vector",
-    ):
+    ) -> None:
         """
         Initialize the PostgresRagService.
 

@@ -105,7 +105,7 @@ class Registry:
     are optional extras that a given install need not have.
     """
 
-    def __init__(self, kind: str, register_hint: str):
+    def __init__(self, kind: str, register_hint: str) -> None:
         self.kind = kind
         self.register_hint = register_hint
         self._targets: dict[str, Target] = {}

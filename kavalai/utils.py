@@ -27,7 +27,7 @@ def clean_text(text: Any) -> Any:
     )
 
 
-def to_plain(obj):
+def to_plain(obj: Any) -> Any:
     """Recursively convert Pydantic models, dicts, and lists into plain JSON-serializable types."""
     if isinstance(obj, str):
         return clean_text(obj)

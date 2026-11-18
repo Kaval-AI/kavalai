@@ -19,7 +19,7 @@ from typing import Any
 
 
 class OpenApiSpecParser:
-    def __init__(self, spec):
+    def __init__(self, spec) -> None:
         self.full_spec = copy.deepcopy(spec)
         self.resolved_spec = self._resolve_all(self.full_spec)
 
