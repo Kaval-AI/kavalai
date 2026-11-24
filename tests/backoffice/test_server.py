@@ -1147,3 +1147,33 @@ async def test_a_google_only_user_sets_a_first_password(client, backoffice_db):
     )
     # Only the signed-in user's own record changed.
     assert (await backoffice_db.get(db.User, other_id)).password_hash is None
+
+
+@pytest.mark.asyncio
+async def test_a_taken_email_address_is_a_conflict_not_an_outage(client, backoffice_db):
+    """The database refuses a second user with the same address. That is the
+    caller's mistake, so it answers 409 and says so, rather than the 503
+    "database is not connected" every other database error becomes."""
+    first = db.User(email=f"{uuid.uuid4()}@test", name="First")
+    second = db.User(email=f"{uuid.uuid4()}@test", name="Second")
+    backoffice_db.add_all([first, second])
+    await backoffice_db.commit()
+
+    admin = {"user_info": {"id": str(uuid.uuid4()), "is_admin": True}}
+    with (
+        patch("kavalai.backoffice.server.assert_logged_in"),
+        patch("starlette.requests.Request.session", admin),
+    ):
+        created = await client.post(
+            "/users/create", json={"email": first.email, "name": "Copy"}
+        )
+        updated = await client.put(
+            f"/users/update/{second.id}", json={"email": first.email}
+        )
+
+    for response in (created, updated):
+        assert response.status_code == 409
+        assert (
+            response.json()["detail"]
+            == "A user with this email address already exists."
+        )

@@ -25,7 +25,7 @@ from uuid import UUID
 
 import numpy as np
 from loguru import logger
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 try:
@@ -598,12 +598,20 @@ async def users_get_all(request: Request):
         return [public_user(user) for user in await get_all(session, db.User)]
 
 
+DUPLICATE_EMAIL = "A user with this email address already exists."
+
+
 @app.post("/users/create")
 async def users_create(request: Request, data: dict = Body(...)):
     assert_logged_in(request)
     assert_is_admin(request)
     async with get_backoffice_session() as session:
-        return public_user(await insert(session, db.User, user_fields(data)))
+        try:
+            return public_user(await insert(session, db.User, user_fields(data)))
+        except IntegrityError:
+            # Caught here, inside the session block: get_backoffice_session
+            # would otherwise report it as an unreachable database.
+            raise HTTPException(status_code=409, detail=DUPLICATE_EMAIL)
 
 
 @app.put("/users/update/{user_id}")
@@ -611,7 +619,10 @@ async def users_update(user_id: UUID, request: Request, data: dict = Body(...)):
     assert_logged_in(request)
     assert_is_admin(request)
     async with get_backoffice_session() as session:
-        updated = await update(session, db.User, user_id, user_fields(data))
+        try:
+            updated = await update(session, db.User, user_id, user_fields(data))
+        except IntegrityError:
+            raise HTTPException(status_code=409, detail=DUPLICATE_EMAIL)
         if not updated:
             raise HTTPException(status_code=404, detail="User not found.")
         return public_user(updated)

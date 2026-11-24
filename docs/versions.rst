@@ -110,6 +110,9 @@ Fixed
   a new project's settings is for administrators only.
 * A failed connection test showed ``Http failure response … 400 Bad Request``
   instead of the database's error message.
+* Adding a user, or changing a user's address, to an address another user
+  already has answered ``503 Backoffice database is not connected``. It now
+  answers ``409 A user with this email address already exists.``
 
 Upgrading
 ^^^^^^^^^
