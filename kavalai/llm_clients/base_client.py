@@ -35,8 +35,8 @@ class LlmClientParameters(BaseModel):
 
     ``max_output_tokens`` caps the tokens a call may generate. Each client
     sends it under its provider's own name (``max_output_tokens`` for OpenAI
-    and Gemini, ``max_tokens`` for Anthropic and WebLLM, ``num_predict`` for
-    Ollama). On reasoning models the cap includes the reasoning tokens. A call
+    and Gemini, ``max_tokens`` for Anthropic and WebLLM,
+    ``max_completion_tokens`` for Scaleway, ``num_predict`` for Ollama). On reasoning models the cap includes the reasoning tokens. A call
     that reaches the cap raises :class:`OutputTruncatedError` rather than
     returning the partial answer.
     """

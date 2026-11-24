@@ -227,7 +227,7 @@ achievable with enough glue code.
 .. [#f2] An ``agent`` node runs a full tool-using loop, and a graph can route
    between several of them — but there is no agent-to-agent handoff primitive,
    and no agent can delegate to another agent by itself.
-.. [#fprov] OpenAI, Gemini, Anthropic, Ollama and in-browser WebLLM ship with
+.. [#fprov] OpenAI, Gemini, Anthropic, Scaleway, Ollama and in-browser WebLLM ship with
    Kaval.AI; :func:`~kavalai.register_llm_provider` adds any other under a name
    of your own, usable from YAML like a built-in.
 

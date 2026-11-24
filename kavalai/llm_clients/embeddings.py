@@ -35,7 +35,13 @@ class BaseEmbeddingClient:
     Implementations return the embeddings plus a database-ready
     :class:`~kavalai.db.ModelCallStat` (the ORM row) so callers such as
     :class:`~kavalai.rag.postgres.PostgresRagService` can persist usage directly.
+
+    ``provider`` is the prefix a subclass sets so that its calls are recorded
+    as ``provider/model``; a subclass serving another vendor through the same
+    API overrides it.
     """
+
+    provider: str = ""
 
     def __init__(self, model: str) -> None:
         self.model = model
@@ -92,6 +98,8 @@ class OpenAIEmbeddingClient(BaseEmbeddingClient):
     statistics row as well, they duplicated every indexed vector.
     """
 
+    provider = "openai"
+
     def __init__(
         self,
         model: str,
@@ -133,13 +141,49 @@ class OpenAIEmbeddingClient(BaseEmbeddingClient):
 
         stats = create_model_call_stat(
             call_type="embedding",
-            model=f"openai/{self.model}",
+            model=f"{self.provider}/{self.model}",
             duration_seconds=duration,
             batch_size=len(texts),
             total_tokens=total_tokens,
             response_data={"model": response.model, "usage": response.usage},
         )
         return embeddings, stats
+
+
+class ScalewayEmbeddingClient(OpenAIEmbeddingClient):
+    """Scaleway embeddings (e.g. ``qwen3-embedding-8b``).
+
+    The request is the OpenAI embeddings request, so ``dimensions`` works as
+    on :class:`OpenAIEmbeddingClient`; ``qwen3-embedding-8b`` accepts 32 to
+    4096. The key and the endpoint are resolved as for
+    :class:`~kavalai.llm_clients.scaleway_client.ScalewayClient`:
+    ``SCW_SECRET_KEY``, and the serverless API unless ``base_url`` names a
+    dedicated deployment.
+    """
+
+    provider = "scaleway"
+
+    def __init__(
+        self,
+        model: str,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        project_id: Optional[str] = None,
+        timeout: float = 30.0,
+        dimensions: Optional[int] = None,
+    ) -> None:
+        from kavalai.llm_clients.scaleway_client import (
+            scaleway_api_key,
+            scaleway_base_url,
+        )
+
+        super().__init__(
+            model,
+            api_key=scaleway_api_key(api_key),
+            base_url=scaleway_base_url(base_url, project_id),
+            timeout=timeout,
+            dimensions=dimensions,
+        )
 
 
 class GeminiEmbeddingClient(BaseEmbeddingClient):
@@ -150,6 +194,8 @@ class GeminiEmbeddingClient(BaseEmbeddingClient):
     :class:`OpenAIEmbeddingClient`, binding it at registration gives the
     reduced model a name of its own.
     """
+
+    provider = "gemini"
 
     def __init__(
         self,
@@ -190,7 +236,7 @@ class GeminiEmbeddingClient(BaseEmbeddingClient):
         )
         stats = create_model_call_stat(
             call_type="embedding",
-            model=f"gemini/{model_name}",
+            model=f"{self.provider}/{model_name}",
             duration_seconds=duration,
             batch_size=len(texts),
             total_tokens=0,
@@ -200,6 +246,8 @@ class GeminiEmbeddingClient(BaseEmbeddingClient):
 
 class OllamaEmbeddingClient(BaseEmbeddingClient):
     """Ollama (local) embeddings."""
+
+    provider = "ollama"
 
     def __init__(
         self, model: str, host: Optional[str] = None, timeout: float = 30.0
@@ -234,7 +282,7 @@ class OllamaEmbeddingClient(BaseEmbeddingClient):
 
         stats = create_model_call_stat(
             call_type="embedding",
-            model=f"ollama/{model_name}",
+            model=f"{self.provider}/{model_name}",
             duration_seconds=duration,
             batch_size=len(texts),
             total_tokens=total_prompt_tokens,
@@ -244,6 +292,8 @@ class OllamaEmbeddingClient(BaseEmbeddingClient):
 
 class FastEmbedClient(BaseEmbeddingClient):
     """Local embeddings via FastEmbed / ONNX Runtime (no API key)."""
+
+    provider = "fastembed"
 
     def __init__(
         self,
@@ -307,7 +357,7 @@ class FastEmbedClient(BaseEmbeddingClient):
 
         stats = create_model_call_stat(
             call_type="embedding",
-            model=f"fastembed/{self.model}",
+            model=f"{self.provider}/{self.model}",
             duration_seconds=duration,
             batch_size=len(texts),
             total_tokens=None,  # FastEmbed does not expose token counts.
@@ -333,6 +383,8 @@ class BrowserEmbeddingClient(BaseEmbeddingClient):
     is passed verbatim to the bridge (e.g. a WebLLM embedding id like
     ``snowflake-arctic-embed-m-q0f32-MLC-b4``).
     """
+
+    provider = "browser"
 
     async def compute_embeddings(
         self,
@@ -369,7 +421,7 @@ class BrowserEmbeddingClient(BaseEmbeddingClient):
 
         stats = create_model_call_stat(
             call_type="embedding",
-            model=f"browser/{self.model}",
+            model=f"{self.provider}/{self.model}",
             duration_seconds=duration,
             batch_size=len(texts),
             total_tokens=total_tokens,
@@ -383,8 +435,9 @@ def make_embedding_client(model: str, **kwargs: Any) -> BaseEmbeddingClient:
     The provider is the part before the first ``/``; the remainder is the model
     name and may itself contain slashes
     (``fastembed/BAAI/bge-small-en-v1.5``). Built-in providers are ``openai``,
-    ``gemini``, ``ollama``, ``fastembed`` and ``browser``; ``browser`` runs
-    client-side via a WebLLM bridge (Pyodide only) and needs no API key.
+    ``gemini``, ``scaleway``, ``ollama``, ``fastembed`` and ``browser``;
+    ``browser`` runs client-side via a WebLLM bridge (Pyodide only) and needs
+    no API key.
 
     Any provider registered with
     :func:`~kavalai.register_embedding_provider` resolves here too, and an

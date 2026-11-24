@@ -30,7 +30,8 @@ Construction
 
 Any provider client works, since they share the :class:`~kavalai.BaseLlmClient`
 interface — :class:`~kavalai.OpenAIClient`, :class:`~kavalai.GeminiClient`,
-:class:`~kavalai.AnthropicClient` or :class:`~kavalai.OllamaClient`, or
+:class:`~kavalai.AnthropicClient`, :class:`~kavalai.ScalewayClient` or
+:class:`~kavalai.OllamaClient`, or
 ``make_client("gemini/gemini-3.1-flash-lite")``. See
 :doc:`../tutorials/llm_clients`.
 

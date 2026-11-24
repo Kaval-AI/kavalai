@@ -84,7 +84,7 @@ def make_client(
 
     The provider is the part before the first ``/``; the remainder is the model
     name. Built-in providers are ``openai``, ``gemini``, ``anthropic``,
-    ``ollama`` and ``browser``. The ``browser`` provider runs inference
+    ``scaleway``, ``ollama`` and ``browser``. The ``browser`` provider runs inference
     client-side via a WebLLM bridge (Pyodide only) and needs no API key --- see
     :class:`~kavalai.llm_clients.browser_client.BrowserLLMClient`.
 

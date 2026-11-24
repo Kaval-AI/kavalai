@@ -36,6 +36,12 @@ Provider credentials
    * - ``ANTHROPIC_API_KEY``
      - Used by :class:`~kavalai.AnthropicClient` and ``anthropic/…`` models.
        Note the ``_API_`` — ``ANTHROPIC_KEY`` is **not** read.
+   * - ``SCW_SECRET_KEY``
+     - Scaleway IAM secret key. Used by :class:`~kavalai.ScalewayClient`,
+       ``scaleway/…`` models and ``scaleway/…`` embeddings.
+   * - ``SCW_DEFAULT_PROJECT_ID``
+     - Optional. The Scaleway project ``scaleway/…`` requests are billed to;
+       the default project of the key's organisation when unset.
    * - ``OLLAMA_HOST``
      - Ollama endpoint. Default ``http://localhost:11434``. No key needed.
    * - ``OPENAI_BASE_URL``

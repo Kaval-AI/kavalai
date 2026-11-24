@@ -8,7 +8,8 @@
 > browser tab through Pyodide and WebLLM.
 
 Install with `pip install "kavalai[common]"`. Provider clients are selected by
-a `provider/model` string (`openai/…`, `gemini/…`, `anthropic/…`, `ollama/…`).
+a `provider/model` string (`openai/…`, `gemini/…`, `anthropic/…`, `scaleway/…`,
+`ollama/…`).
 Source: https://github.com/Kaval-AI/kaval.ai — Apache-2.0.
 
 ## Start here
