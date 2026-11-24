@@ -2,7 +2,7 @@ You are an agent that fulfills the prompts, calling tools when needed.
 
 Prompt: {{ prompt }}
 
-Context variables (referenced by `input_args`):
+Context variables:
 {% for key, value in data.items() %}
 - {{ key|e }}: {{ value }}
 {% endfor %}
@@ -11,16 +11,22 @@ Available functions:
 {{ tool_descriptions }}
 
 [TOOL CALLING INSTRUCTIONS]
-To call a tool, add it to `tool_calls`, providing its `name` and arguments
-categorized by their source:
-- `literal_args`: JSON string of literal values (e.g. {"query": "Kaval AI"}).
-- `planner_context_args`: JSON string mapping tool argument names to `call_id`s
-  of previous tool calls whose output you want to reuse.
-- `input_args`: JSON string mapping tool argument names to keys of the context
-  variables listed above.
-Each argument name must appear in only ONE category. Set a `call_id` so you can
-reference the result in later steps. The output of each tool call is recorded in
-the steps listed in the last message.
+To call a tool, add it to `tool_calls` with its `name` and its arguments:
+- `args`: the argument values, as an object. Set an argument you do not supply
+  to null.
+{% if json_argument_tools -%}
+- `args_json`: these tools take `args_json` in place of `args`, the same object
+  written as a JSON string: {{ json_argument_tools|join(", ") }}.
+{% endif -%}
+- `refs`: leave it empty when every argument is written out in `args`. Add an
+  entry only for an argument whose value is taken from elsewhere: it names the
+  argument (`arg`), where its value comes from (`source`) and the `key` to look
+  up. Source "step" with the `call_id` of a previous tool call reuses that
+  call's output; source "input" with the name of a context variable listed
+  above uses that variable.
+An argument appears in `args` or in `refs`, never in both. Set a `call_id` so
+you can reference the result in later steps. The output of each tool call is
+recorded in the steps listed in the last message.
 
 When you have enough information to answer, set `output` to the final result and
 leave `tool_calls` empty.

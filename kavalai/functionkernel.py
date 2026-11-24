@@ -707,40 +707,52 @@ class FunctionKernel:
         """Return the output Pydantic model for a registered tool."""
         return self.get_tool_definition(tool_uri).output_model
 
-    async def get_tool_descriptions(
+    async def get_tool_definitions(
         self, allowed_tools: Optional[List[str]] = None
-    ) -> str:
-        """Returns a string description of all registered tools as a JSON array for prompts."""
+    ) -> Dict[str, ToolDefinition]:
+        """The registered tools an allow-list admits, keyed by tool URI.
+
+        The key is the URI as a tool description shows it and as a model
+        writes it in a tool call: ``python://name``, ``mcp://server.tool`` or
+        ``rest://server.tool [METHOD]``. Python tools come first, then REST,
+        then MCP, each in registration order.
+        """
         # MCP tools are only known once their server has been asked, so connect
         # anything still unconnected before describing what is available.
         # Without this an agent is told it has no MCP tools and answers without
         # them — silently, and plausibly.
         await self.connect_mcp_servers()
 
-        tools_list = []
-
-        # Python tools
-        for name, definition in self.python_tool_definitions.items():
-            tool_uri = f"python://{name}"
-            if _is_tool_allowed(tool_uri, allowed_tools):
-                tools_list.append(definition.to_dict(name_override=tool_uri))
-
-        # REST tools
+        candidates: Dict[str, ToolDefinition] = {
+            f"python://{name}": definition
+            for name, definition in self.python_tool_definitions.items()
+        }
         for server_name, tools in self.rest_tool_definitions.items():
             for tool_name, definition in tools.items():
                 method = _rest_method(definition, "GET").upper()
-                tool_uri = f"rest://{server_name}.{tool_name} [{method}]"
-                if _is_tool_allowed(tool_uri, allowed_tools):
-                    tools_list.append(definition.to_dict(name_override=tool_uri))
-
-        # MCP tools
+                candidates[f"rest://{server_name}.{tool_name} [{method}]"] = definition
         for server_name, tools in self.mcp_tool_definitions.items():
             for tool_name, definition in tools.items():
-                tool_uri = f"mcp://{server_name}.{tool_name}"
-                if _is_tool_allowed(tool_uri, allowed_tools):
-                    tools_list.append(definition.to_dict(name_override=tool_uri))
+                candidates[f"mcp://{server_name}.{tool_name}"] = definition
 
-        return json.dumps(tools_list, indent=2)
+        return {
+            tool_uri: definition
+            for tool_uri, definition in candidates.items()
+            if _is_tool_allowed(tool_uri, allowed_tools)
+        }
+
+    async def get_tool_descriptions(
+        self, allowed_tools: Optional[List[str]] = None
+    ) -> str:
+        """Returns a string description of all registered tools as a JSON array for prompts."""
+        definitions = await self.get_tool_definitions(allowed_tools)
+        return json.dumps(
+            [
+                definition.to_dict(name_override=tool_uri)
+                for tool_uri, definition in definitions.items()
+            ],
+            indent=2,
+        )
 
 
 def _strip_metadata(arguments: Dict[str, Any]) -> Dict[str, Any]:

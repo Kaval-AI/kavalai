@@ -11,6 +11,11 @@ Agent
 
 .. automodule:: kavalai.agent
 
+Step schema
+-----------
+
+.. automodule:: kavalai.step_schema
+
 Run context
 -----------
 

@@ -77,6 +77,7 @@ from kavalai.llm_clients.registry import (
 )
 
 from kavalai.agent import Agent, ToolCall
+from kavalai.step_schema import ArgRef
 from kavalai.run_context import RunContext
 from kavalai.telemetry import Telemetry
 from kavalai.functionkernel import (
@@ -216,6 +217,7 @@ __all__ = [
     # Agent & tools
     "Agent",
     "ToolCall",
+    "ArgRef",
     "RunContext",
     "RestServer",
     "McpServer",

@@ -1,11 +1,20 @@
 import asyncio
 import json
 import time
-from typing import Any, AsyncGenerator, Callable, Mapping, Optional, Sequence, Type
+from typing import (
+    Any,
+    AsyncGenerator,
+    Callable,
+    Mapping,
+    Optional,
+    Sequence,
+    Type,
+    Union,
+)
 import os
 
 from loguru import logger
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from kavalai.run_context import RunContext
 from kavalai.utils import to_plain
@@ -13,50 +22,129 @@ from kavalai.functionkernel import FunctionKernel, _is_tool_allowed
 from kavalai.llm_clients.base_client import BaseLlmClient, ChatHistory, ChatMessage
 from kavalai.llm_clients.common import safe_parse_json
 from kavalai.llm_clients.streamer import StreamContent
+from kavalai.step_schema import (
+    ArgRef,
+    build_step_schema,
+    step_output_model,
+    untyped_tools,
+)
 from jinja2 import Template
 
 
 class ToolCall(BaseModel):
-    """This data structure represents tool call requests.
+    """A tool call as the agent reads it from a step.
 
-    Arguments are expected to be JSON encoded to help LLM models encode the data.
+    This is the lenient reading of what the model wrote, not the schema the
+    model is asked for (see :mod:`kavalai.step_schema`). Nothing about a
+    call's arguments fails the step: a malformed value becomes that call's
+    error result, which the model reads on its next step.
+
+    Attributes:
+        name: The tool's URI, for instance ``python://mypackage.mytool``.
+        args: Literal argument values, as an object. A null value means the
+            argument is not supplied. A JSON object in a string is accepted.
+        args_json: Literal argument values as a JSON object in a string, the
+            form asked of a tool whose arguments cannot be typed.
+        refs: Arguments taken from elsewhere, each an :class:`ArgRef`. An
+            object mapping the argument name to ``{"source", "key"}`` is
+            accepted too.
+        call_id: The name under which later steps refer to the result.
+        literal_args: Literal argument values as a JSON object in a string.
+            With the two fields below, the form of a call before arguments
+            were typed; the model is no longer asked for it, and it is still
+            read.
+        planner_context_args: A JSON object mapping argument names to
+            ``call_id``s: the earlier form of a ``"step"`` reference.
+        input_args: A JSON object mapping argument names to context variable
+            names: the earlier form of an ``"input"`` reference.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    name: str = Field(description="Tool call name i.e python://mypackage.mytool")
-    literal_args: str = Field(
-        default="{}",
-        description="Literal values to use as arguments for the tool call.",
-    )
-    planner_context_args: str = Field(
-        default="{}",
-        description="Map of tool argument names to keys in planner_context.",
-    )
-    input_args: str = Field(
-        default="{}",
-        description="Map of tool argument names to keys in input_data.",
-    )
-    call_id: Optional[str] = Field(
-        default=None,
-        description="Generate an ID, which represents this result in downstream agent runs.",
-    )
+    name: str
+    args: Union[dict[str, Any], str, None] = None
+    args_json: Optional[str] = None
+    refs: Union[list[Any], dict[str, Any], None] = None
+    call_id: Optional[str] = None
+    literal_args: Union[str, dict[str, Any], None] = None
+    planner_context_args: Union[str, dict[str, Any], None] = None
+    input_args: Union[str, dict[str, Any], None] = None
+
+
+class _ToolArgumentError(ValueError):
+    """A tool call's arguments cannot be read or resolved."""
+
+
+def _as_mapping(field_name: str, value: Union[str, dict[str, Any], None]) -> dict:
+    """Read an argument field, which holds an object or a JSON object in a string."""
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return value
+    if not value.strip():
+        return {}
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as error:
+        raise _ToolArgumentError(
+            f"`{field_name}` is not valid JSON ({error.msg}, at character {error.pos})."
+        ) from error
+    if not isinstance(parsed, dict):
+        raise _ToolArgumentError(f"`{field_name}` must hold a JSON object.")
+    return parsed
+
+
+def _references(tool_call: ToolCall) -> tuple[dict[str, Any], dict[str, Any]]:
+    """The by-reference arguments of a call, in both forms it can take.
+
+    Returns:
+        ``(step_refs, input_refs)``, each mapping an argument name to the key
+        its value is looked up under.
+    """
+    step_refs = dict(_as_mapping("planner_context_args", tool_call.planner_context_args))
+    input_refs = dict(_as_mapping("input_args", tool_call.input_args))
+    entries: list[Any]
+    if isinstance(tool_call.refs, dict):
+        entries = [
+            {**spec, "arg": arg} if isinstance(spec, dict) else spec
+            for arg, spec in tool_call.refs.items()
+        ]
+    else:
+        entries = tool_call.refs or []
+    for entry in entries:
+        try:
+            ref = ArgRef.model_validate(entry)
+        except ValidationError as error:
+            raise _ToolArgumentError(
+                f"`refs` entry {entry!r} is malformed: each needs `arg`, `source` "
+                '("step" or "input") and `key`.'
+            ) from error
+        (step_refs if ref.source == "step" else input_refs)[ref.arg] = ref.key
+    return step_refs, input_refs
+
+
+def _lookup(
+    refs: Mapping[str, Any], values: Mapping[str, Any], what: str
+) -> dict[str, Any]:
+    """Resolve references against the values they name."""
+    resolved = {}
+    for arg, key in refs.items():
+        if not isinstance(key, str) or key not in values:
+            raise _ToolArgumentError(
+                f"`{arg}` refers to the {what} {key!r}, which does not exist. "
+                f"Available: {', '.join(sorted(values)) or 'none'}."
+            )
+        resolved[arg] = values[key]
+    return resolved
 
 
 def get_step_output_type(ResponseModel: Type[BaseModel]) -> Type[BaseModel]:
-    class StepOutput(BaseModel):
-        """Data structure that helps passing around information between consecutive agent runs."""
+    """The model the agent reads a step with.
 
-        instructions: str = Field(
-            description="Briefly describe the goal of this step (what you intend to achieve with these tool calls).",
-        )
-        tool_calls: list[ToolCall] = Field(
-            default_factory=list,
-            description="Add tool call requests here, their output will be available via `call_id` key for next steps.",
-        )
-        output: Optional[ResponseModel] = None
-
-    return StepOutput
+    Its ``tool_calls`` are the lenient :class:`ToolCall`. The schema sent to
+    the model is built by :func:`kavalai.step_schema.build_step_schema`.
+    """
+    return step_output_model(ResponseModel, ToolCall)
 
 
 class StepStreamDemuxer:
@@ -231,6 +319,12 @@ class Agent:
         model nor callable. ``None`` (the default) allows every registered
         tool; an empty list allows none.
 
+        The model is asked for a step whose tool calls are typed: one call
+        model per allowed tool, its arguments held to that tool's input schema
+        (:mod:`kavalai.step_schema`). A custom ``prompt_template`` has to
+        describe that form; it receives ``json_argument_tools``, the URIs of
+        the tools that take ``args_json`` instead of ``args``.
+
         ``on_step`` is an observer called once per completed reasoning step
         with that step's record (index, instructions, tool calls with their
         arguments, results and durations, and the step's output). It exists so
@@ -302,8 +396,8 @@ class Agent:
                 user message belongs in ``prompt``, not here — the model
                 would read it twice.
             inputs: The context variables of this invocation: listed in the
-                system prompt and the values ``input_args`` of a tool call
-                resolve against. Defaults to the run context's ``data``. The
+                system prompt and the values an ``"input"`` reference of a
+                tool call resolves against. Defaults to the run context's ``data``. The
                 workflow engine passes the node's resolved ``inputs``, so an
                 agent node sees what its author declared and not every value
                 the run has produced so far.
@@ -313,11 +407,25 @@ class Agent:
                 The workflow engine passes the run's user message.
         """
         StepOutput = get_step_output_type(response_model or str)
+        # The schema the model is asked for is stricter than the reading of
+        # its reply: StepOutput accepts what a model writes when nothing holds
+        # it to the schema.
+        tool_models = (
+            {
+                uri: definition.input_model
+                for uri, definition in (
+                    await self.kernel.get_tool_definitions(self.allowed_tools)
+                ).items()
+            }
+            if self.kernel
+            else {}
+        )
+        step_schema = build_step_schema(response_model or str, tool_models)
         history_messages = list(history or [])
         variables = dict(inputs) if inputs is not None else self.run_context.data
 
         # Per-invocation working memory: tool call results keyed by call_id,
-        # referenced via `planner_context_args`. Created fresh for each
+        # which a later call's "step" reference names. Created fresh for each
         # invocation (up to `max_steps`) and discarded afterwards, unlike
         # `self.run_context` which is passed in at construction.
         planner_context: dict[str, Any] = {}
@@ -339,6 +447,7 @@ class Agent:
                 max_steps=max_steps,
                 last_step=step_idx == max_steps - 1,
                 request=request,
+                json_argument_tools=untyped_tools(tool_models),
             )
             rendered_prompt = self.prompt_template.render(**template_vars)
             rendered_step = self.step_template.render(**template_vars)
@@ -361,7 +470,7 @@ class Agent:
             # to validate on completion.
             streamer = await self.llm_client.stream_chat_completions(
                 chat_history=chat_history,
-                response_model=StepOutput,
+                response_model=step_schema,
                 stream_delta=True,
             )
             demux = StepStreamDemuxer(
@@ -498,39 +607,37 @@ class Agent:
     ) -> dict:
         """Resolve a ToolCall's argument sources into a single argument dict.
 
-        Arguments are merged with precedence ``literal_args`` >
-        ``planner_context_args`` > ``input_args``. ``planner_context_args``
-        resolves against the per-invocation ``planner_context`` (results of
-        previous tool calls); ``input_args`` against ``variables``, the context
-        variables the prompt listed (``self.run_context.data`` when not given).
+        A literal value beats a ``"step"`` reference, which beats an
+        ``"input"`` reference. ``"step"`` references resolve against the
+        per-invocation ``planner_context`` (results of previous tool calls);
+        ``"input"`` references against ``variables``, the context variables
+        the prompt listed (``self.run_context.data`` when not given). A null
+        in ``args`` means the argument is not supplied, which is how a model
+        held to the typed schema writes it; ``literal_args`` keeps its nulls.
+
+        Raises:
+            _ToolArgumentError: An argument field is not a JSON object, a
+                ``refs`` entry is malformed, or a reference names a tool
+                result or a context variable that does not exist.
         """
         if variables is None:
             variables = self.run_context.data
 
-        def parse(field_name: str, value: str) -> dict:
-            if not value:
-                return {}
-            try:
-                return json.loads(value)
-            except json.JSONDecodeError:
-                logger.error(f"Failed to parse {field_name} as JSON: {value}")
-                return {}
-
-        literal_args = parse("literal_args", tool_call.literal_args)
-
-        context_keys = parse("planner_context_args", tool_call.planner_context_args)
-        context_args = {
-            arg_name: planner_context.get(ctx_key)
-            for arg_name, ctx_key in context_keys.items()
+        literals = {
+            **_as_mapping("literal_args", tool_call.literal_args),
+            **_as_mapping("args_json", tool_call.args_json),
+            **{
+                name: value
+                for name, value in _as_mapping("args", tool_call.args).items()
+                if value is not None
+            },
         }
-
-        input_keys = parse("input_args", tool_call.input_args)
-        input_args = {
-            arg_name: variables.get(input_key)
-            for arg_name, input_key in input_keys.items()
+        step_refs, input_refs = _references(tool_call)
+        return {
+            **_lookup(input_refs, variables, "context variable"),
+            **_lookup(step_refs, planner_context, "call_id"),
+            **literals,
         }
-
-        return {**input_args, **context_args, **literal_args}
 
     def _publish_step(self, step_record: dict) -> None:
         """Hand a completed step to the ``on_step`` observer, if there is one.
@@ -553,14 +660,20 @@ class Agent:
     ) -> tuple[ToolCall, dict, Any, float]:
         """Resolve arguments and execute a single tool call via the kernel.
 
-        Returns ``(tool_call, args, result, duration_seconds)``. Execution
-        errors are captured and returned as the result so the model can
-        self-correct. The duration is measured here rather than around the
+        Returns ``(tool_call, args, result, duration_seconds)``. Arguments
+        that cannot be resolved and execution errors are captured and returned
+        as the result so the model can self-correct. The duration is measured here rather than around the
         caller's ``asyncio.gather`` — that would time the slowest call in the
         batch and attribute it to all of them.
         """
-        args = self._resolve_args(tool_call, planner_context, variables)
         start = time.perf_counter()
+        try:
+            args = self._resolve_args(tool_call, planner_context, variables)
+        except _ToolArgumentError as e:
+            # Not run: a tool called with half its arguments answers a
+            # question the model did not ask.
+            logger.warning(f"Tool {tool_call.name} was not called: {e}")
+            return tool_call, {}, f"Error: {e}", time.perf_counter() - start
         if not _is_tool_allowed(tool_call.name, self.allowed_tools):
             # The tool was never described to the model; tell it so it can
             # pick one it is actually allowed to call.

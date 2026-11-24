@@ -1,10 +1,22 @@
 import json
+import os
+from typing import Optional
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from pydantic import BaseModel
 
-from kavalai.agent import Agent, StepStreamDemuxer, ToolCall, get_step_output_type
+from kavalai import make_client, pythontool
+from kavalai.llm_clients.base_client import LlmClientParameters
+from kavalai.testing import ScriptedLlmClient
+
+from kavalai.agent import (
+    Agent,
+    StepStreamDemuxer,
+    ToolCall,
+    _ToolArgumentError,
+    get_step_output_type,
+)
 from kavalai.run_context import RunContext
 from kavalai.functionkernel import FunctionKernel
 from kavalai.llm_clients.base_client import BaseLlmClient, ChatMessage
@@ -47,6 +59,7 @@ class ScriptedClient(BaseLlmClient):
 def mock_kernel():
     kernel = MagicMock(spec=FunctionKernel)
     kernel.get_tool_descriptions = AsyncMock(return_value="Mock tool descriptions")
+    kernel.get_tool_definitions = AsyncMock(return_value={})
     kernel.call_tool = AsyncMock(return_value="Tool result")
     return kernel
 
@@ -175,17 +188,21 @@ async def test_planner_context_args_resolve_from_planner_context(mock_kernel):
         ScriptedClient(), mock_kernel, RunContext(data={"input_key": "input value"})
     )
 
-    tool_call = ToolCall(
-        name="python://test",
-        planner_context_args='{"a": "c1", "b": "missing"}',
-    )
     planner_context = {"c1": "tool result"}
 
-    args = agent._resolve_args(tool_call, planner_context)
+    args = agent._resolve_args(
+        ToolCall(name="python://test", planner_context_args='{"a": "c1"}'),
+        planner_context,
+    )
+    assert args == {"a": "tool result"}
 
-    # "c1" comes from planner_context; an unknown key resolves to None and
-    # input data is not reachable through planner_context_args.
-    assert args == {"a": "tool result", "b": None}
+    # Input data is not reachable through planner_context_args, and a key
+    # that names no earlier call is refused rather than passed as None.
+    with pytest.raises(_ToolArgumentError, match="call_id 'input_key'.*Available: c1"):
+        agent._resolve_args(
+            ToolCall(name="python://test", planner_context_args='{"b": "input_key"}'),
+            planner_context,
+        )
 
 
 @pytest.mark.asyncio
@@ -221,9 +238,11 @@ async def test_planner_context_isolated_across_invocations(mock_kernel, run_cont
     mock_kernel.call_tool.reset_mock()
     await agent.prompt("second", response_model=MockResponse)
 
-    # The reference to the prior invocation's call_id resolves to None.
-    first_args = mock_kernel.call_tool.await_args_list[0].kwargs["arguments"]
-    assert first_args == {"x": None}
+    # The prior invocation's call_id no longer exists: the call is not run,
+    # and the model is told which results it can refer to.
+    mock_kernel.call_tool.assert_not_awaited()
+    assert "`x` refers to the call_id 'c1', which does not exist" in client.seen[-1][-1].content
+    assert "Available: none" in client.seen[-1][-1].content
 
 
 @pytest.mark.asyncio
@@ -472,19 +491,113 @@ async def test_agent_creates_its_own_run_context_when_none_is_given(mock_kernel)
     assert agent.run_context.data == {}
 
 
-@pytest.mark.asyncio
-async def test_resolve_args_ignores_unparsable_json(mock_kernel, caplog):
-    agent = make_agent(ScriptedClient(), mock_kernel, RunContext(data={}))
+@pytest.mark.parametrize(
+    "fields, message",
+    [
+        ({"literal_args": "{not json}"}, "`literal_args` is not valid JSON"),
+        ({"args": '{"a": '}, "`args` is not valid JSON"),
+        ({"args_json": "[1, 2]"}, "`args_json` must hold a JSON object"),
+        ({"input_args": '"user_id"'}, "`input_args` must hold a JSON object"),
+        ({"refs": ["c1"]}, "`refs` entry 'c1' is malformed"),
+        (
+            {"refs": [{"arg": "a", "source": "memory", "key": "c1"}]},
+            "is malformed: each needs `arg`, `source`",
+        ),
+        ({"refs": {"a": "c1"}}, "`refs` entry 'c1' is malformed"),
+        (
+            {"refs": [{"arg": "a", "source": "input", "key": "nope"}]},
+            "`a` refers to the context variable 'nope', which does not exist. "
+            "Available: user_id.",
+        ),
+        ({"input_args": '{"a": ["not", "a", "name"]}'}, "refers to the context variable"),
+    ],
+)
+def test_unreadable_arguments_are_refused(mock_kernel, fields, message):
+    agent = make_agent(ScriptedClient(), mock_kernel, RunContext(data={"user_id": "u-1"}))
+    with pytest.raises(_ToolArgumentError) as error:
+        agent._resolve_args(ToolCall(name="python://test", **fields), {})
+    assert message in str(error.value)
 
+
+def test_empty_argument_fields_are_no_arguments(mock_kernel):
+    agent = make_agent(ScriptedClient(), mock_kernel, RunContext(data={}))
+    tool_call = ToolCall(
+        name="python://test", literal_args="", planner_context_args="  ", input_args="{}"
+    )
+    assert agent._resolve_args(tool_call, {}) == {}
+    assert agent._resolve_args(ToolCall(name="python://test"), {}) == {}
+
+
+@pytest.mark.asyncio
+async def test_unreadable_arguments_become_the_calls_result(mock_kernel, run_context):
+    """The tool is not run with half its arguments; the model is told why."""
+    agent = make_agent(ScriptedClient(), mock_kernel, run_context)
+    tool_call = ToolCall(name="python://t", literal_args="{not json}", call_id="c1")
+
+    _, args, result, duration = await agent._call_tool(tool_call, {}, {})
+
+    assert args == {}
+    assert result.startswith("Error: `literal_args` is not valid JSON")
+    assert duration >= 0.0
+    mock_kernel.call_tool.assert_not_awaited()
+
+
+def test_typed_arguments_and_references_resolve(mock_kernel):
+    agent = make_agent(ScriptedClient(), mock_kernel, RunContext(data={"user_id": "u-1"}))
     tool_call = ToolCall(
         name="python://test",
-        literal_args="{not json}",
-        planner_context_args="",
-        input_args="",
+        args={"mode": "fast", "limit": None, "document": None},
+        refs=[
+            {"arg": "document", "source": "step", "key": "c1"},
+            {"arg": "uid", "source": "input", "key": "user_id"},
+        ],
     )
+    assert agent._resolve_args(tool_call, {"c1": {"title": "T"}}) == {
+        "mode": "fast",
+        "document": {"title": "T"},
+        "uid": "u-1",
+    }
 
-    assert agent._resolve_args(tool_call, {}) == {}
-    assert "Failed to parse literal_args as JSON" in caplog.text
+
+def test_arguments_are_read_in_every_shape_a_model_writes(mock_kernel):
+    agent = make_agent(ScriptedClient(), mock_kernel, RunContext(data={"user_id": "u-1"}))
+
+    def resolve(**fields):
+        return agent._resolve_args(ToolCall(name="python://test", **fields), {"c1": 7})
+
+    assert resolve(args='{"a": 1}') == {"a": 1}
+    assert resolve(args_json='{"a": 1, "b": null}') == {"a": 1, "b": None}
+    assert resolve(literal_args={"a": 1}, input_args={"u": "user_id"}) == {"a": 1, "u": "u-1"}
+    assert resolve(refs={"x": {"source": "step", "key": "c1"}}) == {"x": 7}
+    # A written value beats a reference to the same argument.
+    assert resolve(args={"x": 1}, refs=[{"arg": "x", "source": "step", "key": "c1"}]) == {"x": 1}
+    # The earlier form and the typed form of one call are merged.
+    assert resolve(literal_args='{"a": 1, "b": 1}', args={"b": 2}) == {"a": 1, "b": 2}
+
+
+def test_a_step_in_the_earlier_form_is_still_read(mock_kernel):
+    StepOutput = get_step_output_type(str)
+    typed = StepOutput.model_validate(
+        {
+            "instructions": "i",
+            "tool_calls": [
+                {
+                    "name": "python://t",
+                    "args": {"a": 1},
+                    "refs": [{"arg": "b", "source": "step", "key": "c"}],
+                }
+            ],
+        }
+    )
+    assert typed.tool_calls[0].args == {"a": 1}
+    earlier = StepOutput.model_validate(
+        {"instructions": "i", "tool_calls": [{"name": "python://t", "literal_args": "{}"}]}
+    )
+    assert earlier.tool_calls[0].literal_args == "{}"
+    with pytest.raises(ValueError):
+        StepOutput.model_validate(
+            {"instructions": "i", "tool_calls": [{"name": "python://t", "arguments": {}}]}
+        )
 
 
 @pytest.mark.asyncio
@@ -773,3 +886,262 @@ async def test_an_answer_on_the_last_step_is_kept_though_its_tool_calls_are_not_
 
     assert result == MockResponse(answer="from what I have")
     assert mock_kernel.call_tool.await_count == 1
+
+
+class Document(BaseModel):
+    title: str
+    body: str
+
+
+@pythontool
+def fetch_document(doc_id: str) -> Document:
+    """Fetch a document by its id."""
+    return Document(title=f"Policy {doc_id}", body="Claims are reported within 72 hours.")
+
+
+@pythontool
+def summarise(document: Document, max_words: int = 100, language: Optional[str] = None) -> str:
+    """Summarise a fetched document."""
+    return f"{document.title} in {max_words} words ({language})"
+
+
+@pythontool
+def search(query: str, filters: dict) -> str:
+    """Search the knowledge base."""
+    return f"{query} {sorted(filters)}"
+
+
+def real_kernel() -> FunctionKernel:
+    kernel = FunctionKernel()
+    kernel.register_python_tool("fetch_document", fetch_document)
+    kernel.register_python_tool("summarise", summarise)
+    kernel.register_python_tool("search", search)
+    return kernel
+
+
+def typed_agent(client, **kwargs) -> Agent:
+    return Agent(llm_client=client, kernel=real_kernel(), run_context=RunContext(), **kwargs)
+
+
+async def test_the_model_is_asked_for_typed_tool_calls():
+    client = ScriptedLlmClient([{"instructions": "answer", "output": "done"}])
+    agent = typed_agent(client, allowed_tools=["python://fetch_document", "python://summarise"])
+
+    assert await agent.prompt("task") == "done"
+
+    schema = client.calls[0].response_model.model_json_schema()
+    options = schema["properties"]["tool_calls"]["items"]["anyOf"]
+    assert [option["$ref"].rsplit("/", 1)[1] for option in options] == [
+        "python_fetch_document_call",
+        "python_summarise_call",
+    ]
+    arguments = schema["$defs"]["python_summarise_args"]["properties"]
+    assert set(arguments) == {"document", "max_words", "language"}
+    assert "literal_args" not in json.dumps(schema)
+
+    system_prompt = client.calls[0].messages[0].content
+    assert "- `args`: the argument values, as an object." in system_prompt
+    assert "- `refs`:" in system_prompt
+    assert "literal_args" not in system_prompt and "args_json" not in system_prompt
+
+
+async def test_typed_calls_run_with_literals_and_references():
+    client = ScriptedLlmClient(
+        [
+            {
+                "instructions": "fetch it",
+                "tool_calls": [
+                    {
+                        "name": "python://fetch_document",
+                        "args": {"doc_id": None},
+                        "refs": [{"arg": "doc_id", "source": "input", "key": "wanted"}],
+                        "call_id": "doc",
+                    }
+                ],
+            },
+            {
+                "instructions": "summarise it",
+                "tool_calls": [
+                    {
+                        "name": "python://summarise",
+                        "args": {"document": None, "max_words": 50, "language": None},
+                        "refs": [{"arg": "document", "source": "step", "key": "doc"}],
+                        "call_id": "summary",
+                    }
+                ],
+            },
+            {"instructions": "answer", "output": "done"},
+        ]
+    )
+    steps = []
+    agent = typed_agent(client, on_step=steps.append)
+
+    assert await agent.prompt("summarise the wanted document", inputs={"wanted": "D-9"}) == "done"
+
+    fetch, summary = steps[0]["tool_calls"][0], steps[1]["tool_calls"][0]
+    assert fetch["args"] == {"doc_id": "D-9"}
+    assert fetch["output"] == {
+        "title": "Policy D-9",
+        "body": "Claims are reported within 72 hours.",
+    }
+    # A null argument is not supplied: the tool's own default applies.
+    assert summary["args"]["max_words"] == 50 and "language" not in summary["args"]
+    assert summary["output"] == {"result": "Policy D-9 in 50 words (None)"}
+    assert "Policy D-9 in 50 words (None)" in client.calls[2].messages[-1].content
+
+
+async def test_a_tool_with_a_free_form_argument_is_called_with_a_json_string():
+    client = ScriptedLlmClient(
+        [
+            {
+                "instructions": "search",
+                "tool_calls": [
+                    {
+                        "name": "python://search",
+                        "args_json": '{"query": "claims", "filters": {"year": 2026}}',
+                        "call_id": "hits",
+                    }
+                ],
+            },
+            {"instructions": "answer", "output": "done"},
+        ]
+    )
+    steps = []
+    agent = typed_agent(client, allowed_tools=["python://search"], on_step=steps.append)
+
+    assert await agent.prompt("search for claims") == "done"
+
+    call_schema = client.calls[0].response_model.model_json_schema()["$defs"][
+        "python_search_call"
+    ]
+    assert "args_json" in call_schema["properties"] and "args" not in call_schema["properties"]
+    system_prompt = client.calls[0].messages[0].content
+    assert "these tools take `args_json` in place of `args`" in system_prompt
+    assert "written as a JSON string: python://search." in system_prompt
+    assert steps[0]["tool_calls"][0]["output"] == {"result": "claims ['year']"}
+
+
+async def test_an_unresolvable_call_is_answered_with_an_error_the_model_reads():
+    client = ScriptedLlmClient(
+        [
+            {
+                "instructions": "summarise",
+                "tool_calls": [
+                    {
+                        "name": "python://summarise",
+                        "args": {"max_words": 10},
+                        "refs": [{"arg": "document", "source": "step", "key": "doc"}],
+                    }
+                ],
+            },
+            {"instructions": "answer", "output": "could not"},
+        ]
+    )
+    steps = []
+    agent = typed_agent(client, on_step=steps.append)
+
+    assert await agent.prompt("summarise D-9") == "could not"
+
+    call = steps[0]["tool_calls"][0]
+    assert call["args"] == {}
+    assert call["output"].startswith("Error: `document` refers to the call_id 'doc'")
+    assert "Error: `document` refers to the call_id 'doc'" in client.calls[1].messages[-1].content
+
+
+async def test_arguments_the_tool_refuses_are_answered_with_an_error():
+    client = ScriptedLlmClient(
+        [
+            {
+                "instructions": "summarise",
+                "tool_calls": [{"name": "python://summarise", "args": {"max_words": 10}}],
+            },
+            {"instructions": "answer", "output": "could not"},
+        ]
+    )
+    steps = []
+    agent = typed_agent(client, on_step=steps.append)
+
+    await agent.prompt("summarise D-9")
+
+    output = steps[0]["tool_calls"][0]["output"]
+    assert "argument validation failed" in output and "document" in output
+
+
+async def test_a_reply_in_the_earlier_form_still_runs():
+    client = ScriptedLlmClient(
+        [
+            {
+                "instructions": "fetch",
+                "tool_calls": [
+                    {
+                        "name": "python://fetch_document",
+                        "literal_args": '{"doc_id": "D-1"}',
+                        "call_id": "doc",
+                    }
+                ],
+            },
+            {
+                "instructions": "summarise",
+                "tool_calls": [
+                    {
+                        "name": "python://summarise",
+                        "literal_args": '{"max_words": 5}',
+                        "planner_context_args": '{"document": "doc"}',
+                    }
+                ],
+            },
+            {"instructions": "answer", "output": "done"},
+        ]
+    )
+    steps = []
+
+    assert await typed_agent(client, on_step=steps.append).prompt("task") == "done"
+    assert steps[1]["tool_calls"][0]["output"] == {"result": "Policy D-1 in 5 words (None)"}
+
+
+async def test_an_agent_without_tools_is_asked_for_no_tool_calls():
+    for kwargs in ({"kernel": None}, {"kernel": real_kernel(), "allowed_tools": []}):
+        client = ScriptedLlmClient([{"instructions": "answer", "output": "done"}])
+        agent = Agent(llm_client=client, run_context=RunContext(), **kwargs)
+
+        assert await agent.prompt("task") == "done"
+        assert list(client.calls[0].response_model.model_fields) == ["instructions", "output"]
+
+
+TYPED_CALL_MODELS = [
+    ("openai/gpt-5.6-luna", "OPENAI_API_KEY"),
+    ("gemini/gemini-3.5-flash", "GEMINI_API_KEY"),
+    ("scaleway/glm-5.3", "SCW_SECRET_KEY"),
+]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("model, key", TYPED_CALL_MODELS, ids=lambda value: value.split("/")[0])
+async def test_a_provider_accepts_the_typed_step_schema(model, key):
+    """Each provider takes the union of call models and the agent finishes the task."""
+    if not os.getenv(key):
+        pytest.skip(f"{key} is not set")
+    steps = []
+    agent = Agent(
+        llm_client=make_client(model, LlmClientParameters(timeout_seconds=120)),
+        kernel=real_kernel(),
+        run_context=RunContext(),
+        allowed_tools=["python://fetch_document", "python://summarise"],
+        on_step=steps.append,
+    )
+
+    answer = await agent.prompt(
+        "Fetch document D-9, then summarise it in at most 20 words with the "
+        "summarise tool. Reply with the summarise tool's result, word for word.",
+        max_steps=5,
+    )
+
+    calls = [call for step in steps for call in step["tool_calls"]]
+    assert [call["name"] for call in calls][:2] == [
+        "python://fetch_document",
+        "python://summarise",
+    ]
+    assert calls[0]["args"] == {"doc_id": "D-9"}
+    assert calls[1]["args"]["max_words"] == 20
+    assert calls[1]["output"] == {"result": "Policy D-9 in 20 words (None)"}
+    assert "Policy D-9 in 20 words" in answer

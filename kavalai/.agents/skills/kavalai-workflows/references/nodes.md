@@ -68,8 +68,16 @@ between the system prompt and the step message, **without the current user
 message** (the node's `prompt` carries it), so `history_limit` counts earlier
 messages only. The agent's intermediate steps never enter the chat history.
 The node's `inputs` are the **only** context variables the agent sees (and the
-only values a tool call's `input_args` can name) — declare what the agent
+only values a tool call can pass by reference) — declare what the agent
 needs, and do not also interpolate it into `prompt`, or it is sent twice.
+
+Do not describe the tool-call format in `prompt`: the agent's own system prompt
+and step schema do. A step's tool call is
+`{"name": "python://tool", "args": {…}, "refs": [{"arg", "source": "step"|"input", "key"}], "call_id"}`
+— `args` typed to the tool's input model, `null` meaning "not supplied". Write
+scripted test replies (`ScriptedLlmClient`) in that form. A tool with a `dict`
+parameter takes `args_json` (a JSON string) instead of `args`; give the
+parameter a Pydantic model to have it typed.
 
 | Key | Description |
 |---|---|

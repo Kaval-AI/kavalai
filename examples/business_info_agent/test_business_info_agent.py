@@ -90,7 +90,7 @@ class _FakeClient(BaseLlmClient):
                     "tool_calls": [
                         {
                             "name": f"python://{workflow.CRAWL_TOOL}",
-                            "literal_args": json.dumps({"url": "https://example.com"}),
+                            "args": {"url": "https://example.com"},
                             "call_id": "c0",
                         }
                     ],
