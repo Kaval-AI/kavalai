@@ -157,8 +157,8 @@ the Angular port:
 
 .. code-block:: bash
 
-   python -m kavalai.backoffice.server      # API, port 8000 unless set
-   cd frontend && npm start                 # UI on http://localhost:4200
+   python -m kavalai.backoffice.server      # API, port 12800 unless set
+   cd frontend && npm start                 # UI on http://localhost:8400
 
 Signing in
 ^^^^^^^^^^

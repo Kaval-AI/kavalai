@@ -1003,7 +1003,7 @@ if __name__ == "__main__":
     config = uvicorn.Config(
         "kavalai.backoffice.server:app",
         host=os.environ.get("KAVALAI_BO_HOST", "127.0.0.1"),
-        port=int(os.environ.get("KAVALAI_BO_PORT", "8000")),
+        port=int(os.environ.get("KAVALAI_BO_PORT", "12800")),
         log_level="info",
         reload=True,
         access_log=True,

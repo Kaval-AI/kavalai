@@ -76,7 +76,7 @@ Read by `python -m kavalai.server` and `python -m kavalai.migrate_db agents`.
 | `KAVALAI_BO_DB_URI` | The backoffice's **own** database — separate from any agent database |
 | `KAVALAI_BO_DB_SCHEMA` | Schema for the backoffice tables |
 | `KAVALAI_BO_HOST` | Interface `python -m kavalai.backoffice.server` binds to. Default `127.0.0.1` |
-| `KAVALAI_BO_PORT` | Port. Default `8000` |
+| `KAVALAI_BO_PORT` | Port. Default `12800` |
 | `KAVALAI_BO_GOOGLE_CLIENT_ID` / `KAVALAI_BO_GOOGLE_CLIENT_SECRET` | Google OAuth sign-in. **Optional** — set both or neither; with neither, users sign in with a password only (`python -m kavalai.backoffice.users add EMAIL --admin` creates one) |
 | `KAVALAI_BO_SESSION_SECRET_KEY` | Signing key for session cookies. **Required, no development fallback** — the backoffice refuses to start without it |
 | `KAVALAI_BO_FRONTEND_URL` | Where a completed Google sign-in is redirected to. Required only with the Google client |
@@ -109,7 +109,7 @@ KAVALAI_BO_SESSION_SECRET_KEY=change-me
 # Optional: Google sign-in beside passwords
 KAVALAI_BO_GOOGLE_CLIENT_ID=...
 KAVALAI_BO_GOOGLE_CLIENT_SECRET=...
-KAVALAI_BO_FRONTEND_URL=http://localhost:4200
+KAVALAI_BO_FRONTEND_URL=http://localhost:8400
 ```
 
 Keep `.env` out of source control and prefer a secret store in production.
