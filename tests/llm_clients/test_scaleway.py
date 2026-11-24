@@ -1,15 +1,13 @@
 import os
-from unittest.mock import AsyncMock
 
 import pytest
-from openai.types import CompletionUsage, CreateEmbeddingResponse, Embedding
+from openai.types import CompletionUsage
 from openai.types.chat import ChatCompletionChunk
 from openai.types.chat.chat_completion_chunk import Choice, ChoiceDelta
 from openai.types.completion_usage import (
     CompletionTokensDetails,
     PromptTokensDetails,
 )
-from openai.types.create_embedding_response import Usage
 from pydantic import BaseModel
 
 import kavalai
@@ -20,10 +18,8 @@ from kavalai.llm_clients.base_client import (
     LlmClientParameters,
     OutputTruncatedError,
 )
-from kavalai.llm_clients.embeddings import make_embedding_client
 from kavalai.llm_clients.scaleway_client import (
     ScalewayClient,
-    ScalewayEmbeddingClient,
     scaleway_api_key,
     scaleway_base_url,
 )
@@ -334,8 +330,6 @@ def test_a_missing_key_is_refused_rather_than_replaced_by_the_openai_key(
         scaleway_api_key()
     with pytest.raises(LlmClientException, match="SCW_SECRET_KEY"):
         ScalewayClient(model="gpt-oss-120b")
-    with pytest.raises(LlmClientException, match="SCW_SECRET_KEY"):
-        ScalewayEmbeddingClient("qwen3-embedding-8b")
 
 
 def test_timeout_comes_from_the_client_parameters():
@@ -354,61 +348,6 @@ def test_the_provider_is_registered_and_exported():
     assert client.model == "gpt-oss-120b"
     assert kavalai.ScalewayClient is ScalewayClient
     assert "scaleway" in kavalai.registered_llm_providers()
-    assert "scaleway" in kavalai.registered_embedding_providers()
-
-
-# Embeddings
-
-
-def embedding_response(*vectors, tokens=7):
-    return CreateEmbeddingResponse(
-        data=[
-            Embedding(embedding=vector, index=i, object="embedding")
-            for i, vector in enumerate(vectors)
-        ],
-        model="qwen3-embedding-8b",
-        object="list",
-        usage=Usage(prompt_tokens=tokens, total_tokens=tokens),
-    )
-
-
-def embedding_client_returning(response, **init):
-    client = make_embedding_client("scaleway/qwen3-embedding-8b", **init)
-    client.client.embeddings.create = AsyncMock(return_value=response)
-    return client
-
-
-@pytest.mark.asyncio
-async def test_embeddings_are_recorded_under_the_scaleway_prefix():
-    client = embedding_client_returning(embedding_response([0.1, 0.2], [0.3, 0.4]))
-
-    embeddings, stats = await client.compute_embeddings(["a", "b"])
-
-    assert isinstance(client, ScalewayEmbeddingClient)
-    assert embeddings == [[0.1, 0.2], [0.3, 0.4]]
-    assert stats.model == "scaleway/qwen3-embedding-8b"
-    assert (stats.batch_size, stats.total_tokens) == (2, 7)
-    sent = client.client.embeddings.create.call_args.kwargs
-    assert sent["model"] == "qwen3-embedding-8b"
-    assert "dimensions" not in sent
-
-
-@pytest.mark.asyncio
-async def test_embedding_dimensions_are_sent_when_set():
-    client = embedding_client_returning(embedding_response([0.1]), dimensions=256)
-
-    await client.compute_embeddings(["a"])
-
-    assert client.client.embeddings.create.call_args.kwargs["dimensions"] == 256
-
-
-def test_the_embedding_client_uses_the_scaleway_key_and_endpoint(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
-
-    client = ScalewayEmbeddingClient("qwen3-embedding-8b", project_id="p")
-
-    assert client.client.api_key == "scw-test-key"
-    assert str(client.client.base_url) == "https://api.scaleway.ai/p/v1/"
 
 
 # Integration tests (require SCW_SECRET_KEY)
@@ -455,16 +394,3 @@ async def test_scaleway_streamed_text_over_the_cap_raises():
     await streamed_text_over_the_cap_raises(
         real_client(stats, max_output_tokens=40), stats
     )
-
-
-@pytest.mark.integration
-@scaleway_key
-@pytest.mark.asyncio
-async def test_scaleway_embeddings_against_the_real_api():
-    client = ScalewayEmbeddingClient("qwen3-embedding-8b", dimensions=256)
-
-    embeddings, stats = await client.compute_embeddings(["tere", "hello world"])
-
-    assert [len(vector) for vector in embeddings] == [256, 256]
-    assert stats.model == "scaleway/qwen3-embedding-8b"
-    assert stats.total_tokens > 0

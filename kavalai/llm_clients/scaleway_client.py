@@ -1,4 +1,4 @@
-"""Clients for Scaleway Generative APIs.
+"""Chat client for Scaleway Generative APIs.
 
 Copyright 2026 OÜ KAVAL AI (registry code 17393877)
 
@@ -14,10 +14,12 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
-Scaleway serves open-weight models behind an OpenAI-compatible API, so both
-clients here use the ``openai`` SDK pointed at Scaleway. The chat client speaks
-Chat Completions rather than the Responses API the ``openai/`` provider uses:
-Chat Completions is the interface every Scaleway chat model supports.
+Scaleway serves open-weight models behind an OpenAI-compatible API, so the
+client here uses the ``openai`` SDK pointed at Scaleway. It speaks Chat
+Completions rather than the Responses API the ``openai/`` provider uses: Chat
+Completions is the interface every Scaleway chat model supports. The embedding
+client, :class:`~kavalai.llm_clients.embeddings.ScalewayEmbeddingClient`,
+resolves its key and endpoint through the two functions below.
 
 ``SCALEWAY_API_URL`` is the serverless endpoint; :func:`scaleway_base_url`
 decides which endpoint a client calls.
@@ -38,7 +40,6 @@ from kavalai.llm_clients.base_client import (
     LlmClientParameters,
     ModelStatsReceiver,
 )
-from kavalai.llm_clients.embeddings import OpenAIEmbeddingClient
 from kavalai.llm_clients.streamer import Streamer
 
 SCALEWAY_API_URL = "https://api.scaleway.ai"
@@ -211,31 +212,3 @@ def chat_usage_counts(usage: Any) -> dict[str, Any]:
         "cached_prompt_tokens": getattr(prompt_details, "cached_tokens", None),
         "reasoning_tokens": getattr(completion_details, "reasoning_tokens", None),
     }
-
-
-class ScalewayEmbeddingClient(OpenAIEmbeddingClient):
-    """Scaleway embeddings (e.g. ``qwen3-embedding-8b``).
-
-    The request is the OpenAI embeddings request, so ``dimensions`` works as
-    on :class:`~kavalai.llm_clients.embeddings.OpenAIEmbeddingClient`;
-    ``qwen3-embedding-8b`` accepts 32 to 4096.
-    """
-
-    provider = "scaleway"
-
-    def __init__(
-        self,
-        model: str,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
-        project_id: Optional[str] = None,
-        timeout: float = 30.0,
-        dimensions: Optional[int] = None,
-    ) -> None:
-        super().__init__(
-            model,
-            api_key=scaleway_api_key(api_key),
-            base_url=scaleway_base_url(base_url, project_id),
-            timeout=timeout,
-            dimensions=dimensions,
-        )

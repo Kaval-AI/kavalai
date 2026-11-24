@@ -169,7 +169,7 @@ Embeddings use the same string through a separate registry: the lookup behind
      - `Gemini embeddings
        <https://ai.google.dev/gemini-api/docs/embeddings>`_
    * - ``scaleway/``
-     - :class:`~kavalai.llm_clients.scaleway_client.ScalewayEmbeddingClient`
+     - :class:`~kavalai.llm_clients.embeddings.ScalewayEmbeddingClient`
      - ``SCW_SECRET_KEY``; ``SCW_DEFAULT_PROJECT_ID`` optional
      - `Scaleway supported models
        <https://www.scaleway.com/en/docs/generative-apis/reference-content/supported-models/>`_

@@ -150,6 +150,42 @@ class OpenAIEmbeddingClient(BaseEmbeddingClient):
         return embeddings, stats
 
 
+class ScalewayEmbeddingClient(OpenAIEmbeddingClient):
+    """Scaleway embeddings (e.g. ``qwen3-embedding-8b``).
+
+    The request is the OpenAI embeddings request, so ``dimensions`` works as
+    on :class:`OpenAIEmbeddingClient`; ``qwen3-embedding-8b`` accepts 32 to
+    4096. The key and the endpoint are resolved as for
+    :class:`~kavalai.llm_clients.scaleway_client.ScalewayClient`:
+    ``SCW_SECRET_KEY``, and the serverless API unless ``base_url`` names a
+    dedicated deployment.
+    """
+
+    provider = "scaleway"
+
+    def __init__(
+        self,
+        model: str,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        project_id: Optional[str] = None,
+        timeout: float = 30.0,
+        dimensions: Optional[int] = None,
+    ) -> None:
+        from kavalai.llm_clients.scaleway_client import (
+            scaleway_api_key,
+            scaleway_base_url,
+        )
+
+        super().__init__(
+            model,
+            api_key=scaleway_api_key(api_key),
+            base_url=scaleway_base_url(base_url, project_id),
+            timeout=timeout,
+            dimensions=dimensions,
+        )
+
+
 class GeminiEmbeddingClient(BaseEmbeddingClient):
     """Google Gemini embeddings.
 

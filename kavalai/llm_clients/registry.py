@@ -288,7 +288,7 @@ BUILTIN_LLM_PACKAGES = {
 _BUILTIN_EMBEDDING_PROVIDERS = {
     "openai": "kavalai.llm_clients.embeddings.OpenAIEmbeddingClient",
     "gemini": "kavalai.llm_clients.embeddings.GeminiEmbeddingClient",
-    "scaleway": "kavalai.llm_clients.scaleway_client.ScalewayEmbeddingClient",
+    "scaleway": "kavalai.llm_clients.embeddings.ScalewayEmbeddingClient",
     "ollama": "kavalai.llm_clients.embeddings.OllamaEmbeddingClient",
     "fastembed": "kavalai.llm_clients.embeddings.FastEmbedClient",
     "browser": "kavalai.llm_clients.embeddings.BrowserEmbeddingClient",

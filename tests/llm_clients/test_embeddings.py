@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 import types
 from types import SimpleNamespace
@@ -23,6 +24,7 @@ from kavalai.llm_clients.embeddings import (
     GeminiEmbeddingClient,
     OllamaEmbeddingClient,
     OpenAIEmbeddingClient,
+    ScalewayEmbeddingClient,
     make_embedding_client,
 )
 from kavalai.normalizer import Normalizer
@@ -366,3 +368,68 @@ async def test_browser_embeddings_raises_when_bridge_absent(monkeypatch):
 
     with pytest.raises(LlmClientException, match="No in-browser LLM engine found"):
         await BrowserEmbeddingClient("m").compute_embeddings(["a"])
+
+
+def scaleway_client_returning(monkeypatch, response, **init):
+    monkeypatch.setenv("SCW_SECRET_KEY", "scw-test-key")
+    monkeypatch.delenv("SCW_DEFAULT_PROJECT_ID", raising=False)
+    client = make_embedding_client("scaleway/qwen3-embedding-8b", **init)
+    client.client.embeddings.create = AsyncMock(return_value=response)
+    return client
+
+
+@pytest.mark.asyncio
+async def test_scaleway_embeddings_are_recorded_under_their_own_prefix(monkeypatch):
+    client = scaleway_client_returning(
+        monkeypatch, openai_embedding_response([0.1, 0.2], [0.3, 0.4])
+    )
+
+    embeddings, stats = await client.compute_embeddings(["a", "b"])
+
+    assert isinstance(client, ScalewayEmbeddingClient)
+    assert embeddings == [[0.1, 0.2], [0.3, 0.4]]
+    assert stats.model == "scaleway/qwen3-embedding-8b"
+    assert (stats.batch_size, stats.total_tokens) == (2, 7)
+    sent = client.client.embeddings.create.call_args.kwargs
+    assert sent["model"] == "qwen3-embedding-8b"
+    assert "dimensions" not in sent
+
+
+@pytest.mark.asyncio
+async def test_scaleway_dimensions_are_sent_when_set(monkeypatch):
+    client = scaleway_client_returning(
+        monkeypatch, openai_embedding_response([0.1]), dimensions=256
+    )
+
+    await client.compute_embeddings(["a"])
+
+    assert client.client.embeddings.create.call_args.kwargs["dimensions"] == 256
+
+
+def test_scaleway_embeddings_use_the_scaleway_key_and_endpoint(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
+    client = scaleway_client_returning(monkeypatch, None, project_id="p")
+
+    assert client.client.api_key == "scw-test-key"
+    assert str(client.client.base_url) == "https://api.scaleway.ai/p/v1/"
+
+
+def test_scaleway_embeddings_refuse_a_missing_key(monkeypatch):
+    monkeypatch.delenv("SCW_SECRET_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
+
+    with pytest.raises(LlmClientException, match="SCW_SECRET_KEY"):
+        ScalewayEmbeddingClient("qwen3-embedding-8b")
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(not os.getenv("SCW_SECRET_KEY"), reason="SCW_SECRET_KEY not set")
+@pytest.mark.asyncio
+async def test_scaleway_embeddings_against_the_real_api():
+    client = ScalewayEmbeddingClient("qwen3-embedding-8b", dimensions=256)
+
+    embeddings, stats = await client.compute_embeddings(["tere", "hello world"])
+
+    assert [len(vector) for vector in embeddings] == [256, 256]
+    assert stats.model == "scaleway/qwen3-embedding-8b"
+    assert stats.total_tokens > 0
