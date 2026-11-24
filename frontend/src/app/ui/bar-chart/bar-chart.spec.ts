@@ -16,7 +16,7 @@ limitations under the License.
 
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { BarChart, fillDays } from './bar-chart';
+import { BarChart, fillDays, niceTicks } from './bar-chart';
 
 describe('fillDays', () => {
   it('gives every day of the range a row, keeping the ones that exist', () => {
@@ -58,6 +58,36 @@ describe('BarChart', () => {
     expect(el.querySelector('.legend')?.textContent).toContain('b');
   });
 
+  it('labels a round scale with its unit', async () => {
+    await TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] }).compileComponents();
+    const fixture = TestBed.createComponent(BarChart);
+    fixture.componentRef.setInput('bars', [{ day: '2026-09-01', values: [3729, 394] }]);
+    fixture.componentRef.setInput('series', [
+      { label: 'in', color: 'red' },
+      { label: 'out', color: 'blue' },
+    ]);
+    fixture.componentRef.setInput('unit', 'tokens');
+    fixture.detectChanges();
+    const el: HTMLElement = fixture.nativeElement;
+    expect(el.querySelector('[data-testid="chart-unit"]')!.textContent).toBe('tokens');
+    const ticks = Array.from(el.querySelectorAll('.y-tick')).map((t) => t.textContent!.trim());
+    expect(ticks).toEqual(['0', '1K', '2K', '3K', '4K', '5K']);
+    expect(el.querySelectorAll('line.grid').length).toBe(5);
+    expect(el.querySelector('svg')!.getAttribute('aria-label')).toBe('Per day, in tokens');
+    // The bars are drawn on the scale, not stretched to the top.
+    const [bottom] = fixture.componentInstance.stack({ day: '2026-09-01', values: [3729, 394] });
+    expect(bottom.h).toBeCloseTo(74.58, 1);
+  });
+
+  it('shows no unit caption without one', async () => {
+    await TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] }).compileComponents();
+    const fixture = TestBed.createComponent(BarChart);
+    fixture.componentRef.setInput('bars', [{ day: '2026-09-01', values: [1] }]);
+    fixture.componentRef.setInput('series', [{ label: 'a', color: 'red' }]);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('[data-testid="chart-unit"]')).toBeNull();
+  });
+
   it('says so when there is nothing to draw', async () => {
     await TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] }).compileComponents();
     const fixture = TestBed.createComponent(BarChart);
@@ -66,5 +96,17 @@ describe('BarChart', () => {
     fixture.componentRef.setInput('empty', 'Quiet.');
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('Quiet.');
+  });
+});
+
+describe('niceTicks', () => {
+  it('steps by 1, 2 or 5 times a power of ten, at most five steps, never below 1', () => {
+    expect(niceTicks(0)).toEqual([0, 1]);
+    expect(niceTicks(1)).toEqual([0, 1]);
+    expect(niceTicks(4)).toEqual([0, 1, 2, 3, 4]);
+    expect(niceTicks(7)).toEqual([0, 2, 4, 6, 8]);
+    expect(niceTicks(0.3)).toEqual([0, 1]);
+    expect(niceTicks(4123)).toEqual([0, 1000, 2000, 3000, 4000, 5000]);
+    expect(niceTicks(60)).toEqual([0, 20, 40, 60]);
   });
 });

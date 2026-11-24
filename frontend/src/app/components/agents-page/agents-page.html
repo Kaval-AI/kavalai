@@ -117,6 +117,7 @@
                 <app-bar-chart
                   [bars]="activity()"
                   [series]="activitySeries"
+          unit="count"
                   label="Sessions, runs and messages per day"
                   [empty]="'No activity in the last ' + chartDays + ' days.'"
                 />
@@ -125,6 +126,7 @@
                 <app-bar-chart
                   [bars]="tokens()"
                   [series]="tokenSeries"
+          unit="tokens"
                   label="Input, output and embedding tokens per day"
                   [empty]="'No model calls in the last ' + chartDays + ' days.'"
                 />

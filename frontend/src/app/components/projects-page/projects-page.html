@@ -54,6 +54,7 @@
         <app-bar-chart
           [bars]="activity()"
           [series]="activitySeries"
+          unit="count"
           label="Conversations, runs and messages per day"
           empty="No conversations in the last 7 days."
         />
@@ -62,6 +63,7 @@
         <app-bar-chart
           [bars]="tokens()"
           [series]="tokenSeries"
+          unit="tokens"
           label="Input, output and embedding tokens per day"
           empty="No model calls in the last 7 days."
         />
