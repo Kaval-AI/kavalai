@@ -20,6 +20,11 @@ import { BehaviorSubject, Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
 import { UserDetails } from '../models/user-details';
 
+export interface AuthMethods {
+  password: boolean
+  google: boolean
+}
+
 @Injectable({
   providedIn: 'root',
 })
@@ -33,6 +38,19 @@ export class UserService {
 
   login() {
     this.redirect('/api/login');
+  }
+
+  getAuthMethods(): Observable<AuthMethods> {
+    return this.http.get<AuthMethods>('/api/auth/methods');
+  }
+
+  loginWithPassword(email: string, password: string): Observable<UserDetails> {
+    return this.http.post<UserDetails>('/api/auth/login', { email, password }).pipe(
+      tap((userDetails) => {
+        this.loggedIn = true;
+        this.userDetails$.next(userDetails);
+      })
+    );
   }
 
   private redirect(url: string) {

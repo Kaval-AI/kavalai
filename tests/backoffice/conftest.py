@@ -9,8 +9,9 @@ from kavalai.db import build_db_uri
 # The backoffice application reads these at call time (AsyncBackofficeSession
 # defaults); the library itself never reads them at import time anymore.
 os.environ["KAVALAI_BO_DB_SCHEMA"] = "test_backoffice"
-# The application refuses to start without these; the values never reach
-# Google because no test completes a sign-in.
+# The session key is required; the Google client is optional and set here so
+# that the Google routes exist. The values never reach Google because no
+# test completes a Google sign-in.
 for _name, _value in {
     "KAVALAI_BO_GOOGLE_CLIENT_ID": "test-client-id",
     "KAVALAI_BO_GOOGLE_CLIENT_SECRET": "test-client-secret",

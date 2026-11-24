@@ -13,8 +13,9 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-import { Component } from '@angular/core';
+import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { UserService } from '../../services/user-service';
 
 @Component({
@@ -22,14 +23,51 @@ import { UserService } from '../../services/user-service';
   standalone: true,
   imports: [
     CommonModule,
+    FormsModule,
   ],
   templateUrl: './login-page.html',
   styleUrls: ['./login-page.css'],
 })
-export class LoginPage {
+export class LoginPage implements OnInit {
+  email = '';
+  password = '';
+  errorMessage = '';
+  isSubmitting = false;
+  googleEnabled = false;
+
   constructor(
     private userService: UserService
   ) {}
+
+  ngOnInit(): void {
+    this.userService.getAuthMethods().subscribe({
+      next: (methods) => {
+        this.googleEnabled = methods.google;
+      },
+      error: () => {
+        this.googleEnabled = false;
+      },
+    });
+  }
+
+  loginWithPassword(): void {
+    if (!this.email || !this.password || this.isSubmitting) return;
+
+    this.isSubmitting = true;
+    this.errorMessage = '';
+    this.userService.loginWithPassword(this.email, this.password).subscribe({
+      next: () => {
+        this.isSubmitting = false;
+      },
+      error: (err) => {
+        this.isSubmitting = false;
+        this.password = '';
+        this.errorMessage = err.status === 401
+          ? 'Invalid email or password.'
+          : 'Sign-in failed. Please try again.';
+      },
+    });
+  }
 
   login(): void {
     this.userService.login();

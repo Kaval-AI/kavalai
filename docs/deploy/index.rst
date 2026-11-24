@@ -310,18 +310,25 @@ broken connection is taken out of rotation instead of failing requests.
 Running the backoffice
 ----------------------
 
-The backoffice needs its own database and Google OAuth credentials:
+The backoffice needs its own database and a key for its session cookies.
+Users sign in with a password; the three Google variables add Google sign-in
+and may be left out together:
 
 .. code-block:: bash
 
    export KAVALAI_BO_DB_URI=postgresql://user:pass@db:5432/kavalai
    export KAVALAI_BO_DB_SCHEMA=backoffice
+   export KAVALAI_BO_SESSION_SECRET_KEY=...
    export KAVALAI_BO_GOOGLE_CLIENT_ID=...
    export KAVALAI_BO_GOOGLE_CLIENT_SECRET=...
-   export KAVALAI_BO_SESSION_SECRET_KEY=...
    export KAVALAI_BO_FRONTEND_URL=https://backoffice.example.com
 
    python -m kavalai.backoffice.server
+
+Accounts are created with ``python -m kavalai.backoffice.users add`` — see
+:doc:`../ui/index`. Password sign-in is not rate-limited by the backoffice;
+an installation reachable from the internet limits ``POST /auth/login`` at
+its reverse proxy.
 
 Access is per project, with ``owner`` and ``viewer`` roles checked server-side
 on every request. The last owner of a project cannot be removed or demoted.

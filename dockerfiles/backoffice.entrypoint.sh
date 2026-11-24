@@ -14,7 +14,7 @@ run_backoffice_server() {
     service nginx start
 
     echo "Starting backoffice server..."
-    # KAVALAI_BO_FRONTEND_URL, the OAuth client and the session key come from the environment.
+    # The session key and the optional Google OAuth client come from the environment.
     exec python -m kavalai.backoffice.server
 }
 

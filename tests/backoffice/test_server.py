@@ -34,6 +34,192 @@ def test_a_missing_required_setting_stops_the_backoffice(monkeypatch):
     assert required_setting("KAVALAI_BO_SESSION_SECRET_KEY") == "s3cret"
 
 
+def test_google_sign_in_is_optional_but_never_half_configured(monkeypatch):
+    from kavalai.backoffice.server import google_oauth_settings
+
+    monkeypatch.delenv("KAVALAI_BO_GOOGLE_CLIENT_ID", raising=False)
+    monkeypatch.delenv("KAVALAI_BO_GOOGLE_CLIENT_SECRET", raising=False)
+    monkeypatch.delenv("KAVALAI_BO_FRONTEND_URL", raising=False)
+    assert google_oauth_settings() is None
+
+    monkeypatch.setenv("KAVALAI_BO_GOOGLE_CLIENT_ID", "id")
+    with pytest.raises(RuntimeError, match="needs both"):
+        google_oauth_settings()
+
+    monkeypatch.setenv("KAVALAI_BO_GOOGLE_CLIENT_SECRET", "secret")
+    with pytest.raises(RuntimeError, match="KAVALAI_BO_FRONTEND_URL is not set"):
+        google_oauth_settings()
+
+    monkeypatch.setenv("KAVALAI_BO_FRONTEND_URL", "http://localhost:4200")
+    assert google_oauth_settings() == {
+        "client_id": "id",
+        "client_secret": "secret",
+        "frontend_url": "http://localhost:4200",
+    }
+
+
+@pytest.mark.asyncio
+async def test_auth_methods_follow_the_configuration(client):
+    response = await client.get("/auth/methods")
+    assert response.json() == {"password": True, "google": True}
+
+    with patch("kavalai.backoffice.server.GOOGLE_OAUTH", None):
+        response = await client.get("/auth/methods")
+        assert response.json() == {"password": True, "google": False}
+
+
+@pytest.mark.asyncio
+async def test_google_routes_are_absent_without_a_client(client):
+    with patch("kavalai.backoffice.server.GOOGLE_OAUTH", None):
+        assert (await client.get("/login")).status_code == 404
+        assert (await client.get("/auth/google/callback")).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_password_login_opens_a_session(client, backoffice_db):
+    """A real sign-in, with no patched session: the cookie the login sets is
+    what the next request is authenticated by."""
+    from kavalai.backoffice.users import hash_password
+
+    project = db.Project(id=uuid.uuid4(), name="Mine")
+    user = db.User(
+        id=uuid.uuid4(),
+        email="pw@example.com",
+        name="Pw",
+        is_admin=True,
+        password_hash=hash_password("correct horse"),
+    )
+    membership = db.ProjectMembership(
+        user_id=user.id, project_id=project.id, role=db.ProjectRole.owner
+    )
+    backoffice_db.add_all([project, user, membership])
+    await backoffice_db.commit()
+
+    response = await client.post(
+        "/auth/login", json={"email": "pw@example.com", "password": "correct horse"}
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "id": str(user.id),
+        "email": "pw@example.com",
+        "name": "Pw",
+        "picture": None,
+        "is_admin": True,
+        "active_project_id": str(project.id),
+    }
+
+    details = await client.get("/user/get_details")
+    assert details.status_code == 200
+    assert details.json()["email"] == "pw@example.com"
+
+    assert (await client.get("/logout")).json() == {"logged_in": False}
+    assert (await client.get("/user/get_details")).status_code == 401
+    # Logging out twice is not an error.
+    assert (await client.get("/logout")).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_password_login_refuses_every_failure_alike(client, backoffice_db):
+    from kavalai.backoffice.users import hash_password
+
+    backoffice_db.add_all(
+        [
+            db.User(
+                email="pw@example.com",
+                name="Pw",
+                password_hash=hash_password("correct horse"),
+            ),
+            db.User(email="google@example.com", name="Google only"),
+        ]
+    )
+    await backoffice_db.commit()
+
+    for body in [
+        {"email": "pw@example.com", "password": "wrong horse"},
+        {"email": "google@example.com", "password": "correct horse"},
+        {"email": "google@example.com", "password": ""},
+        {"email": "nobody@example.com", "password": "correct horse"},
+    ]:
+        response = await client.post("/auth/login", json=body)
+        assert response.status_code == 401, body
+        assert response.json() == {"detail": "Invalid email or password."}
+        assert (await client.get("/user/get_details")).status_code == 401
+
+    for body in [{}, {"email": "pw@example.com"}, {"email": 1, "password": 2}]:
+        response = await client.post("/auth/login", json=body)
+        assert response.status_code == 400, body
+
+
+@pytest.mark.asyncio
+async def test_user_endpoints_never_return_the_password_hash(client, backoffice_db):
+    from kavalai.backoffice.users import hash_password, verify_password
+
+    existing = db.User(
+        id=uuid.uuid4(),
+        email="has@example.com",
+        name="Has",
+        password_hash=hash_password("correct horse"),
+    )
+    backoffice_db.add(existing)
+    await backoffice_db.commit()
+
+    with (
+        patch("kavalai.backoffice.server.assert_logged_in"),
+        patch("kavalai.backoffice.server.assert_is_admin"),
+        patch(
+            "starlette.requests.Request.session",
+            {"user_info": {"id": str(uuid.uuid4()), "is_admin": True}},
+        ),
+    ):
+        listed = (await client.get("/users/all")).json()
+        assert listed[0]["has_password"] is True
+        assert "password_hash" not in listed[0]
+        assert "scrypt$" not in str(listed)
+
+        created = await client.post(
+            "/users/create",
+            json={
+                "email": "new@example.com",
+                "name": "New",
+                "password": "battery staple",
+                "password_hash": "client-chosen",
+                "has_password": False,
+            },
+        )
+        assert created.status_code == 200
+        assert created.json()["has_password"] is True
+        assert "password_hash" not in created.json()
+        assert "password" not in created.json()
+
+        too_short = await client.post(
+            "/users/create",
+            json={"email": "short@example.com", "name": "S", "password": "short"},
+        )
+        assert too_short.status_code == 400
+        assert "at least 8" in too_short.json()["detail"]
+
+        # An edit that leaves the password blank keeps the stored one.
+        renamed = await client.put(
+            f"/users/update/{existing.id}", json={"name": "Renamed", "password": ""}
+        )
+        assert renamed.json()["name"] == "Renamed"
+        assert renamed.json()["has_password"] is True
+
+        changed = await client.put(
+            f"/users/update/{existing.id}", json={"password": "battery staple"}
+        )
+        assert changed.status_code == 200
+
+    backoffice_db.expire_all()
+    rows = {
+        user.email: user
+        for user in (await backoffice_db.execute(db.select(db.User))).scalars()
+    }
+    assert verify_password("battery staple", rows["new@example.com"].password_hash)
+    assert verify_password("battery staple", rows["has@example.com"].password_hash)
+    assert "short@example.com" not in rows
+
+
 @pytest.mark.asyncio
 async def test_user_details_unauthorized(client):
     response = await client.get("/user/get_details")
