@@ -229,6 +229,18 @@ runtime tables; left empty, the collections are looked for in the schema above.
 The project page is where the active project is chosen, new ones are created,
 and the connection is verified.
 
+The database password is write-only. Every member of a project receives its
+settings, and the password would let a viewer connect to the agent database
+around their role and around the read-only setting below, so no page or
+endpoint that lists a project carries it. A form that leaves the password
+empty keeps the stored one — but only while the database type, host, port,
+user and database stay the same; changing any of them asks for the password
+again, so whoever may edit the host cannot send the stored password to another
+server. An administrator who needs the password, to build a connection string
+of their own, asks for it with **Show password** beside the connection strings;
+the request is logged. **Test connection** checks the settings as they are
+typed, before they are saved.
+
 **Read-only** is on for every project unless switched off. The backoffice only
 reads an agent database, and the database it is pointed at may be production,
 so the guarantee is placed where it cannot be argued with: every connection a

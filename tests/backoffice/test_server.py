@@ -268,7 +268,11 @@ async def test_projects_test_connection_reaches_the_database(
         "db_port": int(postgres_container.get_exposed_port(5432)),
         "db_name": postgres_container.dbname,
     }
-    with patch("kavalai.backoffice.server.assert_logged_in"):
+    admin = {"user_info": {"id": str(uuid.uuid4()), "is_admin": True}}
+    with (
+        patch("kavalai.backoffice.server.assert_logged_in"),
+        patch("starlette.requests.Request.session", admin),
+    ):
         response = await client.post("/projects/test-connection/new", json=data)
         assert response.status_code == 200
         assert response.json()["status"] == "success"
@@ -815,3 +819,174 @@ async def test_a_sqlite_project_is_browsed_from_its_file(
         response = await client.post(f"/projects/test-connection/{project.id}")
         assert response.status_code == 200
         assert response.json()["status"] == "success"
+
+
+async def _member_of_new_project(backoffice_db, role, **project_fields):
+    """A user, a project with a stored password, and the user's membership."""
+    user = db.User(id=uuid.uuid4(), email=f"{uuid.uuid4()}@test", name="m")
+    project = db.Project(id=uuid.uuid4(), name="P", **project_fields)
+    backoffice_db.add_all([user, project])
+    await backoffice_db.commit()
+    backoffice_db.add(
+        db.ProjectMembership(user_id=user.id, project_id=project.id, role=role)
+    )
+    await backoffice_db.commit()
+    return user, project
+
+
+def _signed_in(user, is_admin=False):
+    session = {"user_info": {"id": str(user.id), "email": user.email}}
+    session["user_info"]["is_admin"] = is_admin
+    return (
+        patch("kavalai.backoffice.server.assert_logged_in"),
+        patch("starlette.requests.Request.session", session),
+    )
+
+
+@pytest.mark.asyncio
+async def test_project_listings_never_carry_the_database_password(
+    client, backoffice_db
+):
+    """A viewer receives the project, so the password would let them connect
+    to the agent database around their role and the read-only setting."""
+    viewer, project = await _member_of_new_project(
+        backoffice_db,
+        db.ProjectRole.viewer,
+        db_host="h",
+        db_user="u",
+        db_password="top-secret",
+        db_name="d",
+    )
+    login, session = _signed_in(viewer)
+    with login, session:
+        listed = await client.get("/projects/all")
+        single = await client.get(f"/projects/get/{project.id}")
+
+    for response in (listed, single):
+        assert response.status_code == 200
+        assert "top-secret" not in response.text
+        assert "db_password" not in response.text
+    assert listed.json()[0]["has_password"] is True
+    assert listed.json()[0]["role"] == "viewer"
+    assert single.json()["has_password"] is True
+
+
+@pytest.mark.asyncio
+async def test_only_an_administrator_can_reveal_the_password(client, backoffice_db):
+    owner, project = await _member_of_new_project(
+        backoffice_db, db.ProjectRole.owner, db_password="top-secret"
+    )
+    login, session = _signed_in(owner)
+    with login, session:
+        refused = await client.post(f"/projects/{project.id}/reveal-password")
+    login, session = _signed_in(owner, is_admin=True)
+    with login, session:
+        revealed = await client.post(f"/projects/{project.id}/reveal-password")
+
+    assert refused.status_code == 403
+    assert "top-secret" not in refused.text
+    assert revealed.status_code == 200
+    assert revealed.json() == {"db_password": "top-secret"}
+
+
+@pytest.mark.asyncio
+async def test_saving_without_the_password_keeps_it(client, backoffice_db):
+    owner, project = await _member_of_new_project(
+        backoffice_db,
+        db.ProjectRole.owner,
+        db_host="h",
+        db_user="u",
+        db_password="top-secret",
+        db_name="d",
+    )
+    login, session = _signed_in(owner)
+    with login, session:
+        listed = (await client.get("/projects/all")).json()[0]
+        saved = await client.put(
+            f"/projects/update/{project.id}", json={**listed, "description": "d2"}
+        )
+        moved = await client.put(
+            f"/projects/update/{project.id}", json={**listed, "db_host": "evil"}
+        )
+
+    assert saved.status_code == 200
+    assert "top-secret" not in saved.text
+    assert saved.json()["description"] == "d2"
+    assert moved.status_code == 400
+    assert "password again" in moved.json()["detail"]
+    await backoffice_db.refresh(project)
+    assert project.db_password == "top-secret"
+    assert project.db_host == "h"
+
+
+@pytest.mark.asyncio
+async def test_a_connection_test_checks_unsaved_changes_with_the_stored_password(
+    client, backoffice_db, postgres_container
+):
+    """The owner tests a form before saving it; the stored password is used,
+    but never for another server, and a viewer may test only what is saved."""
+    reachable = dict(
+        db_host=postgres_container.get_container_host_ip(),
+        db_port=int(postgres_container.get_exposed_port(5432)),
+        db_user=postgres_container.username,
+        db_password=postgres_container.password,
+        db_name=postgres_container.dbname,
+        db_schema="public",
+    )
+    owner, project = await _member_of_new_project(
+        backoffice_db, db.ProjectRole.owner, **reachable
+    )
+    form = {key: value for key, value in reachable.items() if key != "db_password"}
+
+    login, session = _signed_in(owner)
+    with login, session:
+        unsaved = await client.post(
+            f"/projects/test-connection/{project.id}",
+            json={**form, "db_schema": "elsewhere"},
+        )
+        moved = await client.post(
+            f"/projects/test-connection/{project.id}",
+            json={**form, "db_host": "203.0.113.1"},
+        )
+    assert unsaved.status_code == 200
+    assert moved.status_code == 400
+    assert "password again" in moved.json()["detail"]
+
+    viewer = db.User(id=uuid.uuid4(), email=f"{uuid.uuid4()}@test", name="v")
+    backoffice_db.add(viewer)
+    await backoffice_db.commit()
+    backoffice_db.add(
+        db.ProjectMembership(
+            user_id=viewer.id, project_id=project.id, role=db.ProjectRole.viewer
+        )
+    )
+    await backoffice_db.commit()
+    login, session = _signed_in(viewer)
+    with login, session:
+        saved = await client.post(f"/projects/test-connection/{project.id}")
+        edited = await client.post(f"/projects/test-connection/{project.id}", json=form)
+        new = await client.post("/projects/test-connection/new", json=reachable)
+    assert saved.status_code == 200
+    assert edited.status_code == 403
+    assert new.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_creating_a_project_answers_without_the_password(client, backoffice_db):
+    admin = db.User(id=uuid.uuid4(), email=f"{uuid.uuid4()}@test", name="a")
+    backoffice_db.add(admin)
+    await backoffice_db.commit()
+    body = {"name": "New", "db_host": "h", "db_user": "u", "db_password": "pw-123"}
+
+    login, session = _signed_in(admin)
+    with login, session:
+        refused = await client.post("/projects/create", json=body)
+    login, session = _signed_in(admin, is_admin=True)
+    with login, session:
+        created = await client.post("/projects/create", json=body)
+
+    assert refused.status_code == 403
+    assert created.status_code == 200
+    assert "pw-123" not in created.text
+    assert created.json()["has_password"] is True
+    assert created.json()["role"] == "owner"

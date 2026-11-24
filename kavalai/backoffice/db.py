@@ -262,8 +262,15 @@ async def resolve_active_project_id(db: AsyncSession, user_id: UUID) -> UUID | N
     return fallback
 
 
-async def get_user_projects(db: AsyncSession, user_id: UUID) -> list[dict]:
-    """Fetch projects along with the specific user's role and DB details."""
+async def get_user_projects(
+    db: AsyncSession, user_id: UUID
+) -> list[tuple[Project, ProjectRole]]:
+    """The user's projects, each with the user's role in it.
+
+    Rows, not dicts: what of a project the API may show is decided by
+    ``kavalai.backoffice.project_service.public_project``, which leaves the
+    database password out.
+    """
     stmt = (
         select(Project, ProjectMembership.role)
         .join(ProjectMembership, Project.id == ProjectMembership.project_id)
@@ -271,22 +278,4 @@ async def get_user_projects(db: AsyncSession, user_id: UUID) -> list[dict]:
     )
 
     result = await db.execute(stmt)
-
-    return [
-        {
-            "id": str(project.id),
-            "name": project.name,
-            "description": project.description,
-            "db_type": project.db_type,
-            "db_host": project.db_host,
-            "db_port": project.db_port,
-            "db_user": project.db_user,
-            "db_name": project.db_name,
-            "db_schema": project.db_schema,
-            "db_password": project.db_password,
-            "created_at": project.created_at.isoformat(),
-            "updated_at": project.updated_at.isoformat(),
-            "role": role.value,
-        }
-        for project, role in result.all()
-    ]
+    return [(project, role) for project, role in result.all()]

@@ -55,7 +55,10 @@ from kavalai.backoffice.users import (
 )
 from kavalai.backoffice.project_service import (
     ProjectService,
+    connection_fields,
+    merged_project,
     project_fields,
+    public_project,
     project_rag_schema,
     project_read_only,
     project_sessionmaker,
@@ -268,12 +271,12 @@ def assert_logged_in(request: Request):
         raise HTTPException(status_code=401, detail="Unauthorized.")
 
 
-def assert_is_admin(request: Request):
+def assert_is_admin(
+    request: Request, detail: str = "Only administrators can do this."
+) -> None:
     user_session = request.session.get("user_info")
     if not user_session.get("is_admin"):
-        raise HTTPException(
-            status_code=403, detail="Only administrators can create new projects."
-        )
+        raise HTTPException(status_code=403, detail=detail)
 
 
 async def assert_is_owner(session: db.AsyncSession, request: Request, project_id: UUID):
@@ -424,16 +427,17 @@ async def set_active_project(project_id: UUID, request: Request):
 @app.post("/projects/create")
 async def projects_create(request: Request, data: dict = Body(...)):
     assert_logged_in(request)
-    assert_is_admin(request)
+    assert_is_admin(request, "Only administrators can create new projects.")
     user_session = request.session.get("user_info")
     service = ProjectService(db.AsyncBackofficeSession)
-    return await service.create_project(data, UUID(user_session["id"]))
+    project = await service.create_project(data, UUID(user_session["id"]))
+    return public_project(project, db.ProjectRole.owner.value)
 
 
 @app.get("/projects/get/{project_id}")
 async def projects_get_by_id(project_id: UUID, request: Request):
     assert_logged_in(request)
-    return await get_project_and_assert_access(request, project_id)
+    return public_project(await get_project_and_assert_access(request, project_id))
 
 
 @app.get("/projects/all")
@@ -453,7 +457,25 @@ async def projects_update(project_id: UUID, request: Request, data: dict = Body(
     updated = await service.update_project(project_id, data)
     if not updated:
         raise HTTPException(status_code=404, detail="Project not found.")
-    return updated
+    return public_project(updated, db.ProjectRole.owner.value)
+
+
+@app.post("/projects/{project_id}/reveal-password")
+async def projects_reveal_password(project_id: UUID, request: Request):
+    """The project's database password, for an administrator who asks for it.
+
+    Project listings never carry it (:func:`public_project`). An administrator
+    can create projects and so may see their credentials; the request is a POST
+    so nothing caches or prefetches it, and each one is logged.
+    """
+    assert_logged_in(request)
+    assert_is_admin(
+        request, "Only administrators can see a project's database password."
+    )
+    project = await get_project_and_assert_access(request, project_id)
+    user_email = request.session.get("user_info", {}).get("email")
+    logger.info(f"Database password of project {project_id} revealed to {user_email}.")
+    return {"db_password": project.db_password}
 
 
 @app.delete("/projects/delete/{project_id}")
@@ -933,13 +955,29 @@ async def projects_train_pca(project_id: UUID, collection_name: str, request: Re
 async def projects_test_connection(
     project_id: str, request: Request, data: dict = Body(default={})
 ):
-    """Test connection to the project database."""
+    """Test the connection to a project's database.
+
+    For ``new`` the body describes the database, and only administrators —
+    who can create projects — may have the backoffice connect to an address
+    of their choosing. For an existing project an empty body tests the saved
+    settings, open to any member; a body tests those settings with the body's
+    changes applied, before they are saved, which only an owner — who can save
+    them — may do. The stored password is reused under the rules of
+    :func:`connection_fields`, so a changed host cannot be sent it.
+    """
     assert_logged_in(request)
 
     if project_id == "new":
+        assert_is_admin(
+            request, "Only administrators can test a new project's connection."
+        )
         project = db.Project(**project_fields(data))
     else:
         project = await get_project_and_assert_access(request, UUID(project_id))
+        if project_fields(data):
+            async with get_backoffice_session() as session:
+                await assert_is_owner(session, request, project.id)
+            project = merged_project(project, connection_fields(project, data))
 
     service = ProjectService(db.AsyncBackofficeSession)
     return await service.test_connection(project)

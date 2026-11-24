@@ -48,6 +48,7 @@ Added
   creates a user and ``set-password`` replaces a password; both prompt for it
   or read it from standard input.
 
+
 * **``py.typed`` (PEP 561).** mypy no longer reports ``kavalai`` as missing
   library stubs, and calls into the package are checked against its real
   signatures. The public functions that had no annotations have them;
@@ -85,6 +86,25 @@ Changed
   ``GET /auth/methods`` reports which methods are on. The ``/users``
   endpoints return ``has_password`` and accept ``password``.
 
+Fixed
+^^^^^
+
+* **A project's database password reached every member.** ``GET
+  /projects/all`` and ``GET /projects/get/{id}`` returned ``db_password`` in
+  plain text to viewers as well as owners, and with it a way to connect to the
+  agent database around their role and around the read-only setting, which the
+  backoffice applies to its own connections only. The project endpoints now
+  answer without it and report ``has_password``; the Projects page masks it in
+  the connection strings, and an administrator can ask for it with ``POST
+  /projects/{id}/reveal-password``, which is logged. Saving a project without a
+  password keeps the stored one, but only while the type, host, port, user and
+  database stay the same; a change to any of them asks for the password again,
+  so it cannot be sent to another server. ``POST /projects/test-connection``
+  now tests the settings as typed, before they are saved, for an owner; testing
+  a new project's settings is for administrators only.
+* A failed connection test showed ``Http failure response … 400 Bad Request``
+  instead of the database's error message.
+
 Upgrading
 ^^^^^^^^^
 
@@ -100,6 +120,9 @@ Upgrading
   A reply in the earlier form is still read, so scripted test replies that
   use ``literal_args`` keep passing; ``ToolCall``'s three string fields are
   now optional and default to ``None``, not ``"{}"``.
+* A script that read ``db_password`` from ``GET /projects/all`` or ``GET
+  /projects/get/{id}`` asks ``POST /projects/{id}/reveal-password`` as an
+  administrator instead.
 * Delete any type-checker override for ``kavalai`` (``ignore_missing_imports``
   or ``follow_untyped_imports``). Calls into the package are then checked, so
   a project may see errors that the override had hidden.

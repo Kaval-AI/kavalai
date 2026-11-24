@@ -87,8 +87,9 @@ async def test_get_user_projects_with_role(backoffice_db: AsyncSession):
 
     # Assert
     assert len(results) == 1
-    assert results[0]["name"] == "Role Project"
-    assert results[0]["role"] == "viewer"
+    found, role = results[0]
+    assert found.name == "Role Project"
+    assert role == ProjectRole.viewer
 
 
 @pytest.mark.asyncio
