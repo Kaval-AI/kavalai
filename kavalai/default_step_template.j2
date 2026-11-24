@@ -16,7 +16,10 @@ Step {{ step.index }}:
   goal: {{ step.instructions }}
 {% endif %}
 {% for call in step.tool_calls %}
-  - {{ call.name }}(call_id={{ call.call_id }}) args={{ call.args }}
+  - {{ call.name }}(call_id={{ call.call_id }}) args={{ dict(call.args.items() | rejectattr(0, "in", call.refs)) }}{% if call.refs %} refs={% for arg, ref in call.refs.items() %}{{ arg }}=<{{ ref.source }}:{{ ref.key }}>{{ "" if loop.last else ", " }}{% endfor %}{% endif %}{% if call.requested_call_id %}
+
+    note: the call_id `{{ call.requested_call_id }}` was already used, so this result is `{{ call.call_id }}`.{% endif %}
+
     output: {{ call.output }}
 {% endfor %}
 {% if step.output is not none %}

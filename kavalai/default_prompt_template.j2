@@ -21,12 +21,14 @@ To call a tool, add it to `tool_calls` with its `name` and its arguments:
 - `refs`: leave it empty when every argument is written out in `args`. Add an
   entry only for an argument whose value is taken from elsewhere: it names the
   argument (`arg`), where its value comes from (`source`) and the `key` to look
-  up. Source "step" with the `call_id` of a previous tool call reuses that
-  call's output; source "input" with the name of a context variable listed
-  above uses that variable.
-An argument appears in `args` or in `refs`, never in both. Set a `call_id` so
-you can reference the result in later steps. The output of each tool call is
-recorded in the steps listed in the last message.
+  up. Source "step" with the `call_id` of a tool call from an earlier step
+  reuses that call's output; source "input" with the name of a context
+  variable listed above uses that variable. The tool calls of one step run
+  together, so a call cannot reference another call of its own step, and a call
+  that ended in an error has no output to reference.
+An argument appears in `args` or in `refs`, never in both. Set a `call_id` no
+earlier call has used, so you can reference the result in later steps. The
+output of each tool call is recorded in the steps listed in the last message.
 
 When you have enough information to answer, set `output` to the final result and
 leave `tool_calls` empty.

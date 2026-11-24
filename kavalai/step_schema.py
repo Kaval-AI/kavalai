@@ -42,7 +42,8 @@ from typing import Any, Literal, Mapping, Optional, Union
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
 _CALL_ID_DESCRIPTION = (
-    "Generate an ID, which represents this result in downstream agent runs."
+    "Generate an ID no earlier call has used, which represents this result "
+    "in downstream agent runs."
 )
 _INSTRUCTIONS_DESCRIPTION = (
     "Briefly describe the goal of this step (what you intend to achieve with "
@@ -210,7 +211,7 @@ def typed_call_model(
             source=(
                 Literal["step", "input"],
                 Field(
-                    description="step: a previous tool call. input: a context variable."
+                    description="step: a tool call of an earlier step. input: a context variable."
                 ),
             ),
             key=(
@@ -223,7 +224,8 @@ def typed_call_model(
             Field(
                 default_factory=list,
                 description=(
-                    "Arguments taken from a previous tool call or a context variable."
+                    "Arguments taken from a tool call of an earlier step or a context "
+                    "variable."
                 ),
             ),
         )
