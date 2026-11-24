@@ -1,19 +1,105 @@
-.task-box:hover {
-  filter: brightness(1.2);
+/*
+Copyright 2026 OÜ KAVAL AI (registry code 17393877)
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+/* A lane per set of runs that did not overlap; a long lane scrolls inside the card, not the page. */
+.lanes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  overflow-x: auto;
+  padding-bottom: var(--space-1);
 }
 
-.task-box.bg-success {
-  background-color: var(--color-success);
+.lane {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
 }
 
-.task-box.bg-error {
-  background-color: var(--color-error);
+/* One run: its tasks in execution order, on a granite strip with a lime edge (raspberry when one failed). */
+.run {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px;
+  background: var(--color-base-100);
+  border: 1px solid var(--color-base-200);
+  border-left: 3px solid var(--color-primary);
 }
 
-.task-box.bg-neutral {
-  background-color: var(--color-neutral);
+.run.run-failed {
+  border-left-color: var(--color-raspberry);
 }
 
-.run-group {
-  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+.task {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+  background: var(--color-lime);
+  transition: transform var(--motion-fast) ease;
+}
+
+.task[data-status='error'] {
+  background: var(--color-raspberry);
+}
+
+.task:hover {
+  transform: scale(1.25);
+}
+
+.task:focus-visible {
+  outline: 2px solid var(--color-charcoal);
+  outline-offset: 2px;
+}
+
+.run-empty {
+  padding: 0 var(--space-1);
+  font-family: var(--font-family-accent);
+  font-size: var(--text-xs);
+  color: var(--color-slate-500);
+}
+
+.task-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.task-id {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.task-errors {
+  margin: 0;
+  padding-left: var(--space-4);
+}
+
+.task-section {
+  margin: var(--space-4) 0 0;
+  font-size: var(--text-base);
+}
+
+.task-json {
+  max-height: 40vh;
+  overflow: auto;
+  font-family: var(--font-family-accent);
+  font-size: var(--text-sm);
 }

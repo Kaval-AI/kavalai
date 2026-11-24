@@ -67,6 +67,14 @@ Added
 Changed
 ^^^^^^^
 
+* **The backoffice front end has a new look and a sidebar.** It takes the
+  design of the kavalapp console: a top bar with the user menu, a sidebar
+  with a project switcher above the pages of the active project, and one
+  component library for every page. A project's **Overview** and **Settings**
+  replace the project page and its two editors; conversations and model calls
+  are lists that open beside themselves, and a model call's prompt can be read
+  as messages. DaisyUI, Angular Material and the unused front-end packages
+  are gone.
 * **Typed tool arguments.** An agent step is requested with one call model
   per allowed tool: ``name`` is the tool's URI and ``args`` an object held to
   the tool's input schema, where a call used to carry its arguments as JSON

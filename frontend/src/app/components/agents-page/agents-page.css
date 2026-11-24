@@ -1,2 +1,95 @@
-/* Tailwind CSS and DaisyUI are used for most styling.
-   Only component-specific overrides go here if needed. */
+/*
+Copyright 2026 OÜ KAVAL AI (registry code 17393877)
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+/* The list beside the selected agent; stacked on a narrow screen. */
+.agents-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-6);
+  align-items: start;
+}
+
+@media (min-width: 1024px) {
+  .agents-layout {
+    grid-template-columns: minmax(240px, 1fr) minmax(0, 2.5fr);
+  }
+}
+
+.agent-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-width: 0;
+}
+
+/* The column's gap spaces its surfaces, in place of the stacked-card margin. */
+.agent-detail > * {
+  margin-top: 0;
+}
+
+.agent-name {
+  font-weight: 600;
+}
+
+.agent-description {
+  font-size: var(--text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: min(320px, 60vw);
+}
+
+.agent-updated {
+  font-family: var(--font-family-accent);
+  font-size: var(--text-xs);
+  color: var(--color-slate-500);
+}
+
+/* Six figures as two even rows of three, rather than five and a straggler. */
+.agent-totals {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (min-width: 480px) {
+  .agent-totals {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.agent-charts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-6);
+}
+
+@media (min-width: 768px) {
+  .agent-charts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Chart.js sizes its canvas to this box (maintainAspectRatio is off). */
+.line-chart {
+  position: relative;
+  height: 220px;
+}
+
+.document-body {
+  max-height: 60vh;
+  overflow: auto;
+  font-family: var(--font-family-accent);
+  font-size: var(--text-sm);
+}

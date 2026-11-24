@@ -142,6 +142,57 @@ describe('UserService', () => {
     expect(consoleSpy).toHaveBeenCalled();
   });
 
+  it('lists, creates, updates and deletes users', () => {
+    const fields = { email: 'a@example.com', name: 'A', picture: null, is_admin: false, password: 'correct horse' };
+    service.getUsers().subscribe();
+    let req = httpMock.expectOne('/api/users/all');
+    expect(req.request.method).toBe('GET');
+    req.flush([]);
+
+    service.createUser(fields).subscribe();
+    req = httpMock.expectOne('/api/users/create');
+    expect(req.request.method).toBe('POST');
+    expect(req.request.body).toEqual(fields);
+    req.flush({});
+
+    service.updateUser('u2', { name: 'B' }).subscribe();
+    req = httpMock.expectOne('/api/users/update/u2');
+    expect(req.request.method).toBe('PUT');
+    expect(req.request.body).toEqual({ name: 'B' });
+    req.flush({});
+
+    service.deleteUser('u2').subscribe();
+    req = httpMock.expectOne('/api/users/delete/u2');
+    expect(req.request.method).toBe('DELETE');
+    req.flush({});
+  });
+
+  it('reads and saves the signed-in user\'s own profile', () => {
+    service.getMe().subscribe();
+    let req = httpMock.expectOne('/api/user/me');
+    expect(req.request.method).toBe('GET');
+    req.flush({});
+
+    service.updateProfile({ name: 'Ada', picture: null }).subscribe();
+    req = httpMock.expectOne('/api/user/me');
+    expect(req.request.method).toBe('PATCH');
+    expect(req.request.body).toEqual({ name: 'Ada', picture: null });
+    req.flush({});
+  });
+
+  it('changes a password with the current one, and sets a first one without', () => {
+    service.changePassword('battery staple', 'correct horse').subscribe();
+    let req = httpMock.expectOne('/api/user/me/password');
+    expect(req.request.method).toBe('POST');
+    expect(req.request.body).toEqual({ new_password: 'battery staple', current_password: 'correct horse' });
+    req.flush({});
+
+    service.changePassword('battery staple').subscribe();
+    req = httpMock.expectOne('/api/user/me/password');
+    expect(req.request.body).toEqual({ new_password: 'battery staple' });
+    req.flush({});
+  });
+
   it('should return false for isAdmin when user is null', () => {
     expect(service.getIsAdmin()).toBeFalse();
   });

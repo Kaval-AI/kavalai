@@ -1,49 +1,46 @@
-<div class="json-node" [style.padding-left.px]="depth > 0 ? 20 : 0">
-  <div class="json-line" (click)="toggleExpand($event)" [class.expandable]="isExpandable">
+<div class="json-node" [class.json-nested]="depth > 0">
+  @if (depth === 0 && isExpandable) {
+    <div class="json-controls" data-testid="json-controls">
+      <ui-copy-button [text]="jsonText" label="JSON" />
+      <button type="button" uiButton="ghost" size="sm" data-testid="json-expand-all" (click)="expandAll($event)">
+        <i class="fa-solid fa-angles-down" aria-hidden="true"></i> Expand all
+      </button>
+      <button type="button" uiButton="ghost" size="sm" data-testid="json-collapse-all" (click)="collapseAll($event)">
+        <i class="fa-solid fa-angles-up" aria-hidden="true"></i> Collapse all
+      </button>
+    </div>
+  }
+
+  <div
+    class="json-line"
+    [class.expandable]="isExpandable"
+    (click)="toggleExpand($event)"
+    (keydown.enter)="toggleExpand($event)"
+    (keydown.space)="toggleExpand($event)"
+    [attr.tabindex]="isExpandable ? 0 : null"
+    [attr.role]="isExpandable ? 'button' : null"
+    [attr.aria-expanded]="isExpandable ? !!isExpanded : null"
+  >
     @if (isExpandable) {
-      <span class="toggle-icon">
-        {{ isExpanded ? '▼' : '▶' }}
-      </span>
+      <i
+        class="fa-solid json-toggle"
+        [class.fa-chevron-down]="isExpanded"
+        [class.fa-chevron-right]="!isExpanded"
+        aria-hidden="true"
+      ></i>
     } @else {
-      <span class="spacer"></span>
+      <span class="json-spacer"></span>
     }
-
     @if (key !== null) {
-      <span class="json-key">{{ key }}: </span>
+      <span class="json-key">{{ key }}:</span>
     }
-
-    <span class="json-value" [ngClass]="'type-' + type">
-      {{ formattedValue }}
-    </span>
-
-    @if (depth === 0 && isExpandable) {
-      <div class="tree-controls">
-        <button (click)="copyToClipboard($event)" [title]="isCopied ? 'Copied!' : 'Copy to Clipboard'" class="control-btn" [class.success]="isCopied">
-          @if (isCopied) {
-            <i class="fas fa-check"></i> Copied
-          } @else {
-            <i class="fas fa-copy"></i> Copy
-          }
-        </button>
-        <button (click)="expandAll($event)" title="Expand All" class="control-btn btn-secondary">
-          <i class="fas fa-expand-arrows-alt"></i> Expand All
-        </button>
-        <button (click)="collapseAll($event)" title="Collapse All" class="control-btn btn-secondary">
-          <i class="fas fa-compress-arrows-alt"></i> Collapse All
-        </button>
-      </div>
-    }
+    <span class="json-value" [class]="'type-' + type">{{ formattedValue }}</span>
   </div>
 
   @if (isExpanded && isObject) {
     <div class="json-children">
       @for (child of children; track child.key) {
-        <app-json-tree
-          [data]="child.value"
-          [key]="child.key"
-          [depth]="depth + 1"
-          [isExpanded]="false"
-        ></app-json-tree>
+        <app-json-tree [data]="child.value" [key]="child.key" [depth]="depth + 1" [isExpanded]="false" />
       }
     </div>
   }

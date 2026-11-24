@@ -13,13 +13,17 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-import { of, throwError } from 'rxjs';
+import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { HttpErrorResponse } from '@angular/common/http';
+import { NEVER, of, throwError } from 'rxjs';
 import { WorkflowGraphComponent } from './workflow-graph';
+import { AgentService } from '../../services/agent-service';
+import { settle } from '../../../testing';
 
 describe('WorkflowGraphComponent', () => {
-  let component: WorkflowGraphComponent;
-  let agentService: { renderWorkflowSvg: jasmine.Spy };
-  let sanitizer: { bypassSecurityTrustHtml: jasmine.Spy };
+  let fixture: ComponentFixture<WorkflowGraphComponent>;
+  let el: HTMLElement;
+  let agentService: jasmine.SpyObj<AgentService>;
 
   const workflow = {
     nodes: [
@@ -29,47 +33,66 @@ describe('WorkflowGraphComponent', () => {
     ],
   };
 
-  beforeEach(() => {
-    agentService = { renderWorkflowSvg: jasmine.createSpy('renderWorkflowSvg') };
-    sanitizer = {
-      bypassSecurityTrustHtml: jasmine
-        .createSpy('bypassSecurityTrustHtml')
-        .and.callFake((value: string) => value),
-    };
-    component = new WorkflowGraphComponent(
-      agentService as any,
-      sanitizer as any,
-    );
+  function query(testId: string): HTMLElement | null {
+    return el.querySelector<HTMLElement>(`[data-testid="${testId}"]`);
+  }
+
+  async function render(value: unknown): Promise<void> {
+    fixture = TestBed.createComponent(WorkflowGraphComponent);
+    el = fixture.nativeElement;
+    fixture.componentRef.setInput('workflow', value);
+    fixture.detectChanges();
+    await settle(fixture);
+  }
+
+  beforeEach(async () => {
+    agentService = jasmine.createSpyObj('AgentService', ['renderWorkflowSvg']);
+    await TestBed.configureTestingModule({
+      imports: [WorkflowGraphComponent],
+      providers: [{ provide: AgentService, useValue: agentService }],
+    }).compileComponents();
   });
 
-  it('creates', () => {
-    expect(component).toBeTruthy();
-  });
-
-  it('renders the backend-generated SVG for a workflow', () => {
-    agentService.renderWorkflowSvg.and.returnValue(of('<svg>graph</svg>'));
-    component.workflow = workflow;
-    component.ngOnChanges();
+  it('draws the SVG the backend renders for the workflow', async () => {
+    agentService.renderWorkflowSvg.and.returnValue(of('<svg><text>reply</text></svg>'));
+    await render(workflow);
     expect(agentService.renderWorkflowSvg).toHaveBeenCalledWith(workflow);
-    expect(sanitizer.bypassSecurityTrustHtml).toHaveBeenCalledWith('<svg>graph</svg>');
-    expect(component.svg).toBe('<svg>graph</svg>');
-    expect(component.error).toBeNull();
+    expect(query('graph')!.querySelector('svg text')!.textContent).toBe('reply');
   });
 
-  it('shows an error when the backend render fails', () => {
+  it('shows a spinner while the backend draws', async () => {
+    agentService.renderWorkflowSvg.and.returnValue(NEVER);
+    await render(workflow);
+    expect(el.querySelector('ui-loading')).not.toBeNull();
+    expect(query('graph')).toBeNull();
+  });
+
+  it("shows the server's error with Retry, which draws again", async () => {
     agentService.renderWorkflowSvg.and.returnValue(
-      throwError(() => new Error('boom')),
+      throwError(() => new HttpErrorResponse({ status: 422, error: { detail: 'Unknown node type' } }))
     );
-    component.workflow = workflow;
-    component.ngOnChanges();
-    expect(component.error).toContain('Could not render');
-    expect(component.svg).toBeNull();
+    await render(workflow);
+    expect(query('graph-error')!.textContent).toContain('Unknown node type');
+
+    agentService.renderWorkflowSvg.and.returnValue(of('<svg></svg>'));
+    query('graph-retry')!.click();
+    await settle(fixture);
+    expect(query('graph-error')).toBeNull();
+    expect(query('graph')!.querySelector('svg')).not.toBeNull();
   });
 
-  it('does nothing without a workflow', () => {
-    component.workflow = null;
-    component.ngOnChanges();
+  it('says when there is no workflow, without calling the backend', async () => {
+    await render(null);
+    expect(query('graph-none')!.textContent).toContain('no workflow recorded');
     expect(agentService.renderWorkflowSvg).not.toHaveBeenCalled();
-    expect(component.svg).toBeNull();
+  });
+
+  it('draws again when the workflow changes', async () => {
+    agentService.renderWorkflowSvg.and.returnValue(of('<svg></svg>'));
+    await render(workflow);
+    fixture.componentRef.setInput('workflow', { nodes: [] });
+    fixture.detectChanges();
+    await settle(fixture);
+    expect(agentService.renderWorkflowSvg).toHaveBeenCalledTimes(2);
   });
 });

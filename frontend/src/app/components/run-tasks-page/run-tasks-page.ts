@@ -13,20 +13,63 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-import { Component, OnInit, inject } from '@angular/core';
-import { ActivatedRoute, Router, RouterModule } from '@angular/router';
+import { Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
+import { DatePipe, DecimalPipe } from '@angular/common';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { Subscription } from 'rxjs';
 import { AgentService } from '../../services/agent-service';
 import { UserService } from '../../services/user-service';
 import { Task } from '../../models/task';
+import { Run } from '../../models/run';
 import { LLMCallStat } from '../../models/llm-call-stat';
+import { errorMessage } from '../../core/http-error';
+import {
+  UiAlert,
+  UiBadge,
+  UiButton,
+  UiCard,
+  UiCopyButton,
+  UiEmptyState,
+  UiLoading,
+  UiPageHeader,
+  UiStat,
+  UiStats,
+  UiStatusBadge,
+  UiTable,
+} from '../../ui';
 import { TasksList } from '../tasks-list/tasks-list';
 import { TaskTimelineChart } from '../task-timeline-chart/task-timeline-chart';
-import { NavigationService } from '../../services/navigation-service';
+import { formatDuration, shortId } from '../../core/format';
 
+/**
+ * One run of a conversation: its figures, its steps on a timeline and as a
+ * list, and the model calls it made. The steps come from the conversation's
+ * details, narrowed to this run; the calls from the model call list, filtered
+ * by the run.
+ */
 @Component({
   selector: 'app-run-tasks-page',
   standalone: true,
-  imports: [RouterModule, TasksList, TaskTimelineChart],
+  imports: [
+    DatePipe,
+    DecimalPipe,
+    RouterLink,
+    TasksList,
+    TaskTimelineChart,
+    UiAlert,
+    UiBadge,
+    UiButton,
+    UiCard,
+    UiCopyButton,
+    UiEmptyState,
+    UiLoading,
+    UiPageHeader,
+    UiStat,
+    UiStats,
+    UiStatusBadge,
+    UiTable,
+  ],
   templateUrl: './run-tasks-page.html',
   styleUrl: './run-tasks-page.css',
 })
@@ -35,100 +78,117 @@ export class RunTasksPage implements OnInit {
   private router = inject(Router);
   private agentService = inject(AgentService);
   private userService = inject(UserService);
-  private navigationService = inject(NavigationService);
+  private destroyRef = inject(DestroyRef);
 
-  sessionId: string | null = null;
-  runId: string | null = null;
-  projectId: string | null = null;
-  tasks: Task[] = [];
-  /** The run's model calls, oldest first; at most `modelCallsLimit` of them. */
-  modelCalls: LLMCallStat[] = [];
+  /** The run's model calls are listed up to this many, oldest first. */
   readonly modelCallsLimit = 100;
-  loading: boolean = false;
-  error: string | null = null;
+
+  readonly sessionId = signal<string | null>(null);
+  readonly runId = signal<string | null>(null);
+  readonly projectId = signal<string | null>(null);
+
+  readonly run = signal<Run | null>(null);
+  readonly tasks = signal<Task[]>([]);
+  readonly loading = signal(false);
+  readonly error = signal<string | null>(null);
+
+  readonly modelCalls = signal<LLMCallStat[]>([]);
+  readonly modelCallsLoading = signal(false);
+  readonly modelCallsError = signal<string | null>(null);
+
+  readonly formatDuration = formatDuration;
+  readonly shortId = shortId;
+
+  readonly backLink = computed(() => ['/conversations', this.sessionId() ?? '']);
+  readonly failedTasks = computed(() => this.tasks().filter((t) => !!t.errors?.length).length);
+  readonly promptTokens = computed(() => this.sum((c) => c.prompt_tokens));
+  readonly completionTokens = computed(() => this.sum((c) => c.completion_tokens));
+  readonly totalTokens = computed(() => this.sum((c) => c.total_tokens));
+
+  private detailsSubscription: Subscription | null = null;
+  private callsSubscription: Subscription | null = null;
 
   ngOnInit(): void {
-    this.route.paramMap.subscribe((params) => {
-      this.sessionId = params.get('sessionId');
-      this.runId = params.get('runId');
-      this.navigationService.setBreadcrumbs([
-        { label: 'Conversations', link: '/conversations' },
-        { label: this.sessionId || 'Session', link: `/conversations/${this.sessionId}` },
-        { label: 'Tasks' }
-      ]);
-      if (this.sessionId && this.runId) {
-        this.tryLoad();
+    this.route.paramMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
+      this.sessionId.set(params.get('sessionId'));
+      this.runId.set(params.get('runId'));
+      this.load();
+    });
+    this.userService.userDetails.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((user) => {
+      const projectId =
+        user?.active_project_id && user.active_project_id !== 'None' ? user.active_project_id : null;
+      if (projectId !== this.projectId()) {
+        this.projectId.set(projectId);
+        this.load();
       }
     });
-
-    this.userService.userDetails.subscribe((user) => {
-      if (user && user.active_project_id) {
-        const newProjectId = user.active_project_id !== 'None' ? user.active_project_id : null;
-        if (newProjectId !== this.projectId) {
-          this.projectId = newProjectId;
-          this.tryLoad();
-        }
-      }
+    this.destroyRef.onDestroy(() => {
+      this.detailsSubscription?.unsubscribe();
+      this.callsSubscription?.unsubscribe();
     });
   }
 
-  private tryLoad(): void {
-    if (!this.projectId || !this.sessionId || !this.runId) return;
+  load(): void {
     this.loadTasks();
     this.loadModelCalls();
   }
 
-  private loadModelCalls(): void {
-    if (!this.projectId || !this.runId) return;
-    this.agentService
-      .getLLMCallStats(this.projectId, undefined, this.modelCallsLimit, 0, { runId: this.runId })
-      .subscribe({
-        next: (calls) => {
-          this.modelCalls = [...calls].reverse();
-        },
-        // The tasks are the page's subject; without the calls only their section is missing.
-        error: (err) => {
-          this.modelCalls = [];
-          console.error(err);
-        }
-      });
-  }
-
-  get modelCallTokens(): number {
-    return this.modelCalls.reduce((sum, call) => sum + (call.total_tokens || 0), 0);
-  }
-
-  formatDuration(seconds: number | null): string {
-    return seconds === null ? '-' : `${(seconds * 1000).toFixed(0)} ms`;
-  }
-
-  formatTime(dateStr: string): string {
-    return new Date(dateStr).toLocaleTimeString();
-  }
-
-  private loadTasks(): void {
-    if (!this.projectId || !this.sessionId || !this.runId) return;
-    this.loading = true;
-    this.error = null;
-
-    this.agentService.getSessionDetails(this.projectId, this.sessionId).subscribe({
+  loadTasks(): void {
+    const projectId = this.projectId();
+    const sessionId = this.sessionId();
+    const runId = this.runId();
+    if (!projectId || !sessionId || !runId) return;
+    this.detailsSubscription?.unsubscribe();
+    this.loading.set(true);
+    this.error.set(null);
+    this.detailsSubscription = this.agentService.getSessionDetails(projectId, sessionId).subscribe({
       next: (details) => {
-        this.tasks = details.tasks.filter(t => t.run_id === this.runId);
-        this.loading = false;
+        this.run.set(details.runs.find((r) => r.id === runId) ?? null);
+        this.tasks.set(details.tasks.filter((t) => t.run_id === runId));
+        this.loading.set(false);
       },
       error: (err) => {
-        this.error = 'Failed to load tasks';
-        console.error(err);
-        this.loading = false;
-      }
+        this.error.set(errorMessage(err, 'Could not load the run.'));
+        this.loading.set(false);
+      },
     });
   }
 
-  goBack(): void {
-    if (this.sessionId) {
-      this.router.navigate(['/conversations', this.sessionId]);
-    } else {
-      this.router.navigate(['/conversations']);
-    }
+  loadModelCalls(): void {
+    const projectId = this.projectId();
+    const runId = this.runId();
+    if (!projectId || !runId) return;
+    this.callsSubscription?.unsubscribe();
+    this.modelCallsLoading.set(true);
+    this.modelCallsError.set(null);
+    this.callsSubscription = this.agentService
+      .getLLMCallStats(projectId, undefined, this.modelCallsLimit, 0, { runId })
+      .subscribe({
+        next: (calls) => {
+          this.modelCalls.set([...calls].reverse());
+          this.modelCallsLoading.set(false);
+        },
+        error: (err) => {
+          this.modelCalls.set([]);
+          this.modelCallsError.set(errorMessage(err, 'Could not load the model calls.'));
+          this.modelCallsLoading.set(false);
+        },
+      });
+  }
+
+  /** Opens a call on the Model calls page, narrowed to this run. */
+  openCall(call: LLMCallStat): void {
+    this.router.navigate(['/llm-call-stats'], {
+      queryParams: { run_id: this.runId(), call: call.id },
+    });
+  }
+
+  callStatus(call: LLMCallStat): string {
+    if (call.response_code === null || call.response_code === undefined) return 'unknown';
+    return call.response_code >= 200 && call.response_code < 300 ? 'ok' : 'error';
+  }
+
+  private sum(pick: (call: LLMCallStat) => number | null): number {
+    return this.modelCalls().reduce((total, call) => total + (pick(call) ?? 0), 0);
   }
 }

@@ -1,81 +1,117 @@
-<div class="tasks-list-container">
-  @if (tasks.length === 0) {
-    <div class="empty-state">No tasks recorded for this run.</div>
-  } @else {
-    <div class="tasks-scroll-area">
-      @for (task of tasks; track task.id) {
-        <!-- Rows arrive ordered by `seq`, which is the run's actual execution
-             order, so this list is the path the run took. Tool calls an agent
-             chose for itself are indented under the node that made them. -->
-        <div class="task-item"
-             [class.has-errors]="task.errors && task.errors.length > 0"
-             [class.tool-call]="isToolCall(task)">
-          <div class="task-item-header">
-            @if (task.seq !== null && task.seq !== undefined) {
-              <span class="task-seq">{{ task.seq }}</span>
-            }
-            @if (isToolCall(task)) {
-              <i class="fas fa-level-up-alt fa-rotate-90 opacity-40 text-xs"></i>
-            }
-            <span class="task-name">{{ task.name || 'Unnamed Task' }}</span>
-            @if (task.node_type) {
-              <span class="badge badge-sm badge-outline">{{ task.node_type }}</span>
-            }
-            @if (task.tool_uri) {
-              <span class="badge badge-sm badge-ghost font-mono" [title]="task.tool_uri">
-                {{ toolName(task) }}
+@if (tasks().length === 0) {
+  <ui-empty-state icon="fa-list-check" title="No steps recorded" data-testid="tasks-empty">
+    The run recorded no steps. A task logger with <code>record_nodes=False</code> records none.
+  </ui-empty-state>
+} @else {
+  <div class="tasks-actions">
+    <button type="button" uiButton="ghost" size="sm" data-testid="tasks-open-all" (click)="openAll()">
+      <i class="fa-solid fa-angles-down" aria-hidden="true"></i> Open all
+    </button>
+    <button type="button" uiButton="ghost" size="sm" data-testid="tasks-close-all" (click)="closeAll()">
+      <i class="fa-solid fa-angles-up" aria-hidden="true"></i> Close all
+    </button>
+  </div>
+  <ui-table clickable dense>
+    <table data-testid="tasks-table" [attr.data-run]="runId() || null">
+      <thead>
+        <tr>
+          <th class="task-seq">#</th>
+          <th>Step</th>
+          <th class="col-wide">Type</th>
+          <th class="col-wide">Tool</th>
+          <th>Status</th>
+          <th class="text-right">Duration</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (task of tasks(); track task.id) {
+          <!-- Rows arrive ordered by seq, the run's execution order. -->
+          <tr
+            data-testid="task-row"
+            tabindex="0"
+            [class.selected]="isOpen(task)"
+            [class.task-failed]="failed(task)"
+            [attr.aria-expanded]="isOpen(task)"
+            (click)="toggle(task)"
+            (keydown.enter)="toggle(task)"
+          >
+            <td class="task-seq mono">{{ task.seq ?? '' }}</td>
+            <td>
+              <span class="task-name" [class.task-nested]="isToolCall(task)">
+                <i
+                  class="fa-solid fa-chevron-right task-chevron"
+                  [class.task-chevron-open]="isOpen(task)"
+                  aria-hidden="true"
+                ></i>
+                @if (isToolCall(task)) {
+                  <i class="fa-solid fa-turn-up fa-rotate-90 task-nest-mark" aria-hidden="true" [title]="'Called by ' + task.parent_task_name"></i>
+                }
+                <span>{{ task.name || 'Unnamed step' }}</span>
               </span>
-            }
-            <span class="task-time">{{ formatDate(task.created_at) }}</span>
-            @if (task.duration_seconds) {
-              <span class="task-duration">({{ task.duration_seconds.toFixed(2) }}s)</span>
-            }
-          </div>
-
-          @if (isBranch(task)) {
-            <div class="branch-summary" [class.unmatched]="fellThroughToDefault(task)">
-              <code>{{ branchSummary(task) }}</code>
-              @if (fellThroughToDefault(task)) {
-                <span class="badge badge-sm badge-warning ml-2"
-                      title="No case matched, so the default arm was taken. An unmatched label is almost always an upstream classifier bug.">
-                  no case matched
-                </span>
-              }
-            </div>
-          }
-
-          <div class="task-item-body">
-            @if (task.prompt) {
-              <div class="task-section">
-                <label>Prompt:</label>
-                <div class="prompt-content">{{ task.prompt }}</div>
-              </div>
-            }
-
-            <div class="task-section">
-              <label>Inputs:</label>
-              <app-json-tree [data]="task.inputs"></app-json-tree>
-            </div>
-            <div class="task-section">
-              <label>Output:</label>
-              <app-json-tree [data]="task.output"></app-json-tree>
-            </div>
-
-            <div class="task-section errors">
-              <label>Errors:</label>
-              @if (task.errors && task.errors.length > 0) {
-                <ul class="error-list">
-                  @for (error of task.errors; track $index) {
-                    <li>{{ error }}</li>
+              @if (isBranch(task)) {
+                <div class="branch-summary" data-testid="branch-summary">
+                  <code>{{ branchSummary(task) }}</code>
+                  @if (fellThroughToDefault(task)) {
+                    <ui-badge
+                      tone="warning"
+                      data-testid="no-case-matched"
+                      title="No case matched, so the default arm was taken. An unmatched label is almost always an upstream classifier bug."
+                      >no case matched</ui-badge
+                    >
                   }
-                </ul>
-              } @else {
-                <div class="no-errors">No errors</div>
+                </div>
               }
-            </div>
-          </div>
-        </div>
-      }
-    </div>
-  }
-</div>
+            </td>
+            <td class="col-wide">
+              @if (task.node_type) {
+                <ui-badge tone="muted">{{ task.node_type }}</ui-badge>
+              }
+            </td>
+            <td class="mono task-tool col-wide">
+              @if (task.tool_uri) {
+                <span [title]="task.tool_uri">{{ toolName(task) }}</span>
+              }
+            </td>
+            <td><ui-status-badge [status]="failed(task) ? 'error' : 'ok'" /></td>
+            <td class="text-right mono whitespace-nowrap">{{ formatDuration(task.duration_seconds) }}</td>
+          </tr>
+          @if (isOpen(task)) {
+            <tr class="task-detail" data-testid="task-detail">
+              <td colspan="6">
+                @if (failed(task)) {
+                  <div class="task-errors">
+                    @for (error of task.errors; track $index) {
+                      <ui-alert data-testid="task-error">{{ error }}</ui-alert>
+                    }
+                  </div>
+                }
+                @if (task.node_type) {
+                  <p class="task-uri"><span class="task-label">Type</span> <code>{{ task.node_type }}</code></p>
+                }
+                @if (task.tool_uri) {
+                  <p class="task-uri"><span class="task-label">Tool</span> <code>{{ task.tool_uri }}</code></p>
+                }
+                @if (task.prompt) {
+                  <div class="task-section">
+                    <span class="task-label">Prompt</span>
+                    <pre class="snippet task-prompt" data-testid="task-prompt">{{ task.prompt }}</pre>
+                  </div>
+                }
+                <div class="task-io">
+                  <div class="task-section">
+                    <span class="task-label">Inputs</span>
+                    <app-json-tree [data]="task.inputs" />
+                  </div>
+                  <div class="task-section">
+                    <span class="task-label">Output</span>
+                    <app-json-tree [data]="task.output" />
+                  </div>
+                </div>
+              </td>
+            </tr>
+          }
+        }
+      </tbody>
+    </table>
+  </ui-table>
+}

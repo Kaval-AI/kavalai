@@ -1,9 +1,6 @@
-<div class="app-container">
-  @if (isLoggedIn) {
-    <app-header></app-header>
-    <div class="page-container"><router-outlet></router-outlet></div>
-  } @else {
-  <app-login-page></app-login-page>
-  }
-  <app-toast></app-toast>
-</div>
+@if (isLoggedIn) {
+  <app-shell />
+} @else {
+  <app-login-page />
+}
+<app-toast />

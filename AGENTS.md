@@ -156,6 +156,10 @@ Frontend:
 cd frontend && npm test -- --watch=false
 ```
 
+Page specs render the template and query by `data-testid`; fixtures come
+from `frontend/src/testing.ts`. `frontend/src/app/ui/README.md` holds the
+testing rules.
+
 ## Conventions
 
 - `loguru` for logging, f-strings for formatting.
@@ -175,7 +179,8 @@ cd frontend && npm test -- --watch=false
   checker, so check a changed signature with `mypy --strict` on a scratch
   script written against the public API.
 - Angular: modern control flow (`@if`, `@for`), never `*ngIf` / `*ngFor`.
-  Prefer `common.css`, Tailwind and DaisyUI.
+  Build pages from `frontend/src/app/ui` and follow its `README.md`
+  (tokens in `src/styles.css`, Tailwind for layout only, no DaisyUI).
 - Refactor blocks with distinct responsibilities into named functions.
 - Comments: no `#:` attribute comments and no dash-rule section dividers.
   Explain a field in the class docstring and a constant in the module or

@@ -1,1 +1,50 @@
-/* Empty */
+.database {
+  font-size: var(--text-sm);
+  color: var(--color-slate-600);
+  word-break: break-all;
+}
+
+.charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+  gap: var(--space-5);
+  margin: var(--space-5) 0;
+}
+
+/* Chart.js sizes the canvas to its parent, which therefore needs a height. */
+.line-chart {
+  position: relative;
+  height: 220px;
+}
+
+.strings {
+  display: grid;
+  gap: var(--space-4);
+  margin: var(--space-4) 0 0;
+}
+
+.string dt {
+  margin-bottom: var(--space-1);
+  font-family: var(--font-family-accent);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--color-slate-600);
+}
+
+.string dd {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.string code {
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  background-color: var(--color-base-200);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  word-break: break-all;
+}

@@ -13,174 +13,221 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-import { Component, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute, Router } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import { AgentService } from '../../services/agent-service';
 import { UserService } from '../../services/user-service';
 import { SessionSummary } from '../../models/session';
 import { Agent } from '../../models/agent';
-import { NavigationService } from '../../services/navigation-service';
+import { errorMessage } from '../../core/http-error';
+import {
+  UiAlert,
+  UiBadge,
+  UiButton,
+  UiCard,
+  UiChip,
+  UiCopyButton,
+  UiEmptyState,
+  UiField,
+  UiInfo,
+  UiLoading,
+  UiPageHeader,
+  UiSpinner,
+  UiStat,
+  UiStats,
+  UiTable,
+  UiToolbar,
+} from '../../ui';
 
+/** Sessions fetched per request; "Load more" asks for the next page. */
+const PAGE_SIZE = 20;
+
+/** A `datetime-local` value (local time, minutes) for `date`. */
+function toLocalInput(date: Date): string {
+  const offset = date.getTimezoneOffset() * 60000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+}
+
+/** The default window: from the start of the day a week ago to the end of today. */
+function defaultWindow(): { start: string; end: string } {
+  const start = new Date();
+  start.setDate(start.getDate() - 7);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date();
+  end.setHours(23, 59, 59, 999);
+  return { start: toLocalInput(start), end: toLocalInput(end) };
+}
+
+/**
+ * The conversations of the active project, latest activity first. The filters
+ * narrow the list on the server; a selected row opens its summary beside the
+ * table, and "Open conversation" leads to the transcript.
+ *
+ * The list endpoint has no total for the current page window, so paging is
+ * "Load more": a page shorter than `PAGE_SIZE` is the last one.
+ */
 @Component({
   selector: 'app-conversations-page',
-  standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [
+    DatePipe,
+    DecimalPipe,
+    FormsModule,
+    RouterLink,
+    UiAlert,
+    UiBadge,
+    UiButton,
+    UiCard,
+    UiChip,
+    UiCopyButton,
+    UiEmptyState,
+    UiField,
+    UiInfo,
+    UiLoading,
+    UiPageHeader,
+    UiSpinner,
+    UiStat,
+    UiStats,
+    UiTable,
+    UiToolbar,
+  ],
   templateUrl: './conversations-page.html',
   styleUrl: './conversations-page.css',
 })
 export class ConversationsPage implements OnInit {
-  private agentService = inject(AgentService);
-  private userService = inject(UserService);
-  private navigationService = inject(NavigationService);
-  private route = inject(ActivatedRoute);
-  private router = inject(Router);
+  private readonly agentService = inject(AgentService);
+  private readonly userService = inject(UserService);
+  private readonly route = inject(ActivatedRoute);
+  private readonly destroyRef = inject(DestroyRef);
 
-  sessions: SessionSummary[] = [];
-  agents: Agent[] = [];
-  loading: boolean = false;
-  error: string | null = null;
-  activeProjectId: string | null = null;
-  totalSessions: number = 0;
+  readonly projectId = signal<string | null>(null);
+  readonly agents = signal<Agent[]>([]);
+  readonly agentsError = signal('');
+  readonly sessions = signal<SessionSummary[]>([]);
+  readonly total = signal(0);
+  readonly loading = signal(false);
+  readonly error = signal('');
+  readonly hasMore = signal(false);
+  readonly selected = signal<SessionSummary | null>(null);
 
-  // Pagination & Filtering
-  selectedAgentId: string = '';
-  searchText: string = '';
-  /** Prefix match on the session's external id — the eval click-through. */
-  externalId: string = '';
-  startDate: string = '';
-  endDate: string = '';
-  limit: number = 20;
-  offset: number = 0;
-  hasMore: boolean = true;
+  /** The agent the list is narrowed to, shown as a chip in the header. */
+  readonly agent = computed(() => {
+    const id = this.agentFilter();
+    return id ? (this.agents().find((a) => a.id === id) ?? null) : null;
+  });
+
+  agentId = '';
+  search = '';
+  /** Prefix match on the session's external id — the click-through from an eval result. */
+  externalId = '';
+  startDate = '';
+  endDate = '';
+  private readonly agentFilter = signal('');
+  private offset = 0;
 
   constructor() {
-    // Default to last 7 days
-    const now = new Date();
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(now.getDate() - 7);
-
-    // Set to start of day for 7 days ago, end of day for today
-    sevenDaysAgo.setHours(0, 0, 0, 0);
-    now.setHours(23, 59, 59, 999);
-
-    this.startDate = this.toLocalISOString(sevenDaysAgo);
-    this.endDate = this.toLocalISOString(now);
-  }
-
-  private toLocalISOString(date: Date): string {
-    const tzoffset = date.getTimezoneOffset() * 60000;
-    return new Date(date.getTime() - tzoffset).toISOString().slice(0, 16);
+    const window = defaultWindow();
+    this.startDate = window.start;
+    this.endDate = window.end;
   }
 
   ngOnInit(): void {
-    this.navigationService.setBreadcrumbs([{ label: 'Conversations' }]);
-    this.route.queryParams.subscribe(params => {
-      if (params['agentId']) {
-        this.selectedAgentId = params['agentId'];
-      }
-      // Lets a result file's external id be linked to directly.
-      if (params['externalId']) {
-        this.externalId = params['externalId'];
-      }
+    this.route.queryParams.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
+      if (params['agentId']) this.agentId = params['agentId'];
+      if (params['externalId']) this.externalId = params['externalId'];
+      this.agentFilter.set(this.agentId);
     });
 
-    this.userService.userDetails.subscribe(user => {
-      if (user && user.active_project_id) {
-        const newProjectId = user.active_project_id !== 'None' ? user.active_project_id : null;
-        if (newProjectId !== this.activeProjectId) {
-          this.activeProjectId = newProjectId;
-          this.loadAgents();
-          this.loadSessions();
-        }
+    this.userService.userDetails.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((user) => {
+      const id = user?.active_project_id && user.active_project_id !== 'None' ? user.active_project_id : null;
+      if (id === this.projectId()) return;
+      this.projectId.set(id);
+      if (id) {
+        this.loadAgents();
+        this.load();
       }
     });
   }
 
   loadAgents(): void {
-    if (!this.activeProjectId) return;
-    this.agentService.getAgentsByProject(this.activeProjectId).subscribe({
-      next: (agents) => {
-        this.agents = agents;
-      },
-      error: (err) => console.error('Failed to load agents', err)
+    const projectId = this.projectId();
+    if (!projectId) return;
+    this.agentsError.set('');
+    this.agentService.getAgentsByProject(projectId).subscribe({
+      next: (agents) => this.agents.set(agents),
+      error: (err) => this.agentsError.set(errorMessage(err, 'The agents could not be loaded.')),
     });
   }
 
-  loadSessions(reset: boolean = true): void {
-    if (!this.activeProjectId) {
-      this.error = 'No active project selected';
-      return;
-    }
-
+  /** Load the first page (`reset`) or append the next one. */
+  load(reset = true): void {
+    const projectId = this.projectId();
+    if (!projectId) return;
     if (reset) {
       this.offset = 0;
-      this.sessions = [];
-      this.hasMore = true;
+      this.selected.set(null);
     }
-
-    this.loading = true;
-    this.error = null;
-
-    const agentId = this.selectedAgentId || undefined;
-    const search = this.searchText || undefined;
-    const startDate = this.startDate ? new Date(this.startDate).toISOString() : undefined;
-    const endDate = this.endDate ? new Date(this.endDate).toISOString() : undefined;
-
-    const externalId = this.externalId.trim() || undefined;
-
-    this.agentService.getSessions(this.activeProjectId, agentId, search, startDate, endDate, this.limit, this.offset, externalId).subscribe({
-      next: (data) => {
-        const sessions = data.sessions;
-        this.totalSessions = data.total_count;
-        if (reset) {
-          this.sessions = sessions;
-        } else {
-          this.sessions = [...this.sessions, ...sessions];
-        }
-        this.loading = false;
-        if (sessions.length < this.limit) {
-          this.hasMore = false;
-        }
-      },
-      error: (err) => {
-        this.error = 'Failed to load sessions';
-        console.error(err);
-        this.loading = false;
-      }
-    });
+    this.agentFilter.set(this.agentId);
+    this.loading.set(true);
+    this.error.set('');
+    this.agentService
+      .getSessions(
+        projectId,
+        this.agentId || undefined,
+        this.search.trim() || undefined,
+        this.startDate ? new Date(this.startDate).toISOString() : undefined,
+        this.endDate ? new Date(this.endDate).toISOString() : undefined,
+        PAGE_SIZE,
+        this.offset,
+        this.externalId.trim() || undefined
+      )
+      .subscribe({
+        next: (data: { sessions: SessionSummary[]; total_count: number }) => {
+          this.sessions.set(reset ? data.sessions : [...this.sessions(), ...data.sessions]);
+          this.total.set(data.total_count);
+          this.hasMore.set(data.sessions.length >= PAGE_SIZE);
+          this.loading.set(false);
+        },
+        error: (err) => {
+          this.error.set(errorMessage(err, 'The conversations could not be loaded.'));
+          this.loading.set(false);
+        },
+      });
   }
 
-  nextPage(): void {
-    if (this.loading || !this.hasMore) return;
-    this.offset += this.limit;
-    this.loadSessions(false);
+  /** Retry what failed: the first page, or the page "Load more" asked for. */
+  retry(): void {
+    this.load(this.offset === 0);
   }
 
-  onFilterChange(): void {
-    this.loadSessions(true);
+  loadMore(): void {
+    if (this.loading() || !this.hasMore()) return;
+    this.offset += PAGE_SIZE;
+    this.load(false);
   }
 
-  /**
-   * Whether this conversation came from an evaluation run rather than from a
-   * real user. Marked so test traffic is never mistaken for production.
-   */
-  isEvalSession(session: SessionSummary): boolean {
+  clearFilters(): void {
+    const window = defaultWindow();
+    this.agentId = '';
+    this.search = '';
+    this.externalId = '';
+    this.startDate = window.start;
+    this.endDate = window.end;
+    this.load();
+  }
+
+  select(session: SessionSummary): void {
+    this.selected.set(this.selected()?.session_id === session.session_id ? null : session);
+  }
+
+  close(): void {
+    this.selected.set(null);
+  }
+
+  /** Whether a conversation came from an evaluation run rather than a real user. */
+  isEval(session: SessionSummary): boolean {
     return !!session.external_id?.startsWith('eval:');
-  }
-
-  viewSession(sessionId: string): void {
-    this.router.navigate(['/conversations', sessionId]);
-  }
-
-  formatDate(dateStr: string): string {
-    const date = new Date(dateStr);
-    const day = String(date.getDate()).padStart(2, '0');
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const year = date.getFullYear();
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    return `${day}-${month}-${year} ${hours}:${minutes}`;
   }
 }

@@ -13,89 +13,178 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-import { Component, OnInit, inject } from '@angular/core';
-import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
-import { CommonModule } from '@angular/common';
-import { ActivatedRoute, Router } from '@angular/router';
+import { Component, OnInit, inject, signal } from '@angular/core';
+import {
+  AbstractControl,
+  NonNullableFormBuilder,
+  ReactiveFormsModule,
+  ValidationErrors,
+  Validators,
+} from '@angular/forms';
+import { firstValueFrom } from 'rxjs';
+import { errorMessage } from '../../core/http-error';
+import { MIN_PASSWORD_LENGTH, UserDetails } from '../../models/user-details';
+import { ToastService } from '../../services/toast-service';
 import { UserService } from '../../services/user-service';
-import { UserDetails } from '../../models/user-details';
+import {
+  UiAlert,
+  UiAvatar,
+  UiBadge,
+  UiButton,
+  UiCard,
+  UiField,
+  UiInfo,
+  UiLoading,
+  UiPageHeader,
+  UiSpinner,
+} from '../../ui';
 
+/** The password form's group check: the repeated password must be the new one. */
+function passwordsMatch(group: AbstractControl): ValidationErrors | null {
+  const { new_password, repeat_password } = group.value as { new_password: string; repeat_password: string };
+  return new_password === repeat_password ? null : { mismatch: true };
+}
+
+/**
+ * The signed-in user's own profile, open to every user: the name and the
+ * picture in one card, the password in another. A user who signs in through
+ * Google only has no current password to give and sets a first one.
+ */
 @Component({
   selector: 'app-user-edit-page',
-  standalone: true,
-  imports: [ReactiveFormsModule, CommonModule],
+  imports: [
+    ReactiveFormsModule,
+    UiAlert,
+    UiAvatar,
+    UiBadge,
+    UiButton,
+    UiCard,
+    UiField,
+    UiInfo,
+    UiLoading,
+    UiPageHeader,
+    UiSpinner,
+  ],
   templateUrl: './user-edit-page.html',
   styleUrl: './user-edit-page.css',
 })
 export class UserEditPage implements OnInit {
-  private userService = inject(UserService);
-  private fb = inject(FormBuilder);
-  private route = inject(ActivatedRoute);
-  private router = inject(Router);
+  private readonly userService = inject(UserService);
+  private readonly toast = inject(ToastService);
+  private readonly fb = inject(NonNullableFormBuilder);
 
-  userId: string | null = null;
-  userDetails: UserDetails | null = null;
-  isAdmin = false;
-  isSelf = false;
+  readonly minPasswordLength = MIN_PASSWORD_LENGTH;
+  readonly me = signal<UserDetails | null>(null);
+  readonly loading = signal(true);
+  readonly loadError = signal('');
 
-  userForm = this.fb.group({
-    email: ['', [Validators.required, Validators.email]],
+  readonly savingProfile = signal(false);
+  readonly profileError = signal('');
+  readonly savingPassword = signal(false);
+  readonly passwordError = signal('');
+
+  readonly profileForm = this.fb.group({
     name: ['', [Validators.required]],
-    is_admin: [false],
     picture: [''],
   });
 
-  ngOnInit() {
-    this.isAdmin = this.userService.getIsAdmin();
-    this.userId = this.route.snapshot.paramMap.get('id');
+  readonly passwordForm = this.fb.group(
+    {
+      current_password: [''],
+      new_password: ['', [Validators.required, Validators.minLength(MIN_PASSWORD_LENGTH)]],
+      repeat_password: [''],
+    },
+    { validators: passwordsMatch }
+  );
 
-    const currentUser = this.userService.getUserDetailsValue();
-    if (currentUser && currentUser.id === this.userId) {
-      this.isSelf = true;
+  ngOnInit(): void {
+    void this.load();
+  }
+
+  async load(): Promise<void> {
+    this.loading.set(true);
+    this.loadError.set('');
+    try {
+      this.show(await firstValueFrom(this.userService.getMe()));
+    } catch (err) {
+      this.loadError.set(errorMessage(err, 'Could not load your profile.'));
+    } finally {
+      this.loading.set(false);
     }
+  }
 
-    if (this.userId) {
-      this.loadUser();
+  private show(user: UserDetails): void {
+    this.me.set(user);
+    this.profileForm.reset({ name: user.name, picture: user.picture ?? '' });
+    const current = this.passwordForm.controls.current_password;
+    current.setValidators(user.has_password ? [Validators.required] : []);
+    this.passwordForm.reset();
+  }
+
+  /** The message under a field once it has been touched, or `''`. */
+  nameError(): string {
+    const control = this.profileForm.controls.name;
+    return control.touched && control.invalid ? 'The name is required.' : '';
+  }
+
+  passwordFieldError(name: 'current_password' | 'new_password' | 'repeat_password'): string {
+    const control = this.passwordForm.controls[name];
+    if (!control.touched) return '';
+    if (name === 'repeat_password') {
+      return this.passwordForm.hasError('mismatch') ? 'The two passwords differ.' : '';
+    }
+    if (control.hasError('required')) {
+      return name === 'current_password' ? 'Your current password is required.' : 'A new password is required.';
+    }
+    return control.hasError('minlength') ? `At least ${MIN_PASSWORD_LENGTH} characters.` : '';
+  }
+
+  async saveProfile(): Promise<void> {
+    if (this.profileForm.invalid) {
+      this.profileForm.markAllAsTouched();
+      return;
+    }
+    const value = this.profileForm.getRawValue();
+    this.savingProfile.set(true);
+    this.profileError.set('');
+    try {
+      const saved = await firstValueFrom(
+        this.userService.updateProfile({ name: value.name.trim(), picture: value.picture.trim() || null })
+      );
+      this.me.set(saved);
+      this.profileForm.reset({ name: saved.name, picture: saved.picture ?? '' });
+      this.userService.updateUserDetails();
+      this.toast.success('Saved');
+    } catch (err) {
+      this.profileError.set(errorMessage(err, 'Could not save your profile.'));
+    } finally {
+      this.savingProfile.set(false);
     }
   }
 
-  loadUser() {
-    // If it's self, we might already have it in UserService,
-    // but better to fetch fresh from all users list if admin,
-    // or we might need a getById in UserService.
-    // Current UserService only has getUsers() (all).
-    this.userService.getUsers().subscribe((users) => {
-      const user = users.find(u => u.id === this.userId);
-      if (user) {
-        this.userDetails = user;
-        this.userForm.patchValue(user);
-
-        // Disable email and is_admin if not admin
-        if (!this.isAdmin) {
-          this.userForm.get('email')?.disable();
-          this.userForm.get('is_admin')?.disable();
-        }
-      } else {
-        // Handle user not found
-        this.router.navigate(['/']);
-      }
-    });
-  }
-
-  saveUser() {
-    if (this.userForm.invalid || !this.userId) return;
-
-    const userData = this.userForm.getRawValue() as Partial<UserDetails>;
-
-    this.userService.updateUser(this.userId, userData).subscribe(() => {
-      if (this.isSelf) {
-        this.userService.updateUserDetails();
-      }
-      this.router.navigate(['/']);
-    });
-  }
-
-  cancel() {
-    this.router.navigate(['/']);
+  async savePassword(me: UserDetails): Promise<void> {
+    if (this.passwordForm.invalid) {
+      this.passwordForm.markAllAsTouched();
+      return;
+    }
+    const value = this.passwordForm.getRawValue();
+    this.savingPassword.set(true);
+    this.passwordError.set('');
+    try {
+      const saved = await firstValueFrom(
+        this.userService.changePassword(
+          value.new_password,
+          me.has_password ? value.current_password : undefined
+        )
+      );
+      this.toast.success(me.has_password ? 'Password changed' : 'Password set');
+      this.me.set(saved);
+      this.passwordForm.controls.current_password.setValidators([Validators.required]);
+      this.passwordForm.reset();
+    } catch (err) {
+      this.passwordError.set(errorMessage(err, 'Could not change your password.'));
+    } finally {
+      this.savingPassword.set(false);
+    }
   }
 }

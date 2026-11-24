@@ -1,173 +1,171 @@
-<div class="p-6 max-w-6xl mx-auto space-y-6">
-  <div class="card bg-base-100 shadow-xl border border-base-200">
-    <div class="card-body">
-      <div class="flex flex-col sm:flex-row items-center justify-between gap-4">
-        <div>
-          <h1 class="text-3xl font-bold font-header">System Users</h1>
-          <p class="text-base-content/70">Manage system users and their permissions.</p>
-        </div>
-        <button class="btn btn-primary w-full sm:w-auto" (click)="addUser()">
-          <i class="fas fa-plus"></i> Add User
-        </button>
-      </div>
-    </div>
-  </div>
+<ui-page-header tag="Administration" title="Users">
+  Who can sign in to the backoffice. Administrators manage projects and users; everyone else sees the projects they
+  are a member of.
+  <button page-actions type="button" uiButton="primary" (click)="openNew()" data-testid="add-user">
+    <i class="fa-solid fa-user-plus" aria-hidden="true"></i>Add user
+  </button>
+</ui-page-header>
 
-  <div class="card bg-base-100 shadow-xl border border-base-200">
-    <div class="card-body">
-      <div class="overflow-x-auto">
-        <table class="table table-zebra w-full">
-          <thead>
-            <tr>
-              <th>User</th>
-              <th>Email</th>
-              <th>Role</th>
-              <th>Actions</th>
+<ui-card>
+  @if (loadError()) {
+    <ui-alert data-testid="load-error">
+      {{ loadError() }}
+      <button alert-actions type="button" uiButton="ghost" size="sm" (click)="load()" data-testid="retry">Retry</button>
+    </ui-alert>
+  } @else if (loading()) {
+    <ui-loading label="Loading users" />
+  } @else if (users().length === 0) {
+    <ui-empty-state icon="fa-users" title="No users" data-testid="users-empty">
+      Add a user to let them sign in.
+    </ui-empty-state>
+  } @else {
+    <ui-table>
+      <table data-testid="users-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Email</th>
+            <th>Access</th>
+            <th class="actions"></th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (user of users(); track user.id) {
+            <tr [attr.data-testid]="'user-' + user.id">
+              <td>
+                <span class="user-name">
+                  <ui-avatar round size="sm" [name]="user.name || user.email" [src]="user.picture || null" />
+                  {{ user.name }}
+                  @if (user.id === myId()) {
+                    <span class="text-muted">(you)</span>
+                  }
+                </span>
+              </td>
+              <td>{{ user.email }}</td>
+              <td>
+                <span class="badges">
+                  @if (user.is_admin) {
+                    <ui-badge tone="primary">admin</ui-badge>
+                  }
+                  @if (user.has_password) {
+                    <ui-badge tone="neutral">password</ui-badge>
+                  } @else {
+                    <ui-badge tone="muted">Google only</ui-badge>
+                  }
+                </span>
+              </td>
+              <td class="actions">
+                <button
+                  type="button"
+                  uiButton="ghost"
+                  size="sm"
+                  (click)="openEdit(user)"
+                  [attr.data-testid]="'edit-' + user.id"
+                >
+                  <i class="fa-solid fa-pen" aria-hidden="true"></i>Edit
+                </button>
+                <button
+                  type="button"
+                  uiButton="ghost"
+                  size="sm"
+                  [disabled]="user.id === myId()"
+                  [attr.title]="user.id === myId() ? 'You cannot delete your own account.' : null"
+                  (click)="askDelete(user)"
+                  [attr.data-testid]="'delete-' + user.id"
+                >
+                  <i class="fa-solid fa-trash" aria-hidden="true"></i>Delete
+                </button>
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            @for (user of users; track user.id) {
-              <tr>
-                <td>
-                  <div class="flex items-center gap-3">
-                    <div class="avatar placeholder">
-                      <div class="bg-neutral text-neutral-content rounded-full w-8">
-                        @if (user.picture) {
-                          <img [src]="user.picture" [alt]="user.name" />
-                        } @else {
-                          <span>{{ user.name.charAt(0) || user.email.charAt(0) }}</span>
-                        }
-                      </div>
-                    </div>
-                    <div class="font-bold">{{ user.name }}</div>
-                  </div>
-                </td>
-                <td>{{ user.email }}</td>
-                <td>
-                  <span class="badge" [ngClass]="user.is_admin ? 'badge-primary' : 'badge-ghost'">
-                    {{ user.is_admin ? 'Admin' : 'User' }}
-                  </span>
-                </td>
-                <td>
-                  <div class="flex gap-2">
-                    <button class="btn btn-primary btn-xs flex items-center gap-1" (click)="editUser(user)" title="Edit">
-                      <i class="fas fa-edit"></i> Edit
-                    </button>
-                    <button class="btn btn-ghost btn-xs text-error flex items-center gap-1" (click)="deleteUser(user)" title="Delete">
-                      <i class="fas fa-trash"></i> Delete
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            }
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- Delete Confirmation Modal -->
-@if (showDeleteModal) {
-  <div class="modal modal-open">
-    <div class="modal-box w-full max-w-lg md:max-w-xl">
-      <h3 class="font-bold text-lg text-error">Confirm Deletion</h3>
-      <p class="py-4">
-        Are you sure you want to delete user <strong>{{ userToDelete?.email }}</strong>?
-        This action cannot be undone.
+          }
+        </tbody>
+      </table>
+    </ui-table>
+    @if (myId() && users().length > 0) {
+      <p class="form-hint" data-testid="self-delete-note">
+        You cannot delete your own account; another administrator can.
       </p>
-      <div class="modal-action">
-        <button type="button" class="btn" (click)="closeDeleteModal()" [disabled]="isDeleting">Cancel</button>
-        <button type="button" class="btn btn-error" (click)="confirmDelete()" [disabled]="isDeleting">
-          @if (isDeleting) { <span class="loading loading-spinner loading-xs"></span> }
-          Delete
-        </button>
-      </div>
-    </div>
-  </div>
-}
+    }
+  }
+</ui-card>
 
-<!-- Error Modal -->
-@if (showErrorModal) {
-  <div class="modal modal-open">
-    <div class="modal-box w-full max-w-lg md:max-w-xl">
-      <h3 class="font-bold text-lg text-error">Error</h3>
-      <p class="py-4">{{ errorMessage }}</p>
-      <div class="modal-action">
-        <button type="button" class="btn" (click)="closeErrorModal()">Close</button>
-      </div>
-    </div>
-  </div>
-}
+<form [formGroup]="form" (ngSubmit)="save()" novalidate data-testid="user-form">
+  <ui-dialog [open]="editing() !== null" (closed)="closeForm()" [title]="isNew() ? 'Add user' : 'Edit user'">
+    <ui-field label="Email" for="user-email" [error]="fieldError('email')">
+      <input id="user-email" type="email" formControlName="email" autocomplete="off" data-testid="user-email" />
+    </ui-field>
+    <ui-field label="Name" for="user-name" [error]="fieldError('name')">
+      <input id="user-name" type="text" formControlName="name" autocomplete="off" data-testid="user-name" />
+    </ui-field>
+    <ui-field label="Picture URL" for="user-picture" hint="Optional. Google sign-in replaces it with the Google picture.">
+      <input
+        id="user-picture"
+        type="url"
+        formControlName="picture"
+        placeholder="https://"
+        autocomplete="off"
+        data-testid="user-picture"
+      />
+    </ui-field>
+    <ui-field
+      label="Password"
+      for="user-password"
+      [error]="fieldError('password')"
+      [hint]="
+        isNew()
+          ? 'Optional. Without one the user signs in through Google only. At least ' + minPasswordLength + ' characters.'
+          : 'Leave empty to keep the current password.'
+      "
+    >
+      <input
+        id="user-password"
+        type="password"
+        formControlName="password"
+        autocomplete="new-password"
+        data-testid="user-password"
+      />
+    </ui-field>
+    <label class="switch" for="user-admin">
+      <input id="user-admin" type="checkbox" role="switch" formControlName="is_admin" data-testid="user-admin" />
+      <span>Administrator — manages projects and users</span>
+    </label>
+    @if (saveError()) {
+      <ui-alert data-testid="save-error">{{ saveError() }}</ui-alert>
+    }
+    <button dialog-actions type="button" uiButton="ghost" (click)="closeForm()" data-testid="cancel-user">Cancel</button>
+    <button dialog-actions type="submit" uiButton="primary" [disabled]="saving()" data-testid="save-user">
+      @if (saving()) {
+        <ui-spinner />
+      }
+      {{ isNew() ? 'Add user' : 'Save' }}
+    </button>
+  </ui-dialog>
+</form>
 
-<!-- Add User Modal -->
-@if (showAddModal) {
-  <div class="modal modal-open">
-    <div class="modal-box w-full max-w-lg md:max-w-xl">
-      <h3 class="font-bold text-lg">Add New User</h3>
-      <form [formGroup]="userForm" (ngSubmit)="saveUser()" class="py-4 space-y-4">
-        <div class="form-control">
-          <label class="label"><span class="label-text">Email</span></label>
-          <input type="email" formControlName="email" class="input input-bordered w-full" placeholder="email@example.com" />
-        </div>
-        <div class="form-control">
-          <label class="label"><span class="label-text">Name</span></label>
-          <input type="text" formControlName="name" class="input input-bordered w-full" placeholder="User Name" />
-        </div>
-        <div class="form-control">
-          <label class="label"><span class="label-text">Picture URL</span></label>
-          <input type="text" formControlName="picture" class="input input-bordered w-full" placeholder="https://..." />
-        </div>
-        <div class="form-control">
-          <label class="label cursor-pointer justify-start gap-4">
-            <input type="checkbox" formControlName="is_admin" class="checkbox checkbox-primary" />
-            <span class="label-text">Is Admin</span>
-          </label>
-        </div>
-        <div class="modal-action">
-          <button type="button" class="btn" (click)="closeAddModal()">Cancel</button>
-          <button type="submit" class="btn btn-primary" [disabled]="userForm.invalid || isSaving">
-            @if (isSaving) { <span class="loading loading-spinner loading-xs"></span> }
-            Save
-          </button>
-        </div>
-      </form>
-    </div>
-  </div>
-}
-
-<!-- Edit User Modal -->
-@if (showEditModal) {
-  <div class="modal modal-open">
-    <div class="modal-box w-full max-w-lg md:max-w-xl">
-      <h3 class="font-bold text-lg">Edit User</h3>
-      <form [formGroup]="editForm" (ngSubmit)="updateUser()" class="py-4 space-y-4">
-        <div class="form-control">
-          <label class="label"><span class="label-text">Email</span></label>
-          <input type="email" formControlName="email" class="input input-bordered w-full" />
-        </div>
-        <div class="form-control">
-          <label class="label"><span class="label-text">Name</span></label>
-          <input type="text" formControlName="name" class="input input-bordered w-full" />
-        </div>
-        <div class="form-control">
-          <label class="label"><span class="label-text">Picture URL</span></label>
-          <input type="text" formControlName="picture" class="input input-bordered w-full" />
-        </div>
-        <div class="form-control">
-          <label class="label cursor-pointer justify-start gap-4">
-            <input type="checkbox" formControlName="is_admin" class="checkbox checkbox-primary" />
-            <span class="label-text">Is Admin</span>
-          </label>
-        </div>
-        <div class="modal-action">
-          <button type="button" class="btn" (click)="closeEditModal()">Cancel</button>
-          <button type="submit" class="btn btn-primary" [disabled]="editForm.invalid || isSaving">
-            @if (isSaving) { <span class="loading loading-spinner loading-xs"></span> }
-            Update
-          </button>
-        </div>
-      </form>
-    </div>
-  </div>
-}
+<ui-dialog [open]="removing() !== null" (closed)="removing.set(null)" title="Delete user">
+  @if (removing(); as user) {
+    <p data-testid="delete-question">Delete {{ user.email }}?</p>
+    <p class="text-muted">
+      They can no longer sign in, and their project memberships go with the account. The projects and their data stay.
+    </p>
+  }
+  @if (deleteError()) {
+    <ui-alert data-testid="delete-error">{{ deleteError() }}</ui-alert>
+  }
+  <button dialog-actions type="button" uiButton="ghost" (click)="removing.set(null)" data-testid="cancel-delete">
+    Cancel
+  </button>
+  <button
+    dialog-actions
+    type="button"
+    uiButton="danger"
+    [disabled]="deleting()"
+    (click)="confirmDelete()"
+    data-testid="confirm-delete"
+  >
+    @if (deleting()) {
+      <ui-spinner />
+    }
+    Delete user
+  </button>
+</ui-dialog>

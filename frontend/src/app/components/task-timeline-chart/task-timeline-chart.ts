@@ -14,86 +14,107 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-import { Component, Input, OnChanges, SimpleChanges } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, computed, input } from '@angular/core';
 import { Task } from '../../models/task';
+import { formatDuration } from '../../core/format';
 
-interface TaskBox {
-  id: string;
-  name: string;
-  left: number; // percentage
-  width: number; // percentage
-  startTime: number;
-  duration: number;
+/**
+ * What a bar stands for, which decides its colour: a step that called a model
+ * (lime), a tool (slate), a step of the graph's own control flow (granite),
+ * and any step that failed (raspberry), whatever its kind.
+ */
+export type TaskKind = 'model' | 'tool' | 'flow' | 'failed';
+
+const MODEL_NODES = new Set(['llm', 'agent', 'rag_query']);
+const TOOL_NODES = new Set(['function', 'tool_call']);
+
+export function taskKind(task: Task): TaskKind {
+  if (task.errors && task.errors.length > 0) return 'failed';
+  if (task.tool_uri || TOOL_NODES.has(task.node_type ?? '')) return 'tool';
+  if (MODEL_NODES.has(task.node_type ?? '')) return 'model';
+  return 'flow';
 }
 
+export interface TaskBox {
+  id: string;
+  name: string;
+  kind: TaskKind;
+  /** A tool call an agent made, drawn under the step that made it. */
+  nested: boolean;
+  /** Percentages of the run's span. */
+  left: number;
+  width: number;
+  duration: string;
+  tooltip: string;
+}
+
+/**
+ * The run's steps on one time axis, in execution order. A task row is
+ * written when its step finishes, so a bar starts at `created_at` less the
+ * step's duration and ends at `created_at`.
+ */
 @Component({
   selector: 'app-task-timeline-chart',
   standalone: true,
-  imports: [CommonModule],
   templateUrl: './task-timeline-chart.html',
   styleUrl: './task-timeline-chart.css',
 })
-export class TaskTimelineChart implements OnChanges {
-  @Input() tasks: Task[] = [];
+export class TaskTimelineChart {
+  readonly tasks = input<Task[]>([]);
 
-  taskBoxes: TaskBox[] = [];
-  minTime: number = 0;
-  maxTime: number = 0;
-  totalDuration: number = 0;
+  private readonly spans = computed(() =>
+    this.tasks().map((task) => {
+      const seconds = task.duration_seconds ?? 0;
+      const end = new Date(task.created_at).getTime();
+      return { task, seconds, start: end - seconds * 1000, end };
+    }),
+  );
 
-  ngOnChanges(changes: SimpleChanges): void {
-    if (changes['tasks']) {
-      this.calculateTaskBoxes();
-    }
-  }
+  /** From the first step's start to the last step's end, in seconds. */
+  readonly totalSeconds = computed(() => {
+    const spans = this.spans();
+    if (spans.length === 0) return 0;
+    const first = Math.min(...spans.map((s) => s.start));
+    const last = Math.max(...spans.map((s) => s.end));
+    return (last - first) / 1000;
+  });
 
-  private calculateTaskBoxes(): void {
-    if (!this.tasks || this.tasks.length === 0) {
-      this.taskBoxes = [];
-      return;
-    }
-
-    const taskData = this.tasks.map((task) => {
-      const start = new Date(task.created_at).getTime();
-      const duration = (task.duration_seconds || 0) * 1000;
+  readonly boxes = computed<TaskBox[]>(() => {
+    const spans = this.spans();
+    if (spans.length === 0) return [];
+    const first = Math.min(...spans.map((s) => s.start));
+    const total = this.totalSeconds() * 1000;
+    return spans.map(({ task, seconds, start }) => {
+      const name = task.name || task.id;
+      const duration = formatDuration(seconds);
       return {
         id: task.id,
-        name: task.name || task.id,
-        start,
+        name,
+        kind: taskKind(task),
+        nested: !!task.parent_task_name,
+        left: total === 0 ? 0 : ((start - first) / total) * 100,
+        width: total === 0 ? 100 : ((seconds * 1000) / total) * 100,
         duration,
-        end: start + duration,
+        tooltip: `${name}${task.node_type ? ` (${task.node_type})` : ''}: ${duration}`,
       };
     });
+  });
 
-    this.minTime = Math.min(...taskData.map((t) => t.start));
-    this.maxTime = Math.max(...taskData.map((t) => t.end));
-    this.totalDuration = this.maxTime - this.minTime;
+  /** The axis labels: the start, the midpoint and the end of the run. */
+  readonly ticks = computed(() => {
+    const total = this.totalSeconds();
+    return [0, total / 2, total].map((s, i) => (i === 0 ? '0 s' : formatDuration(s)));
+  });
 
-    if (this.totalDuration === 0) {
-      this.taskBoxes = taskData.map((t) => ({
-        id: t.id,
-        name: t.name,
-        left: 0,
-        width: 100,
-        startTime: t.start,
-        duration: t.duration,
-      }));
-      return;
-    }
-
-    this.taskBoxes = taskData.map((t) => ({
-      id: t.id,
-      name: t.name,
-      left: ((t.start - this.minTime) / this.totalDuration) * 100,
-      width: (t.duration / this.totalDuration) * 100,
-      startTime: t.start,
-      duration: t.duration,
-    }));
-  }
-
-  formatDuration(ms: number): string {
-    if (ms < 1000) return `${ms}ms`;
-    return `${(ms / 1000).toFixed(2)}s`;
-  }
+  readonly kinds = computed(() => {
+    const present = new Set(this.boxes().map((b) => b.kind));
+    return LEGEND.filter((entry) => present.has(entry.kind));
+  });
 }
+
+const LEGEND: { kind: TaskKind; label: string }[] = [
+  { kind: 'model', label: 'Model step' },
+  { kind: 'tool', label: 'Tool' },
+  { kind: 'flow', label: 'Control flow' },
+  { kind: 'failed', label: 'Failed' },
+];

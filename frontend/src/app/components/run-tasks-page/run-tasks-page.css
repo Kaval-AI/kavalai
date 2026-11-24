@@ -1,4 +1,9 @@
-/*
-   Run tasks page is now using Tailwind CSS and DaisyUI classes.
-   Custom CSS is no longer needed.
-*/
+:host {
+  display: block;
+}
+
+.run-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}

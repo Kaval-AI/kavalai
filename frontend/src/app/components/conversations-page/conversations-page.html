@@ -1,190 +1,204 @@
-<div class="p-6 max-w-6xl mx-auto space-y-6">
-  <!-- Header with Filters -->
-  <div class="card bg-base-100 shadow-xl border border-base-200">
-    <div class="card-body p-4 sm:p-6">
-      <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div class="flex items-center gap-3">
-          <div class="p-2 bg-primary/10 rounded-lg text-primary">
-            <i class="fas fa-comments text-xl"></i>
-          </div>
-          <div>
-            <h2 class="text-xl font-bold">Conversations</h2>
-            @if (!loading || sessions.length > 0) {
-              <div class="badge badge-sm badge-outline opacity-70">{{ totalSessions }} Sessions</div>
-            }
-          </div>
-        </div>
+<ui-page-header tag="Debugging" title="Conversations">
+  The sessions recorded in the project's agent database, latest activity first. Select one to see its
+  summary.
+  @if (agent(); as a) {
+    <ui-chip page-actions [text]="a.name" title="The agent this list is narrowed to" data-testid="agent-chip" />
+  }
+</ui-page-header>
 
-        <div class="flex flex-wrap gap-2 w-full md:w-auto">
-          <div class="join w-full sm:w-auto">
-            <input
-              type="text"
-              [(ngModel)]="searchText"
-              (keyup.enter)="onFilterChange()"
-              placeholder="Search in messages..."
-              class="input input-bordered input-sm join-item flex-1 sm:w-48"
-            >
-            <button class="btn btn-sm btn-primary join-item" (click)="onFilterChange()" [disabled]="loading">
-              <i class="fas fa-search"></i>
-            </button>
-          </div>
-          <button (click)="loadSessions(true)" class="btn btn-sm btn-ghost" [disabled]="loading">
-            <i class="fas fa-sync" [class.animate-spin]="loading"></i>
-          </button>
-        </div>
-      </div>
+@if (!projectId()) {
+  <ui-empty-state icon="fa-folder-open" title="No project selected" data-testid="no-project">
+    Choose a project in the sidebar to see its conversations.
+  </ui-empty-state>
+} @else {
+  <ui-toolbar class="filters" data-testid="filters" aria-label="Filter conversations">
+    <ui-field label="Agent" for="filter-agent" class="filter">
+      <select id="filter-agent" name="agent" [(ngModel)]="agentId" (ngModelChange)="load()" data-testid="filter-agent">
+        <option value="">All agents</option>
+        @for (a of agents(); track a.id) {
+          <option [value]="a.id">{{ a.name }}</option>
+        }
+      </select>
+    </ui-field>
+    <ui-field label="From" for="filter-from" class="filter filter-date">
+      <input id="filter-from" name="from" type="datetime-local" [(ngModel)]="startDate" (change)="load()" />
+    </ui-field>
+    <ui-field label="To" for="filter-to" class="filter filter-date">
+      <input id="filter-to" name="to" type="datetime-local" [(ngModel)]="endDate" (change)="load()" />
+    </ui-field>
+    <ui-field label="External ID" for="filter-external" class="filter">
+      <input
+        id="filter-external"
+        name="external"
+        type="text"
+        class="mono"
+        placeholder="eval:my-suite:pr-412:"
+        [(ngModel)]="externalId"
+        (keyup.enter)="load()"
+        data-testid="filter-external"
+      />
+    </ui-field>
+    <ui-field label="Messages" for="filter-search" class="filter filter-search">
+      <input
+        id="filter-search"
+        name="search"
+        type="search"
+        placeholder="Search in messages"
+        [(ngModel)]="search"
+        (keyup.enter)="load()"
+        data-testid="filter-search"
+      />
+    </ui-field>
+    <button type="button" uiButton class="filter-apply" (click)="load()" [disabled]="loading()" data-testid="apply">
+      <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i> Search
+    </button>
+  </ui-toolbar>
 
-      <div class="divider my-2"></div>
+  @if (agentsError()) {
+    <ui-alert tone="warning" data-testid="agents-error">
+      {{ agentsError() }} The agent filter lists no agents.
+      <button alert-actions type="button" uiButton="ghost" size="sm" (click)="loadAgents()">Retry</button>
+    </ui-alert>
+  }
 
-      <!-- Advanced Filters Row -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div class="form-control w-full">
-          <label class="label py-1"><span class="label-text-alt font-bold">Agent</span></label>
-          <select class="select select-bordered select-sm w-full" [(ngModel)]="selectedAgentId" (change)="onFilterChange()">
-            <option value="">All Agents</option>
-            @for (agent of agents; track agent.id) {
-              <option [value]="agent.id">{{ agent.name }}</option>
-            }
-          </select>
-        </div>
-        <div class="form-control w-full">
-          <label class="label py-1"><span class="label-text-alt font-bold">From</span></label>
-          <input type="datetime-local" class="input input-bordered input-sm w-full" [(ngModel)]="startDate" (change)="onFilterChange()">
-        </div>
-        <div class="form-control w-full">
-          <label class="label py-1"><span class="label-text-alt font-bold">To</span></label>
-          <input type="datetime-local" class="input input-bordered input-sm w-full" [(ngModel)]="endDate" (change)="onFilterChange()">
-        </div>
-        <!-- Matches the caller-supplied session key as a prefix. Evaluation
-             runs are tagged eval:{suite}:{tag}:{case}:{repeat}, so this is how
-             a failing case in a result file is opened here. -->
-        <div class="form-control w-full">
-          <label class="label py-1">
-            <span class="label-text-alt font-bold">External ID</span>
-          </label>
-          <input
-            type="text"
-            class="input input-bordered input-sm w-full font-mono"
-            placeholder="eval:my-suite:pr-412:"
-            [(ngModel)]="externalId"
-            (keyup.enter)="onFilterChange()"
-            (change)="onFilterChange()">
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Content Area -->
-  <div class="space-y-4">
-    @if (loading && sessions.length === 0) {
-      <div class="flex flex-col items-center justify-center min-h-[30vh] space-y-4">
-        <span class="loading loading-spinner loading-lg text-primary"></span>
-        <p class="text-base-content/60 font-medium">Loading conversations...</p>
-      </div>
+  <ui-card title="Sessions" icon="fa-comments">
+    @if (sessions().length > 0) {
+      <span card-actions class="count text-muted" data-testid="count">
+        {{ sessions().length }} of {{ total() }}
+      </span>
     }
 
-    @if (error) {
-      <div class="alert alert-error shadow-lg">
-        <i class="fas fa-exclamation-circle"></i>
-        <span>{{ error }}</span>
-      </div>
-    }
+    @if (error() && sessions().length === 0) {
+      <ui-alert data-testid="error">
+        {{ error() }}
+        <button alert-actions type="button" uiButton="ghost" size="sm" (click)="retry()" data-testid="retry">
+          Retry
+        </button>
+      </ui-alert>
+    } @else if (loading() && sessions().length === 0) {
+      <ui-loading label="Loading conversations" data-testid="loading" />
+    } @else if (sessions().length === 0) {
+      <ui-empty-state icon="fa-comment-slash" title="No conversations match" data-testid="empty">
+        Widen the date range or clear the filters.
+        <button empty-actions type="button" uiButton (click)="clearFilters()" data-testid="clear-filters">
+          Clear filters
+        </button>
+      </ui-empty-state>
+    } @else {
+      <div class="layout" [class.with-detail]="selected()">
+        <div class="list">
+          <ui-table clickable>
+            <table data-testid="sessions-table">
+              <thead>
+                <tr>
+                  <th>When</th>
+                  <th>Agent</th>
+                  <th>First message</th>
+                  <th>Runs</th>
+                  <th>Messages</th>
+                  <th>Errors</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (s of sessions(); track s.session_id) {
+                  <tr
+                    data-testid="session-row"
+                    tabindex="0"
+                    [class.selected]="selected()?.session_id === s.session_id"
+                    [attr.aria-selected]="selected()?.session_id === s.session_id"
+                    (click)="select(s)"
+                    (keydown.enter)="select(s)"
+                  >
+                    <td class="text-nowrap" title="Last activity">
+                      {{ s.updated_at | date: 'short' }}
+                      @if (isEval(s)) {
+                        <ui-badge tone="warning" title="Recorded by an evaluation run">eval</ui-badge>
+                      }
+                    </td>
+                    <td class="text-nowrap">{{ s.agent_name }}</td>
+                    <td class="first-message">{{ s.first_message || '—' }}</td>
+                    <td>{{ s.runs_count | number }}</td>
+                    <td>{{ s.messages_count | number }}</td>
+                    <td>
+                      @if (s.errors_count > 0) {
+                        <ui-badge tone="error" data-testid="errors-badge">{{ s.errors_count | number }}</ui-badge>
+                      } @else {
+                        <span class="text-muted">0</span>
+                      }
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </ui-table>
 
-    @if (!loading && !error && sessions.length === 0) {
-      <div class="flex flex-col items-center justify-center min-h-[30vh] text-center space-y-4 bg-base-100 rounded-box border border-dashed border-base-300 p-12">
-        <div class="text-6xl text-base-content/10"><i class="fas fa-comment-slash"></i></div>
-        <h3 class="text-xl font-bold">No Sessions Found</h3>
-        <p class="text-base-content/60">No conversations match your current filters.</p>
-        <button class="btn btn-outline btn-sm" (click)="searchText = ''; selectedAgentId = ''; externalId = ''; onFilterChange()">Clear Filters</button>
-      </div>
-    }
+          @if (error()) {
+            <ui-alert data-testid="error">
+              {{ error() }}
+              <button alert-actions type="button" uiButton="ghost" size="sm" (click)="retry()" data-testid="retry">
+                Retry
+              </button>
+            </ui-alert>
+          }
 
-    @if (sessions.length > 0) {
-      <div class="grid grid-cols-1 gap-4">
-        @for (session of sessions; track session.session_id) {
-          <div class="card bg-base-100 shadow-sm border border-base-200 hover:border-primary/50 transition-all cursor-pointer group"
-               (click)="viewSession(session.session_id)">
-            <div class="card-body p-4 sm:p-5">
-              <div class="flex flex-col sm:flex-row justify-between items-start gap-2 mb-3">
-                <div class="flex items-center gap-2">
-                  <div class="w-8 h-8 rounded-full bg-base-200 flex items-center justify-center text-xs font-bold text-base-content/70 font-header">
-                    {{ session.agent_name.substring(0, 2).toUpperCase() }}
-                  </div>
-                  <div>
-                    <h3 class="font-bold group-hover:text-primary transition-colors font-header">{{ session.agent_name }}</h3>
-                    <div class="text-[10px] opacity-50 font-mono">{{ session.session_id }}</div>
-                    @if (session.external_id) {
-                      <div class="text-[10px] font-mono mt-0.5">
-                        <span class="badge badge-xs"
-                              [class.badge-warning]="isEvalSession(session)">
-                          {{ session.external_id }}
-                        </span>
-                      </div>
-                    }
-                  </div>
-                </div>
-                <div class="text-xs opacity-60 bg-base-200 px-2 py-1 rounded font-body last-activity"
-                     title="Time of the latest run; conversations are listed by it">
-                  <i class="far fa-clock mr-1"></i> Last activity {{ formatDate(session.updated_at) }}
-                </div>
-              </div>
-
-              <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
-                <div class="bg-base-200/50 rounded p-2 text-center">
-                  <div class="text-[10px] uppercase opacity-50 font-bold font-header">Runs</div>
-                  <div class="text-sm font-bold font-header">{{ session.runs_count }}</div>
-                </div>
-                <div class="bg-base-200/50 rounded p-2 text-center">
-                  <div class="text-[10px] uppercase opacity-50 font-bold font-header">Tasks</div>
-                  <div class="text-sm font-bold font-header">{{ session.tasks_count }}</div>
-                </div>
-                <div class="bg-base-200/50 rounded p-2 text-center">
-                  <div class="text-[10px] uppercase opacity-50 font-bold font-header">Messages</div>
-                  <div class="text-sm font-bold font-header">{{ session.messages_count }}</div>
-                </div>
-                <div class="rounded p-2 text-center" [class.bg-error/10]="session.errors_count > 0" [class.text-error]="session.errors_count > 0" [class.bg-base-200/50]="session.errors_count === 0">
-                  <div class="text-[10px] uppercase opacity-50 font-bold font-header">Errors</div>
-                  <div class="text-sm font-bold font-header">{{ session.errors_count }}</div>
-                </div>
-              </div>
-
-              @if (session.first_message || session.last_message) {
-                <div class="space-y-2">
-                  @if (session.first_message) {
-                    <div class="text-sm flex gap-2">
-                      <span class="font-bold text-primary/70 shrink-0 font-header">Start:</span>
-                      <p class="italic opacity-70 line-clamp-1 font-body">{{ session.first_message }}</p>
-                    </div>
-                  }
-                  @if (session.last_message) {
-                    <div class="text-sm flex gap-2">
-                      <span class="font-bold text-accent/70 shrink-0 font-header">Latest:</span>
-                      <p class="font-medium line-clamp-2 font-body">{{ session.last_message }}</p>
-                    </div>
-                  }
-                </div>
-              }
-
-              <div class="card-actions justify-end mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                <div class="text-xs text-primary font-bold flex items-center gap-1 font-header">
-                  View details <i class="fas fa-chevron-right text-[10px]"></i>
-                </div>
-              </div>
+          @if (hasMore()) {
+            <div class="more">
+              <button type="button" uiButton (click)="loadMore()" [disabled]="loading()" data-testid="load-more">
+                @if (loading()) {
+                  <ui-spinner />
+                }
+                Load more
+              </button>
             </div>
-          </div>
+          }
+        </div>
+
+        @if (selected(); as s) {
+          <aside class="detail" data-testid="session-detail" aria-label="Selected conversation">
+            <div class="detail-head">
+              <h3>{{ s.agent_name }}</h3>
+              <button type="button" uiButton="icon" (click)="close()" aria-label="Close" data-testid="close-detail">
+                <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+              </button>
+            </div>
+
+            <ui-info label="Session" mono>
+              <span [title]="s.session_id">{{ s.session_id.slice(0, 8) }}</span>
+              <ui-copy-button [text]="s.session_id" label="session id" />
+            </ui-info>
+            <ui-info label="External ID" mono>
+              @if (s.external_id) {
+                <span data-testid="detail-external">{{ s.external_id }}</span>
+              } @else {
+                <span class="text-muted">—</span>
+              }
+            </ui-info>
+            <ui-info label="Created">{{ s.created_at | date: 'medium' }}</ui-info>
+            <ui-info label="Last activity">{{ s.updated_at | date: 'medium' }}</ui-info>
+
+            <ui-stats inset class="detail-stats">
+              <ui-stat label="Runs">{{ s.runs_count | number }}</ui-stat>
+              <ui-stat label="Tasks">{{ s.tasks_count | number }}</ui-stat>
+              <ui-stat label="Messages">{{ s.messages_count | number }}</ui-stat>
+              <ui-stat label="Errors">{{ s.errors_count | number }}</ui-stat>
+            </ui-stats>
+
+            <h4 class="detail-label">First message</h4>
+            <p class="message" data-testid="detail-first">{{ s.first_message || '—' }}</p>
+            <h4 class="detail-label">Last message</h4>
+            <p class="message" data-testid="detail-last">{{ s.last_message || '—' }}</p>
+
+            <div class="card-actions-bar">
+              <a uiButton="primary" [routerLink]="['/conversations', s.session_id]" data-testid="open-conversation">
+                <i class="fa-solid fa-arrow-right" aria-hidden="true"></i> Open conversation
+              </a>
+              <a uiButton="ghost" routerLink="/llm-call-stats" [queryParams]="{ session_id: s.session_id }">
+                <i class="fa-solid fa-microchip" aria-hidden="true"></i> Model calls
+              </a>
+            </div>
+          </aside>
         }
       </div>
     }
-
-    @if (sessions.length > 0 && hasMore) {
-      <div class="flex justify-center pt-4">
-        <button class="btn btn-outline btn-wide" (click)="nextPage()" [disabled]="loading">
-          @if (loading) {
-            <span class="loading loading-spinner"></span>
-          }
-          Load More
-        </button>
-      </div>
-    }
-  </div>
-</div>
+  </ui-card>
+}

@@ -1,71 +1,127 @@
-<div class="p-6 max-w-2xl mx-auto">
-  <div class="card bg-base-100 shadow-xl">
-    <div class="card-body">
-      <h2 class="card-title text-2xl font-bold mb-6 flex items-center gap-2">
-        <i class="fas fa-user-edit text-primary"></i>
-        Edit User Profile
-      </h2>
+<ui-page-header tag="Account" title="Profile">
+  @if (me(); as user) {
+    {{ user.email }}
+  }
+</ui-page-header>
 
-      <form [formGroup]="userForm" (ngSubmit)="saveUser()" class="space-y-6">
-        <div class="form-control w-full">
-          <label class="label pb-1">
-            <span class="label-text opacity-70 font-bold text-xs uppercase">Email Address</span>
-          </label>
-          <input type="email" formControlName="email" class="input input-bordered w-full" placeholder="user@example.com" />
-          @if (userForm.get('email')?.invalid && userForm.get('email')?.touched) {
-            <label class="label">
-              <span class="label-text-alt text-error">Valid email is required</span>
-            </label>
-          }
-        </div>
-
-        <div class="form-control w-full">
-          <label class="label pb-1">
-            <span class="label-text opacity-70 font-bold text-xs uppercase">Full Name</span>
-          </label>
-          <input type="text" formControlName="name" class="input input-bordered w-full" placeholder="John Doe" />
-          @if (userForm.get('name')?.invalid && userForm.get('name')?.touched) {
-            <label class="label">
-              <span class="label-text-alt text-error">Name is required</span>
-            </label>
-          }
-        </div>
-
-        <div class="form-control w-full">
-          <label class="label pb-1">
-            <span class="label-text opacity-70 font-bold text-xs uppercase">Picture URL</span>
-          </label>
-          <div class="flex gap-4 items-center">
-            <div class="avatar">
-              <div class="w-12 h-12 rounded-full ring ring-primary ring-offset-base-100 ring-offset-2 overflow-hidden bg-base-200">
-                <img [src]="userForm.get('picture')?.value || 'assets/images/squarelogo.png'" alt="Preview" />
-              </div>
-            </div>
-            <input type="text" formControlName="picture" class="input input-bordered flex-1" placeholder="https://example.com/photo.jpg" />
+@if (loadError()) {
+  <ui-alert data-testid="load-error">
+    {{ loadError() }}
+    <button alert-actions type="button" uiButton="ghost" size="sm" (click)="load()" data-testid="retry">Retry</button>
+  </ui-alert>
+} @else if (loading()) {
+  <ui-loading label="Loading your profile" />
+} @else if (me(); as user) {
+  <div class="grid-2 grid gap-5 lg:grid-cols-2 items-start">
+    <ui-card title="Details" icon="fa-user" data-testid="profile-card">
+      <form [formGroup]="profileForm" (ngSubmit)="saveProfile()" novalidate data-testid="profile-form">
+        <div class="identity">
+          <ui-avatar
+            round
+            size="lg"
+            [name]="profileForm.controls.name.value || user.email"
+            [src]="profileForm.controls.picture.value.trim() || null"
+          />
+          <div>
+            <ui-info label="Email" mono>{{ user.email }}</ui-info>
+            <ui-info label="Access">
+              <span class="badges">
+                @if (user.is_admin) {
+                  <ui-badge tone="primary">admin</ui-badge>
+                }
+                @if (user.has_password) {
+                  <ui-badge tone="neutral">password</ui-badge>
+                } @else {
+                  <ui-badge tone="muted">Google only</ui-badge>
+                }
+              </span>
+            </ui-info>
           </div>
         </div>
-
-        @if (isAdmin) {
-          <div class="form-control">
-            <label class="label cursor-pointer justify-start gap-4">
-              <input type="checkbox" formControlName="is_admin" class="checkbox checkbox-primary" />
-              <span class="label-text font-bold text-xs uppercase opacity-70">Administrator Privileges</span>
-            </label>
-            <div class="text-xs opacity-50 ml-10">Admins can manage projects, users, and system-wide configurations.</div>
-          </div>
+        <ui-field label="Name" for="profile-name" [error]="nameError()">
+          <input id="profile-name" type="text" formControlName="name" autocomplete="name" data-testid="profile-name" />
+        </ui-field>
+        <ui-field label="Picture URL" for="profile-picture" hint="Optional. Leave empty to show your initials.">
+          <input
+            id="profile-picture"
+            type="url"
+            formControlName="picture"
+            placeholder="https://"
+            autocomplete="photo"
+            data-testid="profile-picture"
+          />
+        </ui-field>
+        <p class="form-hint">
+          The email address and administrator access are changed by an administrator. Signing in with Google replaces
+          the name and picture with those of the Google account.
+        </p>
+        @if (profileError()) {
+          <ui-alert data-testid="profile-error">{{ profileError() }}</ui-alert>
         }
-
-        <div class="card-actions justify-end pt-6 border-t border-base-content/10 mt-6">
-          <button type="button" class="btn btn-ghost" (click)="cancel()">
-            <i class="fas fa-times"></i>
-            Cancel
-          </button>
-          <button type="submit" class="btn btn-primary" [disabled]="userForm.invalid">
-            <i class="fas fa-save"></i>
-            Save Changes
+        <div class="card-actions-bar">
+          <button type="submit" uiButton="primary" [disabled]="savingProfile()" data-testid="save-profile">
+            @if (savingProfile()) {
+              <ui-spinner />
+            }
+            Save
           </button>
         </div>
       </form>
-    </div>
+    </ui-card>
+
+    <ui-card title="Password" icon="fa-key" data-testid="password-card">
+      <form [formGroup]="passwordForm" (ngSubmit)="savePassword(user)" novalidate data-testid="password-form">
+        @if (user.has_password) {
+          <ui-field label="Current password" for="current-password" [error]="passwordFieldError('current_password')">
+            <input
+              id="current-password"
+              type="password"
+              formControlName="current_password"
+              autocomplete="current-password"
+              data-testid="current-password"
+            />
+          </ui-field>
+        } @else {
+          <p class="form-hint mb-4" data-testid="no-password-note">
+            You sign in with Google and have no password. Setting one lets you also sign in with your email address
+            and this password.
+          </p>
+        }
+        <ui-field
+          label="New password"
+          for="new-password"
+          [hint]="'At least ' + minPasswordLength + ' characters.'"
+          [error]="passwordFieldError('new_password')"
+        >
+          <input
+            id="new-password"
+            type="password"
+            formControlName="new_password"
+            autocomplete="new-password"
+            data-testid="new-password"
+          />
+        </ui-field>
+        <ui-field label="Repeat the new password" for="repeat-password" [error]="passwordFieldError('repeat_password')">
+          <input
+            id="repeat-password"
+            type="password"
+            formControlName="repeat_password"
+            autocomplete="new-password"
+            data-testid="repeat-password"
+          />
+        </ui-field>
+        @if (passwordError()) {
+          <ui-alert data-testid="password-error">{{ passwordError() }}</ui-alert>
+        }
+        <div class="card-actions-bar">
+          <button type="submit" uiButton="secondary" [disabled]="savingPassword()" data-testid="save-password">
+            @if (savingPassword()) {
+              <ui-spinner />
+            }
+            {{ user.has_password ? 'Change password' : 'Set password' }}
+          </button>
+        </div>
+      </form>
+    </ui-card>
   </div>
-</div>
+}

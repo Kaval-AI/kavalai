@@ -22,7 +22,12 @@ export interface Project {
   db_host?: string;
   db_port?: number;
   db_user?: string;
+  /**
+   * Write-only: sent to set or replace the password, never returned. An empty
+   * value keeps the stored password; `has_password` says whether there is one.
+   */
   db_password?: string;
+  has_password?: boolean;
   db_name?: string;
   db_schema?: string;
   rag_schema?: string;

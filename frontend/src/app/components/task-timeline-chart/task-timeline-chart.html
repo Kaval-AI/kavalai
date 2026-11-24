@@ -1,25 +1,27 @@
-<div class="timeline-container bg-base-200 p-4 rounded-box">
-  <div class="timeline-header flex justify-between text-xs text-neutral mb-2">
-    <span>0s</span>
-    <span>{{ formatDuration(totalDuration) }}</span>
-  </div>
-  <div class="timeline-body relative h-auto">
-    @for (box of taskBoxes; track box.id) {
-    <div class="timeline-row flex items-center mb-1">
-      <div class="task-label text-xs truncate mr-2 w-32" [title]="box.name">
-        {{ box.name }}
-      </div>
-      <div class="flex-1 relative h-6 bg-base-300 rounded overflow-hidden">
-        <div
-          class="task-box absolute h-full bg-primary flex items-center justify-center text-[10px] text-primary-content px-1 truncate"
-          [style.left.%]="box.left"
-          [style.width.%]="box.width"
-          [title]="box.name + ' (' + formatDuration(box.duration) + ')'"
-        >
-          {{ formatDuration(box.duration) }}
-        </div>
-      </div>
+@if (boxes().length > 0) {
+  <div class="tt" data-testid="timeline">
+    <div class="tt-axis" aria-hidden="true">
+      <span></span>
+      <span class="tt-ticks">
+        @for (tick of ticks(); track $index) {
+          <span>{{ tick }}</span>
+        }
+      </span>
+      <span></span>
     </div>
+    @for (box of boxes(); track box.id) {
+      <div class="tt-row" data-testid="timeline-row" [attr.data-kind]="box.kind" [title]="box.tooltip">
+        <span class="tt-label" [class.nested]="box.nested">{{ box.name }}</span>
+        <span class="tt-track">
+          <span class="tt-bar" [attr.data-kind]="box.kind" [style.left.%]="box.left" [style.width.%]="box.width"></span>
+        </span>
+        <span class="tt-duration">{{ box.duration }}</span>
+      </div>
     }
+    <ul class="tt-legend" data-testid="timeline-legend">
+      @for (entry of kinds(); track entry.kind) {
+        <li><span class="tt-swatch" [attr.data-kind]="entry.kind"></span>{{ entry.label }}</li>
+      }
+    </ul>
   </div>
-</div>
+}

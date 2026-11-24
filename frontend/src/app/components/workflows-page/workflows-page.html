@@ -1,129 +1,146 @@
-<div class="container mx-auto p-4 md:p-6 space-y-6">
-  <div class="flex justify-between items-center">
-    <h1 class="text-2xl font-bold font-header">Workflow Monitoring</h1>
-    <button class="btn btn-primary btn-sm" (click)="loadWorkflows()" [disabled]="loading">
-      @if (loading) {
-        <span class="loading loading-spinner loading-xs"></span>
+<ui-page-header tag="Project" title="Runs">
+  The runs of each agent's latest {{ sessionsPerAgent }} conversations. Each square is a task, lime when it
+  succeeded and raspberry when it failed; runs that overlapped in time sit in separate lanes.
+  @if (projectId()) {
+    <button
+      page-actions
+      type="button"
+      uiButton
+      size="sm"
+      (click)="load()"
+      [disabled]="loading()"
+      data-testid="runs-refresh"
+    >
+      @if (loading()) {
+        <ui-spinner />
+      } @else {
+        <i class="fa-solid fa-rotate" aria-hidden="true"></i>
       }
       Refresh
     </button>
-  </div>
-
-  @if (error) {
-    <div class="alert alert-error shadow-lg">
-      <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-      <span>{{ error }}</span>
-    </div>
   }
+</ui-page-header>
 
-  @if (loading && workflows.length === 0) {
-    <div class="flex justify-center p-12">
-      <span class="loading loading-spinner loading-lg text-primary"></span>
-    </div>
-  } @else if (workflows.length === 0) {
-    <div class="text-center p-12 bg-base-200 rounded-box">
-      <p class="text-lg opacity-60">No agents found for this project.</p>
-    </div>
-  } @else {
-    <div class="bg-base-100 rounded-box shadow-sm border border-base-200 overflow-x-auto">
-      <table class="table table-zebra w-full">
-        <thead>
-          <tr>
-            <th class="w-1/4">Agent</th>
-            <th>Workflow Timeline</th>
-          </tr>
-        </thead>
-        <tbody>
-          @for (workflow of workflows; track workflow.agent.id) {
-            <tr>
-              <td class="align-top">
-                <div class="flex flex-col">
-                  <span class="font-bold">{{ workflow.agent.name }}</span>
-                  <span class="text-xs opacity-60">{{ workflow.agent.id }}</span>
-                </div>
-              </td>
-              <td>
-                <div class="flex flex-col gap-4 py-2">
-                  @if (workflow.lanes.length === 0) {
-                    <span class="text-xs opacity-40">No runs yet</span>
-                  }
-                  @for (lane of workflow.lanes; track $index) {
-                    <div class="flex gap-6 items-center">
-                      @for (runItem of lane.runs; track runItem.run.id) {
-                        <div class="run-group flex items-center bg-base-200 rounded p-1 gap-1 border border-base-300">
-                          @for (taskItem of runItem.tasks; track taskItem.task.id) {
-                            <div
-                              class="task-box w-4 h-4 rounded-sm cursor-pointer transition-all hover:scale-125 tooltip tooltip-top"
-                              [class.bg-success]="taskItem.status === 'success'"
-                              [class.bg-error]="taskItem.status === 'error'"
-                              [class.bg-neutral]="taskItem.status === 'running'"
-                              [attr.data-tip]="taskItem.task.name || 'Task'"
-                              (click)="selectTask(taskItem, runItem.sessionId)"
-                            ></div>
-                          }
-                          @if (runItem.tasks.length === 0) {
-                            <div class="text-[10px] px-1 opacity-40 italic">Empty run</div>
-                          }
-                        </div>
-                      }
-                    </div>
+@if (!projectId()) {
+  <ui-empty-state icon="fa-folder-open" title="No project selected" data-testid="runs-no-project">
+    Choose a project in the sidebar to see its runs.
+  </ui-empty-state>
+} @else if (error()) {
+  <ui-alert data-testid="runs-error">
+    {{ error() }}
+    <button alert-actions type="button" uiButton="ghost" size="sm" (click)="load()" data-testid="runs-retry">
+      Retry
+    </button>
+  </ui-alert>
+} @else if (!loaded()) {
+  <ui-loading label="Loading runs" />
+} @else if (workflows().length === 0) {
+  <ui-empty-state icon="fa-robot" title="No agents yet" data-testid="runs-empty">
+    Runs appear here once an agent server built on Kaval.AI has recorded one in this project's database.
+  </ui-empty-state>
+} @else {
+  @for (workflow of workflows(); track workflow.agent.id) {
+    <ui-card [title]="workflow.agent.name" icon="fa-robot" data-testid="agent-runs">
+      <a
+        card-actions
+        uiButton="ghost"
+        size="sm"
+        routerLink="/conversations"
+        [queryParams]="{ agentId: workflow.agent.id }"
+        >Conversations</a
+      >
+      @if (workflow.lanes.length === 0) {
+        <p class="text-muted" data-testid="no-runs">No runs yet.</p>
+      } @else {
+        <div class="lanes">
+          @for (lane of workflow.lanes; track $index) {
+            <div class="lane" data-testid="lane">
+              @for (runItem of lane.runs; track runItem.run.id) {
+                <div
+                  class="run"
+                  [class.run-failed]="runItem.status === 'error'"
+                  [title]="runTitle(runItem)"
+                  data-testid="run"
+                >
+                  @for (taskItem of runItem.tasks; track taskItem.task.id) {
+                    <button
+                      type="button"
+                      class="task"
+                      [attr.data-status]="taskItem.status"
+                      [attr.aria-label]="taskLabel(taskItem)"
+                      [title]="taskLabel(taskItem)"
+                      (click)="select(taskItem, runItem)"
+                      data-testid="task"
+                    ></button>
+                  } @empty {
+                    <span class="run-empty">No tasks</span>
                   }
                 </div>
-              </td>
-            </tr>
-          }
-        </tbody>
-      </table>
-    </div>
-  }
-
-  <!-- Task Overview Modal -->
-  @if (selectedTask) {
-    <div class="modal modal-open">
-      <div class="modal-box max-w-2xl">
-        <h3 class="font-bold text-lg mb-4">Task Overview</h3>
-        <div class="space-y-4">
-          <div class="grid grid-cols-3 gap-2 text-sm">
-            <div class="font-semibold">Task ID:</div>
-            <div class="col-span-2 opacity-70">{{ selectedTask.task.id }}</div>
-
-            <div class="font-semibold">Name:</div>
-            <div class="col-span-2">{{ selectedTask.task.name || 'Unnamed Task' }}</div>
-
-            <div class="font-semibold">Created at:</div>
-            <div class="col-span-2">{{ formatDate(selectedTask.task.created_at) }}</div>
-
-            <div class="font-semibold">Status:</div>
-            <div class="col-span-2">
-              <span class="badge badge-sm" [class.badge-success]="selectedTask.status === 'success'" [class.badge-error]="selectedTask.status === 'error'">
-                {{ selectedTask.status }}
-              </span>
-            </div>
-          </div>
-
-          @if (selectedTask.task.errors && selectedTask.task.errors.length > 0) {
-            <div class="bg-error/10 border border-error/20 p-3 rounded">
-              <h4 class="text-error font-bold text-xs uppercase mb-1">Errors</h4>
-              <ul class="text-sm list-disc list-inside">
-                @for (error of selectedTask.task.errors; track $index) {
-                  <li>{{ error }}</li>
-                }
-              </ul>
+              }
             </div>
           }
-
-          <div class="bg-base-200 p-4 rounded-lg overflow-auto max-h-60">
-            <h4 class="font-bold text-xs uppercase opacity-60 mb-2">Input</h4>
-            <pre class="text-xs whitespace-pre-wrap">{{ selectedTask.task.inputs | json }}</pre>
-          </div>
         </div>
+      }
+    </ui-card>
+  }
+}
 
-        <div class="modal-action">
-          <button class="btn btn-outline btn-sm" (click)="openTaskInNewTab()">Open in New Tab</button>
-          <button class="btn btn-primary btn-sm" (click)="closeTaskOverview()">Close</button>
-        </div>
-      </div>
-      <div class="modal-backdrop" (click)="closeTaskOverview()"></div>
+<ui-dialog size="lg" [open]="selected() !== null" title="Task" (closed)="close()">
+  @if (selected(); as s) {
+    <div class="task-detail" data-testid="task-detail">
+      <ui-info label="Name">{{ s.item.task.name || 'Unnamed task' }}</ui-info>
+      <ui-info label="Status"><ui-status-badge [status]="s.item.status" /></ui-info>
+      @if (s.item.task.node_type) {
+        <ui-info label="Type" mono>{{ s.item.task.node_type }}</ui-info>
+      }
+      @if (s.item.task.tool_uri) {
+        <ui-info label="Tool" mono>{{ s.item.task.tool_uri }}</ui-info>
+      }
+      <ui-info label="Task ID" mono>
+        <span class="task-id">
+          <span [title]="s.item.task.id">{{ shortId(s.item.task.id) }}</span>
+          <ui-copy-button [text]="s.item.task.id" />
+        </span>
+      </ui-info>
+      <ui-info label="Started">{{ s.item.task.created_at | date: 'medium' }}</ui-info>
+      <ui-info label="Duration">{{ formatDuration(s.item.task.duration_seconds) }}</ui-info>
+
+      @if (s.item.status === 'error') {
+        <ui-alert data-testid="task-errors">
+          <ul class="task-errors">
+            @for (message of s.item.task.errors; track $index) {
+              <li>{{ message }}</li>
+            }
+          </ul>
+        </ui-alert>
+      }
+
+      <h3 class="task-section">Input</h3>
+      @if (s.item.task.inputs) {
+        <div class="task-json"><app-json-tree [data]="s.item.task.inputs" [isExpanded]="true" /></div>
+      } @else {
+        <p class="text-muted">No input recorded.</p>
+      }
     </div>
   }
-</div>
+  @if (selected(); as s) {
+    <a
+      dialog-actions
+      uiButton="ghost"
+      [routerLink]="['/conversations', s.run.sessionId]"
+      [fragment]="'task-' + s.item.task.id"
+      data-testid="open-conversation"
+      >Open conversation</a
+    >
+  }
+  @if (selected(); as s) {
+    <a
+      dialog-actions
+      uiButton="ghost"
+      [routerLink]="['/conversations', s.run.sessionId, 'runs', s.run.run.id, 'tasks']"
+      data-testid="open-run"
+      >Open run</a
+    >
+  }
+  <button dialog-actions type="button" uiButton (click)="close()" data-testid="task-close">Close</button>
+</ui-dialog>

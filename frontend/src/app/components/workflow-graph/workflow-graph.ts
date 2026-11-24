@@ -13,10 +13,12 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-import { Component, Input, OnChanges } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, DestroyRef, OnChanges, inject, input, signal } from '@angular/core';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
+import { Subscription } from 'rxjs';
 import { AgentService } from '../../services/agent-service';
+import { errorMessage } from '../../core/http-error';
+import { UiAlert, UiButton, UiLoading } from '../../ui';
 
 /**
  * Renders a workflow graph (its `nodes` + transitions) as an SVG diagram. The
@@ -27,42 +29,44 @@ import { AgentService } from '../../services/agent-service';
  */
 @Component({
   selector: 'app-workflow-graph',
-  standalone: true,
-  imports: [CommonModule],
-  template: `
-    @if (error) {
-      <div class="text-error text-sm p-4">{{ error }}</div>
-    }
-    <div
-      class="workflow-graph w-full flex justify-center overflow-auto"
-      [innerHTML]="svg"
-    ></div>
-  `,
+  imports: [UiAlert, UiButton, UiLoading],
+  templateUrl: './workflow-graph.html',
+  styleUrl: './workflow-graph.css',
 })
 export class WorkflowGraphComponent implements OnChanges {
-  @Input() workflow: any;
-  svg: SafeHtml | null = null;
-  error: string | null = null;
+  private readonly agentService = inject(AgentService);
+  private readonly sanitizer = inject(DomSanitizer);
 
-  constructor(
-    private agentService: AgentService,
-    private sanitizer: DomSanitizer,
-  ) {}
+  readonly workflow = input<unknown>(null);
+  readonly svg = signal<SafeHtml | null>(null);
+  readonly loading = signal(false);
+  readonly error = signal<string | null>(null);
+
+  private subscription: Subscription | null = null;
+
+  constructor() {
+    inject(DestroyRef).onDestroy(() => this.subscription?.unsubscribe());
+  }
 
   ngOnChanges(): void {
     this.render();
   }
 
-  private render(): void {
-    this.error = null;
-    this.svg = null;
-    if (!this.workflow) return;
-    this.agentService.renderWorkflowSvg(this.workflow).subscribe({
+  render(): void {
+    this.subscription?.unsubscribe();
+    this.error.set(null);
+    this.svg.set(null);
+    const workflow = this.workflow();
+    if (!workflow) return;
+    this.loading.set(true);
+    this.subscription = this.agentService.renderWorkflowSvg(workflow).subscribe({
       next: (svg) => {
-        this.svg = this.sanitizer.bypassSecurityTrustHtml(svg);
+        this.svg.set(this.sanitizer.bypassSecurityTrustHtml(svg));
+        this.loading.set(false);
       },
-      error: () => {
-        this.error = 'Could not render workflow graph.';
+      error: (err) => {
+        this.error.set(errorMessage(err, 'Could not draw the workflow graph.'));
+        this.loading.set(false);
       },
     });
   }

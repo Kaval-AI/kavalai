@@ -15,6 +15,14 @@ deliberate: an agent database can be handed to the backoffice read-mostly, and
 several environments — local, staging, production — can be inspected from one
 interface without their runtime data ever meeting.
 
+Every page sits in one frame: a top bar with the user menu (**Profile**,
+**Sign out**), and a sidebar with the **project switcher** above the pages of
+the active project — **Overview**, **Conversations**, **Runs**, **Model
+calls**, **Agents**, **RAG** and **Settings** — and, for administrators,
+**Users**. The switcher names the active project and the database its runs are
+read from; it is the one place the active project changes, and every page
+follows it.
+
 .. contents:: On this page
    :local:
    :depth: 1
@@ -226,8 +234,11 @@ the database file, which the backoffice must be able to read from its own
 filesystem. A PostgreSQL project may also name a **RAG Schema**, for a
 deployment that keeps its RAG collections in a schema of their own beside the
 runtime tables; left empty, the collections are looked for in the schema above.
-The project page is where the active project is chosen, new ones are created,
-and the connection is verified.
+A project's **Overview** shows what its agent database holds; its
+**Settings** page edits it, one card per concern — General, Database (with
+**Test connection**), Access, Members and the **Danger zone**, where the
+project is deleted by typing its name. Administrators create a project with
+**New project** in the switcher.
 
 The database password is write-only. Every member of a project receives its
 settings, and the password would let a viewer connect to the agent database
@@ -257,11 +268,13 @@ do so on a project nobody opened for it.
          and seven-day activity and token charts
    :width: 100%
 
-The **Statistics (Last 7 Days)** panels are read from the agent database rather
-than from the backoffice's own: sessions, messages, tasks and workflow runs on
-the left, input, output and embedding tokens on the right. They are the first
-indication that a project's connection is sound and that the runtime is in fact
-writing to the schema the project names.
+The figures and charts of the **Overview** are read from the agent database
+rather than from the backoffice's own: conversations, runs, messages and tasks,
+the tokens of the last seven days per day, and the average model call and run.
+They are the first indication that a project's connection is sound and that
+the runtime is in fact writing to the schema the project names. Beneath them,
+the **Connection strings** card gives the agent database's URI in the forms an
+agent server and a client library take, with the password masked.
 
 The selected project follows the user across pages, and is stored as
 ``active_project_id``. If the project is later deleted, or the membership
@@ -292,13 +305,14 @@ seven-day charts describe one agent rather than the whole project, which makes
 this the quickest view for judging how heavily a single agent is used.
 
 
-Workflow monitoring
--------------------
+Runs
+----
 
-The **Workflows** page is a monitoring timeline: one row per agent, one marker
-per recent run. Completed runs are filled and empty runs are flagged, which
-gives an at-a-glance health view across every agent in the project and a route
-into any individual run.
+The **Runs** page is a monitoring timeline: one card per agent, one strip per
+recent run, one square per task — lime for a task that completed, raspberry for
+one that recorded an error. It gives an at-a-glance health view across every
+agent in the project, and a square opens its task, with links to its
+conversation and its run.
 
 
 Conversations
@@ -315,8 +329,8 @@ since :doc:`../guides/evaluation` records each case under
          run, task, message and error counts with the first and latest payloads
    :width: 100%
 
-Each entry shows the counts for that session and, below them, its first and
-latest payloads. Because a Kaval.AI workflow's boundaries are typed, those
+Each row shows the counts for that session; selecting it opens a panel beside
+the list with its first and latest payloads and the way into the conversation. Because a Kaval.AI workflow's boundaries are typed, those
 payloads are structured data rather than prose: in the illustration the bakery
 assistant's latest output carries ``status``, ``order_id`` and ``missing``
 beside the human-readable ``subject`` and ``body``, so what the workflow decided
@@ -389,8 +403,10 @@ Each call is attributed to the run that made it: a row carries the run's
 ``run_id`` and ``session_id``, the embedding calls of a workflow's
 ``rag_query`` nodes included, whose response payload records no vectors.
 Neither identifier is a foreign key, so the token counts outlive the
-conversation they belong to. A card links to its conversation and to the
-run's tasks, and its run identifier narrows the page to that run's calls. The
+conversation they belong to. Selecting a call opens it beside the list: its
+figures, links to its conversation and to the run's tasks, and the request and
+response — as messages, with **Show as text**, or as JSON. Its run identifier
+narrows the page to that run's calls. The
 same filters are the page's ``run_id`` and ``session_id`` query parameters,
 which is how the **Model calls** button of a conversation and the task
 debugger reach it; **Show all calls** removes them.
@@ -500,11 +516,33 @@ Users and access
 ----------------
 
 The **Users** page is administrator-only. It is where accounts are created
-after the first — an address and a name, with the administrator flag granted or
-withheld — and where they are removed. An account created there has no
-password and signs in through Google; a password is given with
-``python -m kavalai.backoffice.users set-password``. An administrator cannot delete their own
-account, which prevents an installation from being locked out of itself.
+after the first and where they are removed. Its table lists each user with
+their picture or initials, name and address, an ``admin`` badge for an
+administrator, and ``password`` or ``Google only`` according to whether a
+password is stored. **Add user** and each row's **Edit** open the same form:
+address, name, picture URL, the **Administrator** switch and a password. The
+password is optional — an account created without one signs in through Google
+only — and when editing an empty password field keeps the stored one. The
+server hashes the password and refuses one shorter than eight characters;
+such a refusal is shown in the form, which stays open. **Delete** asks for
+confirmation first, and the user's project memberships go with the account. An
+administrator cannot delete their own account — the control is disabled, with
+the reason beneath the table — which prevents an installation from being
+locked out of itself.
+
+The **Profile** page, reached from the user menu at the top right, is open to
+every user and concerns only their own account. Its **Details** card changes
+the name and the picture URL, and shows the address and the access badges,
+which only an administrator changes; the name in the top bar follows a save.
+A Google sign-in replaces the name and the picture with those of the Google
+account at every such sign-in, as noted under *Creating the first user*. The **Password** card asks for the current
+password and the new one twice. A user who signs in through Google only has no
+current password; the card then sets a first one, after which the user can
+also sign in with their address. The endpoints behind the page are
+``GET /user/me``, ``PATCH /user/me`` (``name`` and ``picture``; any other field
+is refused) and ``POST /user/me/password`` (``current_password``,
+``new_password``). A wrong or missing current password is refused with one
+message, whichever it was.
 
 Membership is granted per project, in one of two roles. A **viewer** may read
 everything the project exposes; an **owner** may in addition edit the project,

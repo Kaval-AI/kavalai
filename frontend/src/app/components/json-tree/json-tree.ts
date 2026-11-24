@@ -13,15 +13,21 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-import { Component, Input, OnInit, ViewChildren, QueryList } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, Input, OnInit, QueryList, ViewChildren } from '@angular/core';
+import { UiButton, UiCopyButton } from '../../ui';
 
+/**
+ * A collapsible view of a JSON value. The top level is open and carries
+ * Copy, Expand all and Collapse all; every nested object or array starts
+ * closed and opens on a click. Nested levels are instances of this component,
+ * with `key` and `depth` set by their parent.
+ */
 @Component({
   selector: 'app-json-tree',
   standalone: true,
-  imports: [CommonModule],
+  imports: [UiButton, UiCopyButton],
   templateUrl: './json-tree.html',
-  styleUrl: './json-tree.css'
+  styleUrl: './json-tree.css',
 })
 export class JsonTreeComponent implements OnInit {
   private _data: any;
@@ -37,87 +43,84 @@ export class JsonTreeComponent implements OnInit {
   @Input() depth: number = 0;
 
   @ViewChildren(JsonTreeComponent) childComponents!: QueryList<JsonTreeComponent>;
-  isCopied: boolean = false;
 
   isObject: boolean = false;
   isArray: boolean = false;
   isExpandable: boolean = false;
   formattedValue: string = '';
   type: string = '';
+  private copiedText: string | null = null;
 
-  children: { key: string | number, value: any }[] = [];
+  children: { key: string | number; value: any }[] = [];
 
-  ngOnInit() {
+  ngOnInit(): void {
     if (this.isExpanded === null) {
       this.isExpanded = this.depth < 1;
     }
-    this.processData();
   }
 
-  private processData() {
+  private processData(): void {
     this.isObject = false;
     this.isArray = false;
     this.isExpandable = false;
     this.children = [];
 
     this.type = typeof this.data;
-    if (this.data === null) {
+    if (this.data === null || this.data === undefined) {
       this.type = 'null';
       this.formattedValue = 'null';
     } else if (Array.isArray(this.data)) {
       this.isArray = true;
       this.isObject = true;
       this.isExpandable = this.data.length > 0;
-      this.formattedValue = `Array[${this.data.length}]`;
+      this.formattedValue = this.data.length === 1 ? '[1 item]' : `[${this.data.length} items]`;
       this.children = this.data.map((value: any, index: number) => ({ key: index, value }));
     } else if (this.type === 'object') {
       this.isObject = true;
       const keys = Object.keys(this.data);
       this.isExpandable = keys.length > 0;
-      this.formattedValue = 'Object';
-      this.children = keys.map(key => ({ key, value: this.data[key] }));
+      this.formattedValue = keys.length === 1 ? '{1 key}' : `{${keys.length} keys}`;
+      this.children = keys.map((key) => ({ key, value: this.data[key] }));
     } else if (this.type === 'string') {
       this.formattedValue = `"${this.data}"`;
     } else {
       this.formattedValue = String(this.data);
     }
+    this.copiedText = null;
   }
 
-  toggleExpand(event: Event) {
+  /** The value as indented JSON, what Copy puts on the clipboard; built once per value. */
+  get jsonText(): string {
+    this.copiedText ??= JSON.stringify(this.data ?? null, null, 2);
+    return this.copiedText;
+  }
+
+  toggleExpand(event: Event): void {
     if (this.isExpandable) {
       this.isExpanded = !this.isExpanded;
     }
     event.stopPropagation();
   }
 
-  expandAll(event: Event) {
+  expandAll(event: Event): void {
     this.setExpandedRecursive(true);
     event.stopPropagation();
   }
 
-  collapseAll(event: Event) {
+  collapseAll(event: Event): void {
     this.setExpandedRecursive(false);
     event.stopPropagation();
   }
 
-  copyToClipboard(event: Event) {
-    event.stopPropagation();
-    const jsonString = JSON.stringify(this.data, null, 2);
-    navigator.clipboard.writeText(jsonString).then(() => {
-      this.isCopied = true;
-      setTimeout(() => {
-        this.isCopied = false;
-      }, 2000);
-    }).catch(err => {
-      console.error('Failed to copy JSON: ', err);
-    });
-  }
-
-  private setExpandedRecursive(expanded: boolean) {
+  /**
+   * Opening a level renders its children only on the next change detection,
+   * so the children are reached a tick later.
+   */
+  private setExpandedRecursive(expanded: boolean): void {
     if (this.isExpandable) {
       this.isExpanded = expanded;
       setTimeout(() => {
-        this.childComponents.forEach(child => child.setExpandedRecursive(expanded));
+        this.childComponents.forEach((child) => child.setExpandedRecursive(expanded));
       });
     }
   }

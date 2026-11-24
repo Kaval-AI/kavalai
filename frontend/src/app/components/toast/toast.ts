@@ -13,32 +13,61 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-
 import { Component, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { ToastService } from '../../services/toast-service';
+import { UiAlert } from '../../ui';
 
+/** The toasts of `ToastService`, stacked in the bottom-right corner. */
 @Component({
   selector: 'app-toast',
-  standalone: true,
-  imports: [CommonModule],
+  imports: [UiAlert],
   template: `
-    <div class="z-[9999] pointer-events-none fixed inset-0">
+    <div class="toasts" aria-live="polite">
       @for (toast of toastService.toasts(); track toast.id) {
-        <div class="alert absolute transition-all duration-300 pointer-events-auto"
-          [style.left.px]="toast.position?.x"
-          [style.top.px]="toast.position?.y"
-          [ngClass]="{
-            'alert-success': toast.type === 'success',
-            'alert-error': toast.type === 'error',
-            'alert-info': toast.type === 'info',
-            'alert-warning': toast.type === 'warning',
-            'toast toast-end toast-bottom relative': !toast.position
-          }">
-          <span>{{ toast.message }}</span>
-        </div>
+        <ui-alert class="toast" [tone]="toast.type" [attr.data-testid]="'toast-' + toast.type">
+          {{ toast.message }}
+          <button
+            alert-actions
+            type="button"
+            class="toast-close"
+            aria-label="Dismiss"
+            (click)="toastService.remove(toast.id)"
+          >
+            <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+          </button>
+        </ui-alert>
       }
     </div>
+  `,
+  styles: `
+    .toasts {
+      position: fixed;
+      right: var(--space-5);
+      bottom: var(--space-5);
+      z-index: 2000;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: var(--space-2);
+      max-width: calc(100vw - 2 * var(--space-5));
+      pointer-events: none;
+    }
+
+    .toast {
+      pointer-events: auto;
+      min-width: 220px;
+      box-shadow: var(--elevation-2);
+    }
+
+    .toast-close {
+      color: inherit;
+      opacity: 0.7;
+      cursor: pointer;
+    }
+
+    .toast-close:hover {
+      opacity: 1;
+    }
   `,
 })
 export class Toast {

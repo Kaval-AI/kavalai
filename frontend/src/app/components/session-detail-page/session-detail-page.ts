@@ -13,170 +13,188 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-import { Component, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { ActivatedRoute, Router, RouterModule } from '@angular/router';
+import { formatDuration } from '../../core/format';
+import { Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { DatePipe, DecimalPipe, NgTemplateOutlet } from '@angular/common';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import { AgentService } from '../../services/agent-service';
 import { UserService } from '../../services/user-service';
 import { ChatMessage } from '../../models/chat-message';
 import { Run } from '../../models/run';
+import { SessionDetails } from '../../models/session';
 import { Task } from '../../models/task';
 import { JsonTreeComponent } from '../json-tree/json-tree';
-import { NavigationService } from '../../services/navigation-service';
+import { errorMessage } from '../../core/http-error';
+import {
+  UiAlert,
+  UiBadge,
+  UiButton,
+  UiCard,
+  UiCopyButton,
+  UiDialog,
+  UiEmptyState,
+  UiInfo,
+  UiLoading,
+  UiPageHeader,
+  UiStat,
+  UiStats,
+} from '../../ui';
 
-interface RunBlock {
+/**
+ * One run of the conversation as the page shows it: the run, its position
+ * (1-based, in the order the runs started), the messages it recorded, the
+ * names of the steps it ran (top-level tasks, in execution order) and the
+ * number of errors its tasks recorded.
+ */
+export interface RunBlock {
   run: Run;
-  timeline: (ChatMessage | Task)[];
+  index: number;
+  messages: ChatMessage[];
+  steps: string[];
+  errors: number;
 }
 
+/** The JSON shown in the dialog: which of a run's payloads, and the value. */
+interface JsonView {
+  title: string;
+  data: unknown;
+}
+
+function byCreated(a: { created_at: string }, b: { created_at: string }): number {
+  return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+}
+
+function hasText(message: ChatMessage): boolean {
+  return !!message.content && message.content.trim().length > 0;
+}
+
+/**
+ * The transcript of one conversation, grouped by run. Each run is a card with
+ * its metadata, the messages it recorded and the way to what lies behind it:
+ * its tasks, its model calls and its input, output and context as JSON.
+ */
 @Component({
   selector: 'app-session-detail-page',
-  standalone: true,
-  imports: [CommonModule, RouterModule, JsonTreeComponent],
+  imports: [
+    DatePipe,
+    DecimalPipe,
+    NgTemplateOutlet,
+    RouterLink,
+    JsonTreeComponent,
+    UiAlert,
+    UiBadge,
+    UiButton,
+    UiCard,
+    UiCopyButton,
+    UiDialog,
+    UiEmptyState,
+    UiInfo,
+    UiLoading,
+    UiPageHeader,
+    UiStat,
+    UiStats,
+  ],
   templateUrl: './session-detail-page.html',
   styleUrl: './session-detail-page.css',
 })
 export class SessionDetailPage implements OnInit {
-  private route = inject(ActivatedRoute);
-  private router = inject(Router);
-  private agentService = inject(AgentService);
-  private userService = inject(UserService);
-  private navigationService = inject(NavigationService);
+  private readonly route = inject(ActivatedRoute);
+  private readonly agentService = inject(AgentService);
+  private readonly userService = inject(UserService);
+  private readonly destroyRef = inject(DestroyRef);
 
-  sessionId: string | null = null;
-  projectId: string | null = null;
-  runBlocks: RunBlock[] = [];
-  unassignedMessages: ChatMessage[] = [];
-  loading: boolean = false;
-  error: string | null = null;
+  readonly sessionId = signal<string | null>(null);
+  readonly projectId = signal<string | null>(null);
+  readonly runs = signal<RunBlock[]>([]);
+  readonly unassigned = signal<ChatMessage[]>([]);
+  readonly loading = signal(false);
+  readonly error = signal('');
+  readonly json = signal<JsonView | null>(null);
 
-  // Modal state
-  showModal: boolean = false;
-  modalTitle: string = '';
-  modalData: any = null;
-  modalType: 'json' | 'tasks' = 'json';
-  modalRunId: string = '';
+  readonly shortId = computed(() => this.sessionId()?.slice(0, 8) ?? '');
+  readonly empty = computed(() => this.runs().length === 0 && this.unassigned().length === 0);
+  readonly formatDuration = formatDuration;
 
   ngOnInit(): void {
-    this.route.paramMap.subscribe((params) => {
-      this.sessionId = params.get('sessionId');
-      this.navigationService.setBreadcrumbs([
-        { label: 'Conversations', link: '/conversations' },
-        { label: this.sessionId || 'Session Details' }
-      ]);
+    this.route.paramMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
+      this.sessionId.set(params.get('sessionId'));
+      this.load();
     });
 
-    this.userService.userDetails.subscribe((user) => {
-      if (user && user.active_project_id) {
-        const newProjectId =
-          user.active_project_id !== 'None' ? user.active_project_id : null;
-        if (newProjectId !== this.projectId) {
-          this.projectId = newProjectId;
-          if (this.sessionId && this.projectId) {
-            this.loadSessionDetails();
-          }
-        }
-      } else if (this.sessionId) {
-        this.error = 'Invalid session or project';
-      }
+    this.userService.userDetails.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((user) => {
+      const id = user?.active_project_id && user.active_project_id !== 'None' ? user.active_project_id : null;
+      if (id === this.projectId()) return;
+      this.projectId.set(id);
+      this.load();
     });
   }
 
-  loadSessionDetails(): void {
-    if (!this.projectId || !this.sessionId) return;
-
-    this.loading = true;
-    this.error = null;
-
-    this.agentService.getSessionDetails(this.projectId, this.sessionId).subscribe({
+  load(): void {
+    const projectId = this.projectId();
+    const sessionId = this.sessionId();
+    if (!projectId || !sessionId) return;
+    this.loading.set(true);
+    this.error.set('');
+    this.agentService.getSessionDetails(projectId, sessionId).subscribe({
       next: (details) => {
-        const runMap = new Map<string, { run: Run; timeline: (ChatMessage | Task)[] }>();
-        details.runs.forEach((run) => {
-          runMap.set(run.id, { run, timeline: [] });
-        });
-
-        this.unassignedMessages = [];
-        details.messages.forEach((msg) => {
-          if (msg.run_id && runMap.has(msg.run_id)) {
-            runMap.get(msg.run_id)!.timeline.push(msg);
-          } else {
-            this.unassignedMessages.push(msg);
-          }
-        });
-
-        details.tasks.forEach((task) => {
-          if (runMap.has(task.run_id)) {
-            runMap.get(task.run_id)!.timeline.push(task);
-          }
-        });
-
-        // Sort timeline items by created_at
-        runMap.forEach((block) => {
-          block.timeline.sort((a, b) => {
-            const timeA = new Date(a.created_at).getTime();
-            const timeB = new Date(b.created_at).getTime();
-            return timeA - timeB;
-          });
-        });
-
-        this.runBlocks = Array.from(runMap.values());
-        this.loading = false;
+        this.group(details);
+        this.loading.set(false);
       },
       error: (err) => {
-        this.error = 'Failed to load session details';
-        console.error(err);
-        this.loading = false;
+        this.error.set(errorMessage(err, 'The conversation could not be loaded.'));
+        this.loading.set(false);
       },
     });
   }
 
-  isChatMessage(item: ChatMessage | Task): item is ChatMessage {
-    return (item as ChatMessage).role !== undefined;
+  showJson(title: string, data: unknown): void {
+    this.json.set({ title, data });
   }
 
-  isTask(item: ChatMessage | Task): item is Task {
-    return (item as Task).run_id !== undefined && (item as Task).agent_id !== undefined;
+  closeJson(): void {
+    this.json.set(null);
   }
 
-  getTaskName(task: Task): string {
-    return task.name || 'Task';
+  /**
+   * A message's content as indented JSON when it is a JSON object or array
+   * (a workflow's structured answer), otherwise `null`.
+   */
+  prettyJson(content: string): string | null {
+    const text = content.trim();
+    if (!text.startsWith('{') && !text.startsWith('[')) return null;
+    try {
+      return JSON.stringify(JSON.parse(text), null, 2);
+    } catch {
+      return null;
+    }
   }
 
-  getTaskErrorsCount(task: Task): number {
-    return task.errors ? task.errors.length : 0;
+  private group(details: SessionDetails): void {
+    const runIds = new Set(details.runs.map((r) => r.id));
+    const messages = details.messages.filter(hasText).sort(byCreated);
+    this.runs.set(
+      [...details.runs].sort(byCreated).map((run, i) => {
+        const tasks = details.tasks.filter((t) => t.run_id === run.id);
+        return {
+          run,
+          index: i + 1,
+          messages: messages.filter((m) => m.run_id === run.id),
+          steps: stepNames(tasks),
+          errors: tasks.reduce((sum, t) => sum + (t.errors?.length ?? 0), 0),
+        };
+      })
+    );
+    this.unassigned.set(messages.filter((m) => !m.run_id || !runIds.has(m.run_id)));
   }
+}
 
-  openJsonModal(title: string, data: any): void {
-    this.modalTitle = title;
-    this.modalData = data;
-    this.modalType = 'json';
-    this.showModal = true;
-  }
-
-  openTasksPage(run: Run): void {
-    if (!this.sessionId) return;
-    this.router.navigate(['/conversations', this.sessionId, 'runs', run.id, 'tasks']);
-  }
-
-  closeModal(): void {
-    this.showModal = false;
-    this.modalData = null;
-  }
-
-  formatDate(dateStr: string): string {
-    const date = new Date(dateStr);
-    return date.toLocaleString();
-  }
-
-  getTaskNames(block: RunBlock): string {
-    return block.timeline
-      .filter(this.isTask)
-      .map((t) => t.name || t.id)
-      .filter((name, index, self) => self.indexOf(name) === index)
-      .join(', ');
-  }
-
-  goBack(): void {
-    this.router.navigate(['/conversations']);
-  }
+/** The distinct names of a run's top-level steps, in the order they ran. */
+function stepNames(tasks: Task[]): string[] {
+  const order = (t: Task) => t.seq ?? Number.MAX_SAFE_INTEGER;
+  const names = tasks
+    .filter((t) => !t.parent_task_name)
+    .sort((a, b) => order(a) - order(b) || byCreated(a, b))
+    .map((t) => t.name || t.id);
+  return [...new Set(names)];
 }
