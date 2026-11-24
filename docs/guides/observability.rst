@@ -493,6 +493,173 @@ list computed from an empty selection cannot purge the whole database.
 ``delete_history_for_session`` treats a single session's model calls in the
 same way, while keeping the session and its runs.
 
+.. _observability-opentelemetry:
+
+Exporting to OpenTelemetry
+--------------------------
+
+The tables are the record of a run. A deployment that already operates a
+tracing stack — Grafana Tempo, Jaeger, a vendor's collector — can receive each
+run there as well, as an OpenTelemetry trace with a small set of metrics.
+The export is a second output beside ``AgentService`` and the task logger:
+nothing recorded in the tables is recorded differently, and an engine built
+without ``telemetry=`` exports nothing. It needs the ``otel`` extra
+(``pip install "kavalai[otel]"``, part of ``common``).
+
+A run is one trace. In the example below the spans go to an in-memory exporter
+so that the tree can be printed; a scripted client stands in for the model, as
+above.
+
+.. code-block:: python
+
+   from opentelemetry.sdk.trace import TracerProvider
+   from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+   from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+       InMemorySpanExporter,
+   )
+
+   from kavalai.otel import OtelTelemetry
+
+   exporter = InMemorySpanExporter()
+   provider = TracerProvider()
+   provider.add_span_processor(SimpleSpanProcessor(exporter))
+
+   scripted = ScriptedLlmClient([
+       {"topic": "opening hours"}, {"agent_response": "From noon."},
+   ])
+   engine = (
+       WorkflowBuilder("Village guide", llm_model="openai/gpt-5.6-luna")
+       .data_model("input", Message)
+       .data_model("topic", Topic)
+       .data_model("output", Reply)
+       .start("classify")
+       .llm("classify", prompt="Name the topic of the question.",
+            inputs={"message": "input"}, output="topic", next="reply")
+       .llm("reply", prompt="You are a concise guide to Green Village.",
+            inputs={"message": "input"}, output="output", next="end")
+       .end()
+       .build_engine(client_factory=scripted,
+                     telemetry=OtelTelemetry(tracer_provider=provider))
+   )
+   await engine.run({"user_message": "Is the pub open on Sundays?"})
+
+   spans = sorted(exporter.get_finished_spans(), key=lambda s: s.start_time)
+
+
+   def show(parent_id, depth):
+       for span in spans:
+           if (span.parent.span_id if span.parent else None) == parent_id:
+               tokens = span.attributes.get("gen_ai.usage.output_tokens")
+               note = f"  output_tokens={tokens}" if tokens is not None else ""
+               print(f"{'  ' * depth}{span.name}{note}")
+               show(span.context.span_id, depth + 1)
+
+
+   show(None, 0)
+   reply = next(s for s in spans if s.name == "llm reply")
+   call = next(s for s in spans if s.parent
+               and s.parent.span_id == reply.context.span_id)
+   print(sorted(call.attributes))
+
+.. code-block:: text
+
+   invoke_workflow Village guide  output_tokens=15
+     start start
+     llm classify
+       chat gpt-5.6-luna  output_tokens=7
+     llm reply
+       chat gpt-5.6-luna  output_tokens=8
+     end end
+   ['gen_ai.operation.name', 'gen_ai.provider.name',
+    'gen_ai.request.model', 'gen_ai.usage.input_tokens',
+    'gen_ai.usage.output_tokens', 'http.response.status_code']
+
+There are four kinds of span:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 16 30 54
+
+   * - Span
+     - Name
+     - What it carries
+   * - Run
+     - ``invoke_workflow {workflow}``
+     - ``kavalai.run.id``, ``kavalai.agent.id``, the session as
+       ``gen_ai.conversation.id``, ``kavalai.session.external_id``,
+       ``kavalai.invocation_id``, the run's token totals and
+       ``kavalai.run.status``. A failed run has the ``ERROR`` status and its
+       error text.
+   * - Node
+     - ``{node_type} {node_name}``
+     - ``kavalai.node.name``, ``kavalai.node.type`` and ``kavalai.node.seq``
+       — the ``seq`` of the node's task row. A branch node adds
+       ``kavalai.branch.taken`` and ``kavalai.branch.matched``.
+   * - Model call
+     - ``chat {model}``, ``embeddings {model}``
+     - The provider, the model, the token counts — cached input and reasoning
+       tokens included — and the provider's status code. A failed attempt has
+       ``error.type`` and the ``ERROR`` status; each attempt of a retried
+       call is a span of its own.
+   * - Tool call
+     - ``execute_tool {function}``
+     - ``gen_ai.tool.name`` and ``kavalai.tool.uri``, for a function node and
+       for a tool an agent chose alike. A raised exception is recorded.
+
+The run span is a child of whichever span is current when the run starts, so
+a run served from an instrumented web application appears inside the trace of
+its request. Everything a node starts is a child of that node's span: the
+branches of a ``parallel`` node, and the outbound HTTP request of a tool when
+the HTTP client is instrumented, which then also carries the ``traceparent``
+header to the service it calls.
+
+The metrics are histograms: ``gen_ai.client.token.usage`` and
+``gen_ai.client.operation.duration`` per model, ``kavalai.workflow.run.duration``
+per workflow and status, ``kavalai.workflow.node.duration`` per node and
+``kavalai.tool.call.duration`` per tool. No session, run or agent id is a
+metric attribute, so the number of series is bounded by the graph and the
+list of models.
+
+Names follow the OpenTelemetry GenAI semantic conventions where one exists
+and have a ``kavalai.`` prefix where none does. Those conventions have
+*Development* status and have changed between releases; the names used are
+those of semantic-conventions 1.41 (``kavalai.otel.SEMCONV_VERSION``), and a
+later change of name is listed in :doc:`../versions`.
+
+**Content is not exported by default.** Spans carry names, timings, token
+counts and error types, and no prompt, answer, tool argument, tool result or
+branch value. ``OtelTelemetry(capture_content=True)`` attaches a model call's
+request and response to its span as ``kavalai.model_call.request`` and
+``kavalai.model_call.response``, each cut to ``max_content_bytes`` (8192)
+with the marker the task logger uses. This is the opposite default from the
+task logger, deliberately: the agent database is the operator's own, while an
+OTLP endpoint is commonly a third party's. The error text of a failed node or
+run is exported in either case, and can quote the value that failed
+validation.
+
+**Spans and rows refer to each other by id.** The run span carries
+``kavalai.run.id``, so the trace of a recorded run is found with one
+predicate — ``{ span.kavalai.run.id = "<run id>" }`` in TraceQL — and the
+run of a trace by reading the attribute. There is no ``trace_id`` column on
+``runs``; the link needs no migration.
+
+A model-call span is created when the call has finished, from the same
+``ModelCallStat`` the task logger receives, with its start computed from the
+duration. The clients are therefore unchanged, and a call in flight is visible
+as its node's open span rather than as a span of its own. ``OtelTelemetry``
+is itself a statistics receiver, so
+``make_client(model, stats_receiver=OtelTelemetry())`` traces a client used
+outside a workflow.
+
+``OtelTelemetry()`` uses the process-global tracer and meter providers unless
+it is given others, as OpenTelemetry instrumentations do: a host that has
+configured OpenTelemetry for the rest of its service passes
+``telemetry=OtelTelemetry()`` and the spans go where its own do.
+``python -m kavalai.server`` configures the providers itself when
+``KAVALAI_AGENT_OTEL=true`` — see :ref:`deploy-opentelemetry`. Database
+writes and the backoffice produce no spans, and the in-browser runtime
+exports nothing.
+
 The backoffice UI
 -----------------
 

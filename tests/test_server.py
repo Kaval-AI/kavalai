@@ -723,3 +723,56 @@ def test_create_app_from_env_conf_streams_everything_without_a_limit_by_default(
 
     assert captured["event_filter"] is None
     assert app.state.engine.run_timeout is None
+
+
+def test_create_app_from_env_conf_exports_to_opentelemetry_when_asked(
+    env_configured_agent, monkeypatch
+):
+    import kavalai.otel as otel
+
+    configured = []
+    monkeypatch.setattr(
+        otel, "configure_sdk", lambda **kwargs: configured.append(kwargs)
+    )
+    monkeypatch.setenv("KAVALAI_AGENT_OTEL", "true")
+    monkeypatch.setenv("KAVALAI_AGENT_OTEL_CAPTURE_CONTENT", "true")
+
+    app = create_app_from_env_conf()
+
+    engine = app.state.engine
+    assert isinstance(engine.telemetry, otel.OtelTelemetry)
+    assert engine.telemetry.capture_content is True
+    assert engine.kernel.telemetry is engine.telemetry
+    assert configured == [{"service_name": engine.graph.name}]
+
+
+def test_create_app_from_env_conf_exports_nothing_by_default(
+    env_configured_agent, monkeypatch
+):
+    import kavalai.otel as otel
+    from kavalai.telemetry import Telemetry
+
+    configured = []
+    monkeypatch.setattr(
+        otel, "configure_sdk", lambda **kwargs: configured.append(kwargs)
+    )
+    monkeypatch.delenv("KAVALAI_AGENT_OTEL", raising=False)
+
+    app = create_app_from_env_conf()
+
+    assert type(app.state.engine.telemetry) is Telemetry
+    assert configured == []
+
+
+def test_opentelemetry_content_capture_is_off_unless_asked(
+    env_configured_agent, monkeypatch
+):
+    import kavalai.otel as otel
+
+    monkeypatch.setattr(otel, "configure_sdk", lambda **kwargs: None)
+    monkeypatch.setenv("KAVALAI_AGENT_OTEL", "true")
+    monkeypatch.delenv("KAVALAI_AGENT_OTEL_CAPTURE_CONTENT", raising=False)
+
+    app = create_app_from_env_conf()
+
+    assert app.state.engine.telemetry.capture_content is False

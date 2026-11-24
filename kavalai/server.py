@@ -620,6 +620,11 @@ def create_app_from_env_conf(
     - KAVALAI_AGENT_RUN_TIMEOUT_SECONDS: Seconds after which a run is
       cancelled and recorded as failed, passed to the engine as
       ``run_timeout`` (optional, default: no limit).
+    - KAVALAI_AGENT_OTEL: Export every run to OpenTelemetry over OTLP/HTTP,
+      configured by the standard ``OTEL_*`` variables (optional, default:
+      false). Needs the ``otel`` extra.
+    - KAVALAI_AGENT_OTEL_CAPTURE_CONTENT: Attach each model call's request
+      and response to its span (optional, default: false).
 
     Args:
         workflow_path: Path to the workflow YAML file.
@@ -732,6 +737,19 @@ def create_app_from_env_conf(
     logger.info(f"Run timeout: {f'{run_timeout:g} s' if run_timeout else '(none)'}")
     logger.info(f"Public event stream: {'on' if public else 'off'}")
 
+    telemetry = None
+    if env.bool("KAVALAI_AGENT_OTEL", False):
+        from kavalai.otel import OtelTelemetry
+
+        capture_content = env.bool("KAVALAI_AGENT_OTEL_CAPTURE_CONTENT", False)
+        telemetry = OtelTelemetry(capture_content=capture_content)
+        logger.info(
+            "OpenTelemetry export: on"
+            f" (content {'captured' if capture_content else 'not captured'})"
+        )
+    else:
+        logger.info("OpenTelemetry export: off")
+
     logger.info(f"Loading workflow from {workflow_path}.")
     engine = WorkflowEngine.from_yaml_path(
         workflow_path,
@@ -740,7 +758,15 @@ def create_app_from_env_conf(
         default_llm_model=default_llm_model,
         default_llm_parameters=default_llm_parameters,
         run_timeout=run_timeout,
+        telemetry=telemetry,
     )
+    if telemetry is not None:
+        from kavalai.otel import configure_sdk
+
+        # After the load, because the workflow's name is the service name.
+        # The telemetry built above holds proxies that resolve to these
+        # providers once they are installed.
+        configure_sdk(service_name=engine.graph.name)
 
     return create_agent_app(
         engine=engine,

@@ -19,6 +19,20 @@ Google OAuth. One backoffice migration.
 Added
 ^^^^^
 
+* **OpenTelemetry export.** ``WorkflowEngine(telemetry=OtelTelemetry())``
+  exports every run as a trace — run, node, tool call and model call spans,
+  named after the OpenTelemetry GenAI semantic conventions (version 1.41) —
+  with token and latency histograms. :mod:`kavalai.otel` needs the new
+  ``otel`` extra, which ``common`` and the agent image include; ``import
+  kavalai`` imports no OpenTelemetry module. ``python -m kavalai.server``
+  exports over OTLP/HTTP when ``KAVALAI_AGENT_OTEL=true``, configured by the
+  standard ``OTEL_*`` variables. Prompts and answers are exported only with
+  ``capture_content=True`` (``KAVALAI_AGENT_OTEL_CAPTURE_CONTENT``). The
+  tables are unchanged. :class:`~kavalai.Telemetry` is the interface the
+  engine calls, for a tracing system other than OpenTelemetry; ``StatsBridge``
+  and ``TokenAccumulator`` take ``telemetry=`` and ``FunctionKernel`` takes it
+  as its one argument. See :ref:`observability-opentelemetry`.
+
 * **Scaleway as a built-in provider.** ``scaleway/<model>`` names a chat
   model of Scaleway Generative APIs (:class:`~kavalai.ScalewayClient`, on the
   Chat Completions API) and an embedding model
@@ -59,6 +73,9 @@ Upgrading
 * Run ``python -m kavalai.migrate_db backoffice`` (revision 0005 adds
   ``users.password_hash``). Existing users keep signing in through Google
   until they are given a password.
+* The OpenTelemetry export needs no migration and is off unless
+  ``telemetry=`` or ``KAVALAI_AGENT_OTEL`` turns it on. An image built with
+  ``--build-arg EXTRAS=…`` names ``otel`` itself to keep the switch working.
 * Delete any type-checker override for ``kavalai`` (``ignore_missing_imports``
   or ``follow_untyped_imports``). Calls into the package are then checked, so
   a project may see errors that the override had hidden.

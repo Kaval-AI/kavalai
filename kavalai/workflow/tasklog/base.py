@@ -30,6 +30,7 @@ from typing import Any, Coroutine, Optional
 from loguru import logger
 
 from kavalai.llm_clients.base_client import ModelCallStat, ModelStatsReceiver
+from kavalai.telemetry import Telemetry
 from kavalai.utils import to_plain
 
 DEFAULT_MAX_PAYLOAD_BYTES = 256 * 1024
@@ -313,6 +314,10 @@ class StatsBridge(ModelStatsReceiver):
     service's ``stats_receiver`` — to log every call it makes against
     ``agent_id`` (and, when known, a session and a run). The engine itself
     uses :class:`TokenAccumulator`, which also forwards to a logger.
+
+    ``telemetry`` additionally reports each call to a
+    :class:`~kavalai.telemetry.Telemetry`, for a client used outside a
+    workflow.
     """
 
     def __init__(
@@ -322,16 +327,20 @@ class StatsBridge(ModelStatsReceiver):
         *,
         session_id: Optional[str] = None,
         run_id: Optional[str] = None,
+        telemetry: Optional[Telemetry] = None,
     ) -> None:
         self.task_logger = task_logger
         self.agent_id = agent_id
         self.session_id = session_id
         self.run_id = run_id
+        self.telemetry = telemetry
 
     def receive_model_stats(self, stats: ModelCallStat) -> None:
         self.task_logger.log_model_call(
             stats, self.agent_id, session_id=self.session_id, run_id=self.run_id
         )
+        if self.telemetry is not None:
+            self.telemetry.model_call(stats)
 
 
 class TokenAccumulator(ModelStatsReceiver):
@@ -343,7 +352,9 @@ class TokenAccumulator(ModelStatsReceiver):
     ends it can report the total token spend. When a ``task_logger`` is
     supplied each individual call is still logged through it, attributed to
     ``agent_id``, ``session_id`` and ``run_id``, so this fully subsumes
-    :class:`StatsBridge`.
+    :class:`StatsBridge`. Each call is also reported to ``telemetry`` when
+    one is given; that happens in the task that made the call, so the span of
+    the node that made it is still current.
     """
 
     def __init__(
@@ -353,11 +364,13 @@ class TokenAccumulator(ModelStatsReceiver):
         *,
         session_id: Optional[str] = None,
         run_id: Optional[str] = None,
+        telemetry: Optional[Telemetry] = None,
     ) -> None:
         self.task_logger = task_logger
         self.agent_id = agent_id
         self.session_id = session_id
         self.run_id = run_id
+        self.telemetry = telemetry
         self.model_calls = 0
         self.prompt_tokens = 0
         self.completion_tokens = 0
@@ -372,6 +385,8 @@ class TokenAccumulator(ModelStatsReceiver):
             self.task_logger.log_model_call(
                 stats, self.agent_id, session_id=self.session_id, run_id=self.run_id
             )
+        if self.telemetry is not None:
+            self.telemetry.model_call(stats)
 
     def summary(self) -> dict:
         """Return the aggregated token counts as a plain dict."""

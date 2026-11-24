@@ -47,6 +47,7 @@ except ImportError:  # pragma: no cover - exercised in pyodide / minimal install
     sse_client = None
     stdio_client = None
 
+from kavalai.telemetry import Telemetry
 from kavalai.workflow.models import (
     McpServer,
     RestServer,
@@ -208,9 +209,14 @@ class FunctionKernel:
     """
     Manages registration and execution of tools (REST, MCP, Python).
     Handles conversions and MCP session management.
+
+    ``telemetry`` is entered around every tool call
+    (:meth:`~kavalai.telemetry.Telemetry.tool_call`); the default does
+    nothing.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, telemetry: Optional[Telemetry] = None) -> None:
+        self.telemetry = telemetry or Telemetry()
         self.rest_servers: Dict[str, RestServer] = {}
         self.rest_tool_definitions: Dict[str, Dict[str, ToolDefinition]] = {}
         self.mcp_servers: Dict[str, McpServer] = {}
@@ -317,6 +323,19 @@ class FunctionKernel:
         Format: protocol://[name|module].function_name
         Example: python://kavalai.mytool.myfunc or rest://myrestserver.restfunction
         """
+        with self.telemetry.tool_call(tool_uri):
+            return await self._dispatch_tool_call(
+                tool_uri, arguments, output_type, **kwargs
+            )
+
+    async def _dispatch_tool_call(
+        self,
+        tool_uri: str,
+        arguments: Optional[Dict[str, Any]],
+        output_type: Optional[type],
+        **kwargs: Any,
+    ) -> Any:
+        """Route a tool call to the protocol its URI names."""
         arguments = _strip_metadata(arguments or {})
         protocol, path = _parse_tool_uri(tool_uri)
 

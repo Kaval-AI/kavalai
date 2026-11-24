@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock, AsyncMock, patch
 import pytest
 import asyncio
+import contextlib
 import json
 import uvicorn
 import multiprocessing
@@ -21,6 +22,7 @@ from kavalai.functionkernel import (
     _is_tool_allowed,
 )
 from kavalai.workflow.models import RestServer, McpServer
+from kavalai.telemetry import Telemetry
 
 
 def find_free_port():
@@ -94,8 +96,11 @@ async def sse_endpoint(request: Request):
 
     async def event_generator():
         # MCP SSE handshake
-        # 1. Send endpoint event
-        yield f"event: endpoint\ndata: http://127.0.0.1:{FREE_PORT}/messages?session_id=123\n\n"
+        # 1. Send endpoint event. A relative path, resolved by the client
+        # against the URL it connected to: the server runs in a spawned
+        # process, which re-imports this module and so has a ``FREE_PORT``
+        # of its own, different from the port it was told to listen on.
+        yield "event: endpoint\ndata: /messages?session_id=123\n\n"
 
         # Keep alive and send messages from queue
         while True:
@@ -1223,3 +1228,63 @@ async def test_concurrent_first_calls_open_one_mcp_session():
         assert len(kernel.mcp_sessions) == 1
     finally:
         await kernel.close()
+
+
+class _RecordingTelemetry(Telemetry):
+    def __init__(self):
+        self.entered = []
+        self.exited = []
+
+    @contextlib.contextmanager
+    def tool_call(self, tool_uri):
+        self.entered.append(tool_uri)
+        try:
+            yield
+        finally:
+            self.exited.append(tool_uri)
+
+
+@pytest.mark.asyncio
+async def test_every_protocol_is_called_inside_the_telemetry_tool_call():
+    telemetry = _RecordingTelemetry()
+    kernel = FunctionKernel(telemetry=telemetry)
+
+    @pythontool
+    def add(a: int, b: int) -> int:
+        assert telemetry.entered == ["python://add"] and not telemetry.exited
+        return a + b
+
+    kernel.register_python_tool("add", add)
+    kernel._call_rest_tool = AsyncMock(return_value={"ok": True})
+    kernel._call_mcp_tool = AsyncMock(return_value="done")
+
+    await kernel.call_tool("python://add", {"a": 1, "b": 2})
+    await kernel.call_tool("rest://server.item", {"id": 1})
+    await kernel.call_tool("mcp://server.tool", {})
+
+    uris = ["python://add", "rest://server.item", "mcp://server.tool"]
+    assert telemetry.entered == uris
+    assert telemetry.exited == uris
+
+
+@pytest.mark.asyncio
+async def test_a_raising_tool_still_leaves_the_telemetry_tool_call():
+    telemetry = _RecordingTelemetry()
+    kernel = FunctionKernel(telemetry=telemetry)
+
+    @pythontool
+    def explode() -> int:
+        raise RuntimeError("boom")
+
+    kernel.register_python_tool("explode", explode)
+
+    with pytest.raises(Exception, match="boom"):
+        await kernel.call_tool("python://explode", {})
+    with pytest.raises(FunctionKernelException, match="Unsupported protocol"):
+        await kernel.call_tool("ftp://nope", {})
+
+    assert telemetry.exited == ["python://explode", "ftp://nope"]
+
+
+def test_a_kernel_without_telemetry_holds_the_no_op():
+    assert type(FunctionKernel().telemetry) is Telemetry

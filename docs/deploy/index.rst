@@ -300,12 +300,55 @@ If you are packaging your own workflow, an image is small:
 workflow that embeds with a local ``fastembed/…`` model needs
 ``kavalai[runtime,fastembed]``, and one that uses ``crawl_url`` or
 ``web_search`` needs ``webtools`` as well. The repository's
-``dockerfiles/agent.Dockerfile`` installs ``runtime`` and takes the extras as
-the ``EXTRAS`` build argument (``--build-arg EXTRAS=runtime,fastembed``).
+``dockerfiles/agent.Dockerfile`` installs ``runtime`` and ``otel`` and takes
+the extras as the ``EXTRAS`` build argument
+(``--build-arg EXTRAS=runtime,otel,fastembed``).
 
 Point your orchestrator's liveness probe at ``GET /liveness`` and its readiness
 probe at ``GET /health`` — the latter also checks the database, so a pod with a
 broken connection is taken out of rotation instead of failing requests.
+
+.. _deploy-opentelemetry:
+
+Exporting to OpenTelemetry
+--------------------------
+
+``KAVALAI_AGENT_OTEL=true`` makes the agent server export every run as a
+trace, with token and latency histograms, over OTLP/HTTP. The repository's
+agent image installs the ``otel`` extra this needs. The destination is
+configured by the OpenTelemetry SDK's own variables, which Kaval.AI does not
+read:
+
+.. code-block:: bash
+
+   export KAVALAI_AGENT_OTEL=true
+   export OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4318
+
+With one endpoint the exporters append ``/v1/traces`` and ``/v1/metrics``.
+A backend with a separate endpoint and token for each signal is configured
+with the per-signal variables, which are used as given. Scaleway Cockpit is
+such a backend: each data source has a push URL of its own, and a Cockpit
+token with push permission is sent in an ``X-Token`` header.
+
+.. code-block:: bash
+
+   TRACES=https://<id>.traces.cockpit.fr-par.scw.cloud
+   METRICS=https://<id>.metrics.cockpit.fr-par.scw.cloud
+
+   export KAVALAI_AGENT_OTEL=true
+   export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=$TRACES/otlp/v1/traces
+   export OTEL_EXPORTER_OTLP_TRACES_HEADERS=X-Token=<token>
+   export OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=$METRICS/otlp/v1/metrics
+   export OTEL_EXPORTER_OTLP_METRICS_HEADERS=X-Token=<token>
+
+The service name is the workflow's name unless ``OTEL_SERVICE_NAME`` sets
+another. Prompts and answers are not exported unless
+``KAVALAI_AGENT_OTEL_CAPTURE_CONTENT=true``. What the spans and metrics
+contain is described in :ref:`observability-opentelemetry`.
+
+A host that mounts the router in its own application sets neither variable:
+it configures OpenTelemetry as it does for the rest of the service and builds
+the engine with ``telemetry=OtelTelemetry()``.
 
 Running the backoffice
 ----------------------

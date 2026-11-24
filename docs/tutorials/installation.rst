@@ -27,8 +27,8 @@ Choosing an extra
 
 The bare ``kavalai`` package is deliberately small and provider-agnostic: it is
 restricted to libraries that also work under Pyodide, so the core can run in a
-browser. Everything else is grouped into four extras, and ``common`` installs
-all four; it is the normal install.
+browser. Everything else is grouped into five extras, and ``common`` installs
+all five; it is the normal install.
 
 .. list-table::
    :header-rows: 1
@@ -37,8 +37,8 @@ all four; it is the normal install.
    * - Extra
      - What it adds
    * - ``kavalai[common]``
-     - The normal install: ``runtime``, ``webtools``, ``fastembed`` and
-       ``backoffice`` together.
+     - The normal install: ``runtime``, ``webtools``, ``fastembed``,
+       ``backoffice`` and ``otel`` together.
    * - ``kavalai[runtime]``
      - What a workflow needs to run and be served: the OpenAI, Gemini,
        Anthropic, Scaleway and Ollama clients, MCP, the agent server (FastAPI), the
@@ -52,6 +52,9 @@ all four; it is the normal install.
      - The backoffice server's own packages: Authlib, itsdangerous,
        scikit-learn and sse-starlette. The backoffice needs ``runtime`` as
        well.
+   * - ``kavalai[otel]``
+     - OpenTelemetry export (:mod:`kavalai.otel`): the OpenTelemetry SDK and
+       the OTLP exporter over HTTP.
    * - ``kavalai[common_web]``
      - The browser counterpart, for running the core under Pyodide / WebLLM.
        See :doc:`run_in_browser`.
@@ -63,7 +66,7 @@ all four; it is the normal install.
    * - ``kavalai[docs]``
      - Sphinx, the theme and the notebook kernel, for building these docs.
 
-The four are divided by weight, not by provider. crawl4ai (with Playwright,
+The five are divided by weight, not by provider. crawl4ai (with Playwright,
 patchright and litellm), fastembed (with onnxruntime) and scikit-learn (with
 SciPy) account for most of a full install; the provider SDKs and MCP are
 small, so they share ``runtime``, and replacing one provider with another

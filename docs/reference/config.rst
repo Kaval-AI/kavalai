@@ -173,6 +173,24 @@ Agent server
    * - ``KAVALAI_AGENT_RUN_TIMEOUT_SECONDS``
      - Seconds after which a run is cancelled and recorded as failed, passed
        to the engine as ``run_timeout``. Unset sets no limit.
+   * - ``KAVALAI_AGENT_OTEL``
+     - Export every run to OpenTelemetry over OTLP/HTTP: a trace per run and
+       token and latency histograms. Default ``false``. Needs the ``otel``
+       extra. See :ref:`observability-opentelemetry`.
+   * - ``KAVALAI_AGENT_OTEL_CAPTURE_CONTENT``
+     - Attach each model call's request and response to its span. Default
+       ``false``: the request is the whole prompt, and the endpoint is
+       commonly a third party's.
+   * - ``OTEL_EXPORTER_OTLP_ENDPOINT``, ``OTEL_EXPORTER_OTLP_HEADERS``
+     - Read by the OpenTelemetry SDK, not by Kaval.AI: where the exporters
+       send, and the headers they send. The per-signal forms
+       (``OTEL_EXPORTER_OTLP_TRACES_ENDPOINT``, ``…_METRICS_ENDPOINT``,
+       ``…_TRACES_HEADERS``, ``…_METRICS_HEADERS``) take precedence. See
+       :ref:`deploy-opentelemetry`.
+   * - ``OTEL_SERVICE_NAME``, ``OTEL_RESOURCE_ATTRIBUTES``
+     - Read by the OpenTelemetry SDK: the service name on every span and
+       metric — the workflow's name when unset — and further resource
+       attributes.
    * - ``KAVALAI_AGENT_BASIC_AUTH_USER``
      - Basic-auth username. Auth is disabled only when both this and the
        password are unset; setting either one enables it.

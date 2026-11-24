@@ -18,6 +18,7 @@ variables instead? Those are in :doc:`../reference/index`.
    functionkernel
    net
    text
+   telemetry
    server
    eval
    testing

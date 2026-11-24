@@ -33,7 +33,7 @@ PACKAGE = ROOT / "kavalai"
 SMOKE_SCRIPT = Path(__file__).parent / "helpers" / "runtime_smoke.py"
 PYPROJECT = tomllib.loads((ROOT / "pyproject.toml").read_text())
 EXTRAS = PYPROJECT["project"]["optional-dependencies"]
-PARTS_OF_COMMON = ("runtime", "webtools", "fastembed", "backoffice")
+PARTS_OF_COMMON = ("runtime", "webtools", "fastembed", "backoffice", "otel")
 
 SOURCE_ONLY = (
     "kavalai/widget/README.md",
@@ -105,7 +105,7 @@ def hint_sources() -> list[Path]:
 
 
 class TestExtras:
-    def test_common_is_the_union_of_the_four_extras(self):
+    def test_common_is_the_union_of_its_parts(self):
         union = set().union(*(requirements(e) for e in PARTS_OF_COMMON))
         assert requirements("common") == union
 
