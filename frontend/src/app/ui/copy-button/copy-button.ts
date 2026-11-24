@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-import { Component, computed, input, signal } from '@angular/core';
+import { Component, booleanAttribute, computed, input, signal } from '@angular/core';
 import { UiButton } from '../button/button';
 
 /** Copies `text` to the clipboard and confirms briefly. */
@@ -26,6 +26,8 @@ import { UiButton } from '../button/button';
 export class UiCopyButton {
   readonly text = input.required<string>();
   readonly label = input(`to clipboard`);
+  /** The icon alone, for a table cell; the label stays for screen readers and as the tooltip. */
+  readonly compact = input(false, { transform: booleanAttribute });
   readonly copied = signal(false);
   readonly copyLabel = computed(() => `Copy ${this.label()}`);
 

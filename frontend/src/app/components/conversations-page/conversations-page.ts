@@ -17,7 +17,7 @@ import { Component, DestroyRef, OnInit, computed, inject, signal } from '@angula
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { AgentService } from '../../services/agent-service';
 import { UserService } from '../../services/user-service';
 import { SessionSummary } from '../../models/session';
@@ -32,12 +32,9 @@ import {
   UiCopyButton,
   UiEmptyState,
   UiField,
-  UiInfo,
   UiLoading,
   UiPageHeader,
   UiSpinner,
-  UiStat,
-  UiStats,
   UiTable,
   UiToolbar,
 } from '../../ui';
@@ -63,8 +60,7 @@ function defaultWindow(): { start: string; end: string } {
 
 /**
  * The conversations of the active project, latest activity first. The filters
- * narrow the list on the server; a selected row opens its summary beside the
- * table, and "Open conversation" leads to the transcript.
+ * narrow the list on the server; a row opens its conversation.
  *
  * The list endpoint has no total for the current page window, so paging is
  * "Load more": a page shorter than `PAGE_SIZE` is the last one.
@@ -75,7 +71,6 @@ function defaultWindow(): { start: string; end: string } {
     DatePipe,
     DecimalPipe,
     FormsModule,
-    RouterLink,
     UiAlert,
     UiBadge,
     UiButton,
@@ -84,12 +79,9 @@ function defaultWindow(): { start: string; end: string } {
     UiCopyButton,
     UiEmptyState,
     UiField,
-    UiInfo,
     UiLoading,
     UiPageHeader,
     UiSpinner,
-    UiStat,
-    UiStats,
     UiTable,
     UiToolbar,
   ],
@@ -100,6 +92,7 @@ export class ConversationsPage implements OnInit {
   private readonly agentService = inject(AgentService);
   private readonly userService = inject(UserService);
   private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
 
   readonly projectId = signal<string | null>(null);
@@ -110,7 +103,6 @@ export class ConversationsPage implements OnInit {
   readonly loading = signal(false);
   readonly error = signal('');
   readonly hasMore = signal(false);
-  readonly selected = signal<SessionSummary | null>(null);
 
   /** The agent the list is narrowed to, shown as a chip in the header. */
   readonly agent = computed(() => {
@@ -167,7 +159,6 @@ export class ConversationsPage implements OnInit {
     if (!projectId) return;
     if (reset) {
       this.offset = 0;
-      this.selected.set(null);
     }
     this.agentFilter.set(this.agentId);
     this.loading.set(true);
@@ -218,12 +209,8 @@ export class ConversationsPage implements OnInit {
     this.load();
   }
 
-  select(session: SessionSummary): void {
-    this.selected.set(this.selected()?.session_id === session.session_id ? null : session);
-  }
-
-  close(): void {
-    this.selected.set(null);
+  open(session: SessionSummary): void {
+    this.router.navigate(['/conversations', session.session_id]);
   }
 
   /** Whether a conversation came from an evaluation run rather than a real user. */

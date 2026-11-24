@@ -1,6 +1,6 @@
 <ui-page-header tag="Debugging" title="Conversations">
-  The sessions recorded in the project's agent database, latest activity first. Select one to see its
-  summary.
+  The sessions recorded in the project's agent database, latest activity first. Select one to open
+  it.
   @if (agent(); as a) {
     <ui-chip page-actions [text]="a.name" title="The agent this list is narrowed to" data-testid="agent-chip" />
   }
@@ -85,120 +85,83 @@
         </button>
       </ui-empty-state>
     } @else {
-      <div class="layout" [class.with-detail]="selected()">
-        <div class="list">
-          <ui-table clickable>
-            <table data-testid="sessions-table">
-              <thead>
-                <tr>
-                  <th>When</th>
-                  <th>Agent</th>
-                  <th>First message</th>
-                  <th>Runs</th>
-                  <th>Messages</th>
-                  <th>Errors</th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (s of sessions(); track s.session_id) {
-                  <tr
-                    data-testid="session-row"
-                    tabindex="0"
-                    [class.selected]="selected()?.session_id === s.session_id"
-                    [attr.aria-selected]="selected()?.session_id === s.session_id"
-                    (click)="select(s)"
-                    (keydown.enter)="select(s)"
-                  >
-                    <td class="text-nowrap" title="Last activity">
-                      {{ s.updated_at | date: 'short' }}
-                      @if (isEval(s)) {
-                        <ui-badge tone="warning" title="Recorded by an evaluation run">eval</ui-badge>
-                      }
-                    </td>
-                    <td class="text-nowrap">{{ s.agent_name }}</td>
-                    <td class="first-message">{{ s.first_message || '—' }}</td>
-                    <td>{{ s.runs_count | number }}</td>
-                    <td>{{ s.messages_count | number }}</td>
-                    <td>
-                      @if (s.errors_count > 0) {
-                        <ui-badge tone="error" data-testid="errors-badge">{{ s.errors_count | number }}</ui-badge>
-                      } @else {
-                        <span class="text-muted">0</span>
-                      }
-                    </td>
-                  </tr>
-                }
-              </tbody>
-            </table>
-          </ui-table>
+      <ui-table clickable>
+        <table data-testid="sessions-table">
+          <thead>
+            <tr>
+              <th>When</th>
+              <th>Session</th>
+              <th>Agent</th>
+              <th>First message</th>
+              <th>Last message</th>
+              <th class="num">Runs</th>
+              <th class="num">Messages</th>
+              <th class="num">Errors</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (s of sessions(); track s.session_id) {
+              <tr
+                data-testid="session-row"
+                tabindex="0"
+                [attr.aria-label]="'Open the conversation ' + s.session_id"
+                (click)="open(s)"
+                (keydown.enter)="open(s)"
+              >
+                <td class="text-nowrap" title="Last activity">
+                  {{ s.updated_at | date: 'short' }}
+                  @if (isEval(s)) {
+                    <ui-badge tone="warning" title="Recorded by an evaluation run">eval</ui-badge>
+                  }
+                </td>
+                <td class="text-nowrap">
+                  <span class="session-id mono" [title]="s.session_id" data-testid="session-id">{{
+                    s.session_id.slice(0, 8)
+                  }}</span>
+                  <!-- Copying is not opening: the click stays in the cell. -->
+                  <span class="copy" (click)="$event.stopPropagation()" (keydown.enter)="$event.stopPropagation()">
+                    <ui-copy-button compact [text]="s.session_id" label="session id" />
+                  </span>
+                </td>
+                <td class="text-nowrap">{{ s.agent_name }}</td>
+                <td class="message-cell" [title]="s.first_message || ''">{{ s.first_message || '—' }}</td>
+                <td class="message-cell" [title]="s.last_message || ''" data-testid="last-message">
+                  {{ s.last_message || '—' }}
+                </td>
+                <td class="num">{{ s.runs_count | number }}</td>
+                <td class="num">{{ s.messages_count | number }}</td>
+                <td class="num">
+                  @if (s.errors_count > 0) {
+                    <ui-badge tone="error" data-testid="errors-badge">{{ s.errors_count | number }}</ui-badge>
+                  } @else {
+                    <span class="text-muted">0</span>
+                  }
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </ui-table>
 
-          @if (error()) {
-            <ui-alert data-testid="error">
-              {{ error() }}
-              <button alert-actions type="button" uiButton="ghost" size="sm" (click)="retry()" data-testid="retry">
-                Retry
-              </button>
-            </ui-alert>
-          }
+      @if (error()) {
+        <ui-alert class="more-error" data-testid="error">
+          {{ error() }}
+          <button alert-actions type="button" uiButton="ghost" size="sm" (click)="retry()" data-testid="retry">
+            Retry
+          </button>
+        </ui-alert>
+      }
 
-          @if (hasMore()) {
-            <div class="more">
-              <button type="button" uiButton (click)="loadMore()" [disabled]="loading()" data-testid="load-more">
-                @if (loading()) {
-                  <ui-spinner />
-                }
-                Load more
-              </button>
-            </div>
-          }
+      @if (hasMore()) {
+        <div class="more">
+          <button type="button" uiButton (click)="loadMore()" [disabled]="loading()" data-testid="load-more">
+            @if (loading()) {
+              <ui-spinner />
+            }
+            Load more
+          </button>
         </div>
-
-        @if (selected(); as s) {
-          <aside class="detail" data-testid="session-detail" aria-label="Selected conversation">
-            <div class="detail-head">
-              <h3>{{ s.agent_name }}</h3>
-              <button type="button" uiButton="icon" (click)="close()" aria-label="Close" data-testid="close-detail">
-                <i class="fa-solid fa-xmark" aria-hidden="true"></i>
-              </button>
-            </div>
-
-            <ui-info label="Session" mono>
-              <span [title]="s.session_id">{{ s.session_id.slice(0, 8) }}</span>
-              <ui-copy-button [text]="s.session_id" label="session id" />
-            </ui-info>
-            <ui-info label="External ID" mono>
-              @if (s.external_id) {
-                <span data-testid="detail-external">{{ s.external_id }}</span>
-              } @else {
-                <span class="text-muted">—</span>
-              }
-            </ui-info>
-            <ui-info label="Created">{{ s.created_at | date: 'medium' }}</ui-info>
-            <ui-info label="Last activity">{{ s.updated_at | date: 'medium' }}</ui-info>
-
-            <ui-stats inset class="detail-stats">
-              <ui-stat label="Runs">{{ s.runs_count | number }}</ui-stat>
-              <ui-stat label="Tasks">{{ s.tasks_count | number }}</ui-stat>
-              <ui-stat label="Messages">{{ s.messages_count | number }}</ui-stat>
-              <ui-stat label="Errors">{{ s.errors_count | number }}</ui-stat>
-            </ui-stats>
-
-            <h4 class="detail-label">First message</h4>
-            <p class="message" data-testid="detail-first">{{ s.first_message || '—' }}</p>
-            <h4 class="detail-label">Last message</h4>
-            <p class="message" data-testid="detail-last">{{ s.last_message || '—' }}</p>
-
-            <div class="card-actions-bar">
-              <a uiButton="primary" [routerLink]="['/conversations', s.session_id]" data-testid="open-conversation">
-                <i class="fa-solid fa-arrow-right" aria-hidden="true"></i> Open conversation
-              </a>
-              <a uiButton="ghost" routerLink="/llm-call-stats" [queryParams]="{ session_id: s.session_id }">
-                <i class="fa-solid fa-microchip" aria-hidden="true"></i> Model calls
-              </a>
-            </div>
-          </aside>
-        }
-      </div>
+      }
     }
   </ui-card>
 }

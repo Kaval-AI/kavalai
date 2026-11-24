@@ -319,8 +319,8 @@ since :doc:`../guides/evaluation` records each case under
          run, task, message and error counts with the first and latest payloads
    :width: 100%
 
-Each row shows the counts for that session; selecting it opens a panel beside
-the list with its first and latest payloads and the way into the conversation. Because a Kaval.AI workflow's boundaries are typed, those
+Each row shows the session's identifier, which can be copied, its first and
+latest payloads and its counts; selecting it opens the conversation. Because a Kaval.AI workflow's boundaries are typed, those
 payloads are structured data rather than prose: in the illustration the bakery
 assistant's latest output carries ``status``, ``order_id`` and ``missing``
 beside the human-readable ``subject`` and ``body``, so what the workflow decided

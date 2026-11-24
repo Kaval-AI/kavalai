@@ -15,7 +15,7 @@ limitations under the License.
 */
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { HttpErrorResponse } from '@angular/common/http';
-import { ActivatedRoute, Params, provideRouter } from '@angular/router';
+import { ActivatedRoute, Params, Router, provideRouter } from '@angular/router';
 import { BehaviorSubject, NEVER, of, throwError } from 'rxjs';
 import { ConversationsPage } from './conversations-page';
 import { AgentService } from '../../services/agent-service';
@@ -166,53 +166,53 @@ describe('ConversationsPage', () => {
     expect(query('load-more')).toBeNull();
   });
 
-  it('opens the summary of a selected row beside the table, and closes it', async () => {
-    const session = makeSession({
-      session_id: 'abcdef1234567890',
-      external_id: 'customer-42',
-      runs_count: 4,
-      first_message: 'How many claims?',
-      last_message: '{"cards": []}',
-    });
-    agentService.getSessions.and.returnValue(page([session, makeSession({ session_id: 's2' })]));
-    await render();
-    expect(query('session-detail')).toBeNull();
-
-    all('session-row')[0].click();
-    await settle(fixture);
-    const detail = query('session-detail')!;
-    expect(all('session-row')[0].classList).toContain('selected');
-    expect(detail.textContent).toContain('pulse_answer');
-    expect(detail.textContent).toContain('abcdef12');
-    expect(query('detail-external')!.textContent).toContain('customer-42');
-    expect(query('detail-first')!.textContent).toContain('How many claims?');
-    expect(query('detail-last')!.textContent).toContain('{"cards": []}');
-    expect(query<HTMLAnchorElement>('open-conversation')!.getAttribute('href')).toBe(
-      '/conversations/abcdef1234567890'
+  it('shows each session by its short id, with its first and last message', async () => {
+    agentService.getSessions.and.returnValue(
+      page([
+        makeSession({
+          session_id: 'abcdef1234567890',
+          first_message: 'How many claims?',
+          last_message: '{"cards": []}',
+        }),
+        makeSession({ session_id: 's2', first_message: null, last_message: null }),
+      ])
     );
-
-    all('session-row')[0].click();
-    await settle(fixture);
-    expect(query('session-detail')).toBeNull();
-
-    all('session-row')[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
-    await settle(fixture);
-    expect(query('session-detail')).not.toBeNull();
-    expect(query('detail-external')).toBeNull();
-    expect(query('detail-first')!.textContent).toContain('How many');
-
-    query<HTMLButtonElement>('close-detail')!.click();
-    await settle(fixture);
-    expect(query('session-detail')).toBeNull();
+    await render();
+    const [first, second] = all('session-row');
+    const id = first.querySelector<HTMLElement>('[data-testid="session-id"]')!;
+    expect(id.textContent!.trim()).toBe('abcdef12');
+    expect(id.title).toBe('abcdef1234567890');
+    expect(first.textContent).toContain('How many claims?');
+    expect(first.querySelector('[data-testid="last-message"]')!.textContent).toContain('{"cards": []}');
+    expect(second.querySelector('[data-testid="last-message"]')!.textContent!.trim()).toBe('—');
   });
 
-  it('shows a dash for a session with no messages', async () => {
-    agentService.getSessions.and.returnValue(page([makeSession({ first_message: null, last_message: null })]));
+  it('opens the conversation of a row, by click or Enter', async () => {
+    agentService.getSessions.and.returnValue(page([makeSession({ session_id: 's1' }), makeSession({ session_id: 's2' })]));
     await render();
+    const navigate = spyOn(TestBed.inject(Router), 'navigate').and.resolveTo(true);
+
     all('session-row')[0].click();
+    expect(navigate).toHaveBeenCalledWith(['/conversations', 's1']);
+
+    all('session-row')[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    expect(navigate).toHaveBeenCalledWith(['/conversations', 's2']);
+  });
+
+  it('copies a session id without opening the conversation', async () => {
+    agentService.getSessions.and.returnValue(page([makeSession({ session_id: 'abcdef1234567890' })]));
+    await render();
+    const navigate = spyOn(TestBed.inject(Router), 'navigate').and.resolveTo(true);
+    const writeText = spyOn(navigator.clipboard, 'writeText').and.resolveTo();
+
+    all('session-row')[0].querySelector<HTMLButtonElement>('ui-copy-button button')!.click();
     await settle(fixture);
-    expect(query('detail-first')!.textContent!.trim()).toBe('—');
-    expect(query('detail-last')!.textContent!.trim()).toBe('—');
+    expect(writeText).toHaveBeenCalledWith('abcdef1234567890');
+
+    all('session-row')[0]
+      .querySelector('.copy')!
+      .dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(navigate).not.toHaveBeenCalled();
   });
 
   it('narrows the list by agent, message text and external id', async () => {

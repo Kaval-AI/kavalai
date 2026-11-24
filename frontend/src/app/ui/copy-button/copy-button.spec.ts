@@ -34,6 +34,19 @@ describe('UiCopyButton', () => {
     expect(fixture.nativeElement.textContent).toContain('Copied');
   });
 
+  it('shows the icon alone when compact, keeping its label', () => {
+    const fixture = TestBed.createComponent(UiCopyButton);
+    fixture.componentRef.setInput('text', 'x');
+    fixture.componentRef.setInput('label', 'session id');
+    fixture.componentRef.setInput('compact', true);
+    fixture.detectChanges();
+    const button = fixture.nativeElement.querySelector('button') as HTMLButtonElement;
+    expect(button.textContent!.trim()).toBe('');
+    expect(button.getAttribute('aria-label')).toBe('Copy session id');
+    expect(button.title).toBe('Copy session id');
+    expect(button.classList).toContain('ui-btn-icon');
+  });
+
   it('goes back to Copy after a moment', async () => {
     spyOn(navigator.clipboard, 'writeText').and.resolveTo();
     jasmine.clock().install();

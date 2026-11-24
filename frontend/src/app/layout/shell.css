@@ -353,6 +353,11 @@ limitations under the License.
   padding: 28px 32px 56px;
 }
 
+/* The list pages are tables: they take the whole width of a wide screen. */
+.content:has(> app-conversations-page, > app-llm-call-stats-page) {
+  max-width: none;
+}
+
 @media (max-width: 900px) {
   .shell {
     grid-template-columns: minmax(0, 1fr);

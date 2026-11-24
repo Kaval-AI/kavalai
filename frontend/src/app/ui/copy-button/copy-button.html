@@ -1,10 +1,17 @@
-<button type="button" uiButton size="sm" (click)="copy()" [attr.aria-label]="copyLabel()">
+<button
+  type="button"
+  [uiButton]="compact() ? 'icon' : ''"
+  size="sm"
+  (click)="copy()"
+  [attr.aria-label]="copyLabel()"
+  [attr.title]="compact() ? copyLabel() : null"
+>
   <i class="fa-solid" [class.fa-copy]="!copied()" [class.fa-check]="copied()" aria-hidden="true"></i>
-
+  @if (!compact()) {
     @if (copied()) {
       Copied
     } @else {
       Copy
     }
-
+  }
 </button>
