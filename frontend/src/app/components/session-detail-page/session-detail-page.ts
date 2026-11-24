@@ -25,6 +25,9 @@ import { Run } from '../../models/run';
 import { SessionDetails } from '../../models/session';
 import { Task } from '../../models/task';
 import { JsonTreeComponent } from '../json-tree/json-tree';
+import { RunModelCalls } from '../run-model-calls/run-model-calls';
+import { TasksList } from '../tasks-list/tasks-list';
+import { TaskTimelineChart } from '../task-timeline-chart/task-timeline-chart';
 import { errorMessage } from '../../core/http-error';
 import {
   UiAlert,
@@ -44,16 +47,24 @@ import {
 /**
  * One run of the conversation as the page shows it: the run, its position
  * (1-based, in the order the runs started), the messages it recorded, the
- * names of the steps it ran (top-level tasks, in execution order) and the
- * number of errors its tasks recorded.
+ * names of the steps it ran (top-level tasks, in execution order), its tasks
+ * and the number of errors they recorded.
  */
 export interface RunBlock {
   run: Run;
   index: number;
   messages: ChatMessage[];
   steps: string[];
+  tasks: Task[];
   errors: number;
 }
+
+/**
+ * Up to this many runs, a conversation opens with every run's steps and model
+ * calls shown; beyond it only the latest run's are, since each run's model
+ * calls are a request of their own.
+ */
+export const OPEN_ALL_RUNS = 3;
 
 /** The JSON shown in the dialog: which of a run's payloads, and the value. */
 interface JsonView {
@@ -82,6 +93,9 @@ function hasText(message: ChatMessage): boolean {
     NgTemplateOutlet,
     RouterLink,
     JsonTreeComponent,
+    RunModelCalls,
+    TasksList,
+    TaskTimelineChart,
     UiAlert,
     UiBadge,
     UiButton,
@@ -107,6 +121,8 @@ export class SessionDetailPage implements OnInit {
   readonly sessionId = signal<string | null>(null);
   readonly projectId = signal<string | null>(null);
   readonly runs = signal<RunBlock[]>([]);
+  /** The runs whose steps and model calls are shown. */
+  readonly expanded = signal<ReadonlySet<string>>(new Set());
   readonly unassigned = signal<ChatMessage[]>([]);
   readonly loading = signal(false);
   readonly error = signal('');
@@ -181,11 +197,29 @@ export class SessionDetailPage implements OnInit {
           index: i + 1,
           messages: messages.filter((m) => m.run_id === run.id),
           steps: stepNames(tasks),
+          tasks,
           errors: tasks.reduce((sum, t) => sum + (t.errors?.length ?? 0), 0),
         };
       })
     );
     this.unassigned.set(messages.filter((m) => !m.run_id || !runIds.has(m.run_id)));
+    const blocks = this.runs();
+    const open = blocks.length <= OPEN_ALL_RUNS ? blocks : blocks.slice(-1);
+    this.expanded.set(new Set(open.map((b) => b.run.id)));
+  }
+
+  isExpanded(runId: string): boolean {
+    return this.expanded().has(runId);
+  }
+
+  toggle(runId: string): void {
+    const next = new Set(this.expanded());
+    if (next.has(runId)) {
+      next.delete(runId);
+    } else {
+      next.add(runId);
+    }
+    this.expanded.set(next);
   }
 }
 

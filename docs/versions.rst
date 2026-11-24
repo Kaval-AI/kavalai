@@ -75,6 +75,12 @@ Changed
   are lists that open beside themselves, and a model call's prompt can be read
   as messages. DaisyUI, Angular Material and the unused front-end packages
   are gone.
+* **Conversations open on a click, and show their runs whole.** A row of the
+  conversation list opens the conversation; the list carries each session's
+  identifier, with a copy button, and its last message, and takes the full
+  width of a wide screen. A conversation shows every run with its timeline,
+  steps and model calls. The Runs page is removed; ``/workflows`` leads to
+  the conversations. The bar charts carry a scale and its unit.
 * **Typed tool arguments.** An agent step is requested with one call model
   per allowed tool: ``name`` is the tool's URI and ``args`` an object held to
   the tool's input schema, where a call used to carry its arguments as JSON

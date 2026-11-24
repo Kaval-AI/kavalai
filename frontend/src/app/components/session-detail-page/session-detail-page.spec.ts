@@ -21,7 +21,8 @@ import { SessionDetailPage } from './session-detail-page';
 import { AgentService } from '../../services/agent-service';
 import { UserService } from '../../services/user-service';
 import { SessionDetails } from '../../models/session';
-import { makeMessage, makeRun, makeTask, settle, signedInAs } from '../../../testing';
+import { makeMessage, makeModelCall, makeRun, makeTask, settle, signedInAs } from '../../../testing';
+import { OPEN_ALL_RUNS } from './session-detail-page';
 
 describe('SessionDetailPage', () => {
   let fixture: ComponentFixture<SessionDetailPage>;
@@ -80,7 +81,8 @@ describe('SessionDetailPage', () => {
   }
 
   beforeEach(async () => {
-    agentService = jasmine.createSpyObj('AgentService', ['getSessionDetails']);
+    agentService = jasmine.createSpyObj('AgentService', ['getSessionDetails', 'getLLMCallStats']);
+    agentService.getLLMCallStats.and.returnValue(of([]));
     await TestBed.configureTestingModule({
       imports: [SessionDetailPage],
       providers: [
@@ -230,5 +232,53 @@ describe('SessionDetailPage', () => {
     const message = all('message')[0];
     expect(message.querySelector('pre')).toBeNull();
     expect(message.textContent).toContain('{not json');
+  });
+  it("shows each run's timeline, steps and model calls in its card", async () => {
+    agentService.getSessionDetails.and.returnValue(of(details));
+    agentService.getLLMCallStats.and.callFake((_p, _a, _l, _o, filters) =>
+      of(filters?.runId === 'r1-0000000000' ? [makeModelCall({ id: 'c1', run_id: 'r1-0000000000' })] : [])
+    );
+    await render();
+    const [first, second] = Array.from(el.querySelectorAll<HTMLElement>('[data-testid="run"]'));
+    expect(first.querySelector('[data-testid="run-timeline"] app-task-timeline-chart')).not.toBeNull();
+    expect(first.querySelectorAll('[data-testid="run-step-list"] app-tasks-list').length).toBe(1);
+    expect(first.querySelectorAll('[data-testid="run-calls"] [data-testid="model-call-row"]').length).toBe(1);
+    expect(second.querySelector('[data-testid="run-calls"] [data-testid="model-calls-empty"]')).not.toBeNull();
+    // Two runs: both open, one request for the model calls of each.
+    expect(agentService.getLLMCallStats).toHaveBeenCalledTimes(2);
+  });
+
+  it('hides and shows a run\'s steps and model calls', async () => {
+    agentService.getSessionDetails.and.returnValue(of(details));
+    await render();
+    const first = el.querySelector<HTMLElement>('[data-testid="run"]')!;
+    const toggle = query<HTMLButtonElement>('toggle-run-details', first)!;
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(toggle.textContent).toContain('Hide steps and model calls');
+
+    toggle.click();
+    await settle(fixture);
+    expect(query('run-step-list', first)).toBeNull();
+    expect(query('run-calls', first)).toBeNull();
+    expect(toggle.textContent).toContain('Show steps and model calls');
+    // The timeline stays: it needs no request.
+    expect(query('run-timeline', first)).not.toBeNull();
+
+    toggle.click();
+    await settle(fixture);
+    expect(query('run-step-list', first)).not.toBeNull();
+  });
+
+  it('opens only the latest run of a long conversation', async () => {
+    const runs = Array.from({ length: OPEN_ALL_RUNS + 1 }, (_, i) =>
+      makeRun({ id: `run-${i}`, created_at: `2026-11-24T10:0${i}:00Z` })
+    );
+    agentService.getSessionDetails.and.returnValue(of({ session_id: 's1', runs, messages: [], tasks: [] }));
+    await render();
+    const cards = Array.from(el.querySelectorAll<HTMLElement>('[data-testid="run"]'));
+    expect(cards.length).toBe(OPEN_ALL_RUNS + 1);
+    expect(cards.map((c) => !!query('run-step-list', c))).toEqual([false, false, false, true]);
+    expect(agentService.getLLMCallStats).toHaveBeenCalledTimes(1);
+    expect(query('run-timeline', cards[0])!.textContent).toContain('no steps');
   });
 });

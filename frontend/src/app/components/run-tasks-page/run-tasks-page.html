@@ -67,52 +67,8 @@
       Open in Model calls <i class="fa-solid fa-arrow-right" aria-hidden="true"></i>
     </a>
   }
-  @if (modelCallsError()) {
-    <ui-alert data-testid="model-calls-error">
-      {{ modelCallsError() }}
-      <button alert-actions type="button" uiButton="ghost" size="sm" data-testid="model-calls-retry" (click)="loadModelCalls()">
-        Retry
-      </button>
-    </ui-alert>
-  } @else if (modelCallsLoading()) {
-    <ui-loading />
-  } @else if (modelCalls().length === 0) {
-    <p class="text-muted" data-testid="model-calls-empty">The run made no model calls.</p>
-  } @else {
-    <ui-table clickable dense>
-      <table data-testid="model-calls-table">
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>Model</th>
-            <th>Type</th>
-            <th>Status</th>
-            <th class="text-right">Duration</th>
-            <th class="text-right">In</th>
-            <th class="text-right">Out</th>
-          </tr>
-        </thead>
-        <tbody>
-          @for (call of modelCalls(); track call.id) {
-            <tr
-              data-testid="model-call-row"
-              tabindex="0"
-              [title]="'Open this call on the Model calls page'"
-              (click)="openCall(call)"
-              (keydown.enter)="openCall(call)"
-            >
-              <td class="whitespace-nowrap">{{ call.created_at | date: 'mediumTime' }}</td>
-              <td class="mono">{{ call.model }}</td>
-              <td><ui-badge tone="muted">{{ call.call_type }}</ui-badge></td>
-              <td><ui-status-badge [status]="callStatus(call)" /></td>
-              <td class="text-right mono whitespace-nowrap">{{ formatDuration(call.duration_seconds) }}</td>
-              <td class="text-right mono">{{ (call.prompt_tokens | number) ?? '—' }}</td>
-              <td class="text-right mono">{{ (call.completion_tokens | number) ?? '—' }}</td>
-            </tr>
-          }
-        </tbody>
-      </table>
-    </ui-table>
+  @if (runId(); as rid) {
+    <app-run-model-calls [projectId]="projectId()!" [runId]="rid" (loaded)="modelCalls.set($event)" />
   }
 </ui-card>
 }

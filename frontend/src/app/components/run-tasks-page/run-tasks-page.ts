@@ -16,7 +16,7 @@ limitations under the License.
 import { Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { AgentService } from '../../services/agent-service';
 import { UserService } from '../../services/user-service';
@@ -26,7 +26,6 @@ import { LLMCallStat } from '../../models/llm-call-stat';
 import { errorMessage } from '../../core/http-error';
 import {
   UiAlert,
-  UiBadge,
   UiButton,
   UiCard,
   UiCopyButton,
@@ -35,12 +34,11 @@ import {
   UiPageHeader,
   UiStat,
   UiStats,
-  UiStatusBadge,
-  UiTable,
 } from '../../ui';
 import { TasksList } from '../tasks-list/tasks-list';
 import { TaskTimelineChart } from '../task-timeline-chart/task-timeline-chart';
 import { formatDuration, shortId } from '../../core/format';
+import { RUN_CALL_LIMIT, RunModelCalls } from '../run-model-calls/run-model-calls';
 
 /**
  * One run of a conversation: its figures, its steps on a timeline and as a
@@ -55,10 +53,10 @@ import { formatDuration, shortId } from '../../core/format';
     DatePipe,
     DecimalPipe,
     RouterLink,
+    RunModelCalls,
     TasksList,
     TaskTimelineChart,
     UiAlert,
-    UiBadge,
     UiButton,
     UiCard,
     UiCopyButton,
@@ -67,21 +65,18 @@ import { formatDuration, shortId } from '../../core/format';
     UiPageHeader,
     UiStat,
     UiStats,
-    UiStatusBadge,
-    UiTable,
   ],
   templateUrl: './run-tasks-page.html',
   styleUrl: './run-tasks-page.css',
 })
 export class RunTasksPage implements OnInit {
   private route = inject(ActivatedRoute);
-  private router = inject(Router);
   private agentService = inject(AgentService);
   private userService = inject(UserService);
   private destroyRef = inject(DestroyRef);
 
   /** The run's model calls are listed up to this many, oldest first. */
-  readonly modelCallsLimit = 100;
+  readonly modelCallsLimit = RUN_CALL_LIMIT;
 
   readonly sessionId = signal<string | null>(null);
   readonly runId = signal<string | null>(null);
@@ -92,9 +87,8 @@ export class RunTasksPage implements OnInit {
   readonly loading = signal(false);
   readonly error = signal<string | null>(null);
 
+  /** What the model-call list loaded, for the figures at the top. */
   readonly modelCalls = signal<LLMCallStat[]>([]);
-  readonly modelCallsLoading = signal(false);
-  readonly modelCallsError = signal<string | null>(null);
 
   readonly formatDuration = formatDuration;
   readonly shortId = shortId;
@@ -106,7 +100,6 @@ export class RunTasksPage implements OnInit {
   readonly totalTokens = computed(() => this.sum((c) => c.total_tokens));
 
   private detailsSubscription: Subscription | null = null;
-  private callsSubscription: Subscription | null = null;
 
   ngOnInit(): void {
     this.route.paramMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
@@ -124,13 +117,11 @@ export class RunTasksPage implements OnInit {
     });
     this.destroyRef.onDestroy(() => {
       this.detailsSubscription?.unsubscribe();
-      this.callsSubscription?.unsubscribe();
     });
   }
 
   load(): void {
     this.loadTasks();
-    this.loadModelCalls();
   }
 
   loadTasks(): void {
@@ -154,39 +145,8 @@ export class RunTasksPage implements OnInit {
     });
   }
 
-  loadModelCalls(): void {
-    const projectId = this.projectId();
-    const runId = this.runId();
-    if (!projectId || !runId) return;
-    this.callsSubscription?.unsubscribe();
-    this.modelCallsLoading.set(true);
-    this.modelCallsError.set(null);
-    this.callsSubscription = this.agentService
-      .getLLMCallStats(projectId, undefined, this.modelCallsLimit, 0, { runId })
-      .subscribe({
-        next: (calls) => {
-          this.modelCalls.set([...calls].reverse());
-          this.modelCallsLoading.set(false);
-        },
-        error: (err) => {
-          this.modelCalls.set([]);
-          this.modelCallsError.set(errorMessage(err, 'Could not load the model calls.'));
-          this.modelCallsLoading.set(false);
-        },
-      });
-  }
 
-  /** Opens a call on the Model calls page, narrowed to this run. */
-  openCall(call: LLMCallStat): void {
-    this.router.navigate(['/llm-call-stats'], {
-      queryParams: { run_id: this.runId(), call: call.id },
-    });
-  }
 
-  callStatus(call: LLMCallStat): string {
-    if (call.response_code === null || call.response_code === undefined) return 'unknown';
-    return call.response_code >= 200 && call.response_code < 300 ? 'ok' : 'error';
-  }
 
   private sum(pick: (call: LLMCallStat) => number | null): number {
     return this.modelCalls().reduce((total, call) => total + (pick(call) ?? 0), 0);

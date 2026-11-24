@@ -335,9 +335,12 @@ by contrast, filters on the time a session was created.
 The task debugger
 -----------------
 
-Opening a conversation descends one further level, to the runs it contains and
-the tasks each run executed. A run names its nodes in execution order, and every
-node can be opened on its own.
+Opening a conversation descends one further level, to every run it contains,
+in the order they started. Each run shows its messages, a timeline of its
+steps, and — open by default for a conversation of up to three runs, for the
+latest run otherwise, since each run's model calls are a request of their
+own — its steps in execution order and the model calls it made. Every step
+can be opened on its own.
 
 .. image:: taskdebugger_detailed_view.png
    :alt: Run tasks view with the executed node list and a task's structured

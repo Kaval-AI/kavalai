@@ -79,3 +79,22 @@
   padding: var(--space-3);
   background: var(--color-base-100);
 }
+
+/* A run's timeline, steps and model calls, each under a small mono heading. */
+.run-section {
+  margin-top: var(--space-5);
+}
+
+.run-section-title {
+  margin: 0 0 var(--space-2);
+  font-family: var(--font-family-accent);
+  font-size: var(--text-xs);
+  font-weight: 400;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--color-slate-500);
+}
+
+.run-toggle {
+  margin-top: var(--space-4);
+}

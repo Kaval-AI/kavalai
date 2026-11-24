@@ -73,6 +73,46 @@
         <p class="text-muted no-messages">This run recorded no messages.</p>
       }
 
+      <section class="run-section" data-testid="run-timeline">
+        <h3 class="run-section-title">Timeline</h3>
+        @if (block.tasks.length > 0) {
+          <app-task-timeline-chart [tasks]="block.tasks" />
+        } @else {
+          <p class="text-muted">The run recorded no steps.</p>
+        }
+      </section>
+
+      <button
+        type="button"
+        uiButton="ghost"
+        size="sm"
+        class="run-toggle"
+        [attr.aria-expanded]="isExpanded(block.run.id)"
+        (click)="toggle(block.run.id)"
+        data-testid="toggle-run-details"
+      >
+        <i
+          class="fa-solid"
+          [class.fa-chevron-down]="!isExpanded(block.run.id)"
+          [class.fa-chevron-up]="isExpanded(block.run.id)"
+          aria-hidden="true"
+        ></i>
+        {{ isExpanded(block.run.id) ? 'Hide' : 'Show' }} steps and model calls
+      </button>
+
+      @if (isExpanded(block.run.id)) {
+        <section class="run-section" data-testid="run-step-list">
+          <h3 class="run-section-title">Steps</h3>
+          <app-tasks-list [tasks]="block.tasks" [runId]="block.run.id" />
+        </section>
+        @if (projectId(); as pid) {
+          <section class="run-section" data-testid="run-calls">
+            <h3 class="run-section-title">Model calls</h3>
+            <app-run-model-calls [projectId]="pid" [runId]="block.run.id" />
+          </section>
+        }
+      }
+
       <div class="card-actions-bar">
         <a
           uiButton="ghost"
@@ -80,7 +120,7 @@
           [routerLink]="['/conversations', block.run.session_id, 'runs', block.run.id, 'tasks']"
           data-testid="open-tasks"
         >
-          <i class="fa-solid fa-list-check" aria-hidden="true"></i> Open tasks
+          <i class="fa-solid fa-list-check" aria-hidden="true"></i> Open run
         </a>
         <a
           uiButton="ghost"
