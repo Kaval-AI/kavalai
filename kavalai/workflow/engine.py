@@ -57,6 +57,7 @@ from kavalai.workflow.models import (
     WorkflowTimeoutError,
 )
 from kavalai.agent_service import AgentService
+from kavalai.telemetry import Telemetry
 from kavalai.workflow.state import WorkflowState
 from kavalai.workflow.tasklog.base import TaskLogger, TokenAccumulator
 from kavalai.functionkernel import FunctionKernel, pythontool
@@ -267,6 +268,12 @@ class WorkflowEngine:
         ``run_stream(timeout=...)`` says otherwise. ``None`` (the default)
         sets no limit. ``python -m kavalai.server`` fills it from
         ``KAVALAI_AGENT_RUN_TIMEOUT_SECONDS``.
+    telemetry: Optional[Telemetry]
+        Where runs, nodes, tool calls and model calls are reported as spans,
+        beside what ``agent_service`` and ``task_logger`` record. ``None``
+        (the default) reports nothing. Pass
+        :class:`kavalai.otel.OtelTelemetry` to export to OpenTelemetry. It is
+        engine-level state: one instance serves every concurrent run.
     """
 
     def __init__(
@@ -283,8 +290,10 @@ class WorkflowEngine:
         default_llm_parameters: Optional[dict] = None,
         record_context: bool = True,
         run_timeout: Optional[float] = None,
+        telemetry: Optional[Telemetry] = None,
     ) -> None:
         self.graph = graph
+        self.telemetry = telemetry or Telemetry()
         self.agent_service = agent_service
         self.task_logger = task_logger
         self.client_factory = client_factory or client_factory_module.make_client
@@ -324,7 +333,7 @@ class WorkflowEngine:
         self._validate_rag_services()
 
         # The kernel is engine state: registered once, shared by every run.
-        self.kernel = FunctionKernel()
+        self.kernel = FunctionKernel(telemetry=self.telemetry)
         for server in graph.rest_servers:
             self.kernel.register_rest_server(server)
         for server in graph.mcp_servers:
@@ -1206,7 +1215,7 @@ class WorkflowEngine:
         run_logger = task_logger or self.task_logger
         # One aggregator per run, carried on the run context, so concurrent runs
         # on the same engine never see each other's tokens.
-        token_stats = TokenAccumulator(run_logger)
+        token_stats = TokenAccumulator(run_logger, telemetry=self.telemetry)
         run_templates = self._merge_templates(templates)
         run_timeout = timeout if timeout is not None else self.run_timeout
 
@@ -1271,6 +1280,16 @@ class WorkflowEngine:
                     content=run_context.user_message,
                 )
 
+            # Started from the context current here, so a host's request span
+            # becomes the run's parent.
+            run_span = self.telemetry.start_run(
+                workflow=self.graph.name,
+                agent_id=state.agent_id,
+                session_id=state.session_id,
+                run_id=state.run_id,
+                external_id=external_id,
+                invocation_id=invocation_id,
+            )
             try:
                 yield WorkflowStreamEvent(
                     type="workflow_started",
@@ -1285,7 +1304,9 @@ class WorkflowEngine:
                     _VisitBudget(self.max_node_visits),
                     trace=state.trace,
                 )
-                async for event in _within_deadline(walk, run_timeout):
+                async for event in self.telemetry.within(
+                    run_span, _within_deadline(walk, run_timeout)
+                ):
                     yield event
                 state.token_usage = token_stats.summary()
                 yield WorkflowStreamEvent(
@@ -1339,6 +1360,13 @@ class WorkflowEngine:
                 # state, released by :meth:`aclose`, and other runs may still be
                 # using its MCP sessions.
                 state.token_usage = token_stats.summary()
+                self.telemetry.end_run(
+                    run_span,
+                    status=state.status,
+                    error=state.error,
+                    token_usage=state.token_usage,
+                    duration_seconds=state.duration_seconds,
+                )
                 if run_logger:
                     await run_logger.flush()
                 self._log_token_usage(invocation_id, token_stats)
@@ -1393,33 +1421,49 @@ class WorkflowEngine:
 
             if record_state:
                 state.current_node = node.name
-            yield WorkflowStreamEvent(type="node_started", name=node.name)
-            event_data: dict = {}
-            async for event in self._execute_node(
-                node, run_context, state, budget, event_data
-            ):
-                yield event
-            trace.append(node.name)
-            if record_state:
-                state.data = to_plain(run_context.data)
-            yield WorkflowStreamEvent(
-                type="node_completed", name=node.name, output_data=event_data or None
+            span = self.telemetry.start_node(
+                name=node.name, node_type=node.type, seq=run_context.current_seq
             )
+            failure: Optional[Exception] = None
+            span_attributes: Optional[dict[str, Any]] = None
+            try:
+                yield WorkflowStreamEvent(type="node_started", name=node.name)
+                event_data: dict = {}
+                async for event in self.telemetry.within(
+                    span,
+                    self._execute_node(node, run_context, state, budget, event_data),
+                ):
+                    yield event
+                trace.append(node.name)
+                if record_state:
+                    state.data = to_plain(run_context.data)
+                yield WorkflowStreamEvent(
+                    type="node_completed",
+                    name=node.name,
+                    output_data=event_data or None,
+                )
 
-            if isinstance(node, EndNode):
-                if not record_state:
-                    # The graph validator rejects end nodes inside a parallel
-                    # branch; this is the belt-and-braces version.
-                    raise WorkflowException(
-                        f"End node '{node.name}' was reached inside a parallel "
-                        "branch; only the main path may end a run."
-                    )
-                await self._finish(node, run_context, state)
-                return
+                if isinstance(node, EndNode):
+                    if not record_state:
+                        # The graph validator rejects end nodes inside a
+                        # parallel branch; this is the belt-and-braces version.
+                        raise WorkflowException(
+                            f"End node '{node.name}' was reached inside a "
+                            "parallel branch; only the main path may end a run."
+                        )
+                    await self._finish(node, run_context, state)
+                    return
 
-            current, decision = self._next_node(node, run_context)
-            if decision is not None:
-                self._log_branch(run_context, node, decision)
+                current, decision = self._next_node(node, run_context)
+                if decision is not None:
+                    self._log_branch(run_context, node, decision)
+                    # ``value`` is left out: it is model output.
+                    span_attributes = decision.as_output()
+            except Exception as error:
+                failure = error
+                raise
+            finally:
+                self.telemetry.end_node(span, error=failure, attributes=span_attributes)
 
         # A non-end node with no outgoing transition (switch with no default match).
         raise WorkflowException(

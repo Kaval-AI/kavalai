@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 import json
 import typing
 from uuid import UUID
@@ -10,6 +12,7 @@ from kavalai.db import DatabaseManager, Run
 from kavalai.workflow import WorkflowEngine, SqliteTaskLogger
 from kavalai.workflow.models import WorkflowException
 from kavalai.functionkernel import pythontool
+from kavalai.telemetry import Telemetry
 from kavalai.llm_clients.base_client import BaseLlmClient, ModelCallStat
 from pydantic import BaseModel
 
@@ -2466,3 +2469,209 @@ async def test_the_completed_event_carries_the_run_id():
 
     assert events[-1].type == "workflow_completed"
     assert events[-1].run_id == events[0].run_id is not None
+
+
+class RecordingTelemetry(Telemetry):
+    """Records every call the engine makes, in order."""
+
+    def __init__(self):
+        self.calls = []
+        self.runs = []
+        self.nodes = []
+
+    def start_run(self, **ids):
+        self.calls.append(("start_run", ids["workflow"]))
+        self.runs.append({"ids": ids})
+        return self.runs[-1]
+
+    def end_run(self, span, **result):
+        self.calls.append(("end_run", result["status"]))
+        span.setdefault("ended", []).append(result)
+
+    def start_node(self, *, name, node_type, seq):
+        self.calls.append(("start_node", name))
+        self.nodes.append({"name": name, "type": node_type, "seq": seq})
+        return self.nodes[-1]
+
+    def end_node(self, span, *, error=None, attributes=None):
+        self.calls.append(("end_node", span["name"]))
+        span.update(error=error, attributes=attributes, ended=True)
+
+    def within(self, span, events):
+        self.calls.append(("within", span.get("name", "run")))
+        return events
+
+    @contextlib.contextmanager
+    def tool_call(self, tool_uri):
+        self.calls.append(("tool_call", tool_uri))
+        yield
+
+    def model_call(self, stats):
+        self.calls.append(("model_call", stats.model))
+
+
+def _telemetry_engine(nodes=STREAM_NODES, **kwargs):
+    telemetry = RecordingTelemetry()
+    kwargs.setdefault("client_factory", make_factory({"agent_response": "r"}))
+    engine = WorkflowEngine.from_dict(graph_dict(nodes), telemetry=telemetry, **kwargs)
+    return engine, telemetry
+
+
+async def test_telemetry_sees_a_linear_run_in_order():
+    service = make_agent_service()
+    engine, telemetry = _telemetry_engine(agent_service=service)
+    assert engine.kernel.telemetry is telemetry
+
+    state = await engine.run({"user_message": "x"}, external_id="ticket-7")
+
+    assert telemetry.calls == [
+        ("start_run", "wf"),
+        ("within", "run"),
+        ("start_node", "s"),
+        ("within", "s"),
+        ("end_node", "s"),
+        ("start_node", "answer"),
+        ("within", "answer"),
+        ("model_call", "fake"),
+        ("end_node", "answer"),
+        ("start_node", "e"),
+        ("within", "e"),
+        ("end_node", "e"),
+        ("end_run", "completed"),
+    ]
+    (run,) = telemetry.runs
+    assert run["ids"] == {
+        "workflow": "wf",
+        "agent_id": state.agent_id,
+        "session_id": state.session_id,
+        "run_id": state.run_id,
+        "external_id": "ticket-7",
+        "invocation_id": state.invocation_id,
+    }
+    (result,) = run["ended"]
+    assert result["error"] is None
+    assert result["token_usage"] == state.token_usage
+    assert result["duration_seconds"] == state.duration_seconds
+    assert [node["seq"] for node in telemetry.nodes] == [0, 1, 2]
+    assert all(node["error"] is None for node in telemetry.nodes)
+
+
+async def test_telemetry_receives_a_branch_decision_without_its_value():
+    nodes = [
+        {"name": "s", "type": "start", "next": "route"},
+        {
+            "name": "route",
+            "type": "switch",
+            "expr": "input.user_message",
+            "cases": {"hello": "e"},
+            "default": "e",
+        },
+        {"name": "e", "type": "end", "output": "input"},
+    ]
+    engine, telemetry = _telemetry_engine(nodes)
+
+    await engine.run({"user_message": "private"})
+
+    route = telemetry.nodes[1]
+    assert route["attributes"] == {"taken": "e", "matched": False}
+    assert telemetry.nodes[0]["attributes"] is None
+
+
+async def test_telemetry_wraps_a_function_nodes_tool_call():
+    class Greeting(BaseModel):
+        agent_response: str
+
+    @pythontool
+    def greet(name: str) -> Greeting:
+        return Greeting(agent_response=f"hi {name}")
+
+    nodes = [
+        {"name": "s", "type": "start", "next": "call"},
+        {
+            "name": "call",
+            "type": "function",
+            "tool": "python://greet",
+            "inputs": {"name": {"type": "literal", "value": "Sam"}},
+            "output": "output",
+            "next": "e",
+        },
+        {"name": "e", "type": "end", "output": "output"},
+    ]
+    engine, telemetry = _telemetry_engine(nodes)
+    engine.kernel.register_python_tool("greet", greet)
+
+    await engine.run({"user_message": "x"})
+
+    at = telemetry.calls.index(("tool_call", "python://greet"))
+    assert telemetry.calls[at - 1] == ("within", "call")
+    assert telemetry.calls[at + 1] == ("end_node", "call")
+
+
+async def test_telemetry_ends_a_failed_run_and_its_node_once():
+    engine, telemetry = _telemetry_engine(client_factory=make_factory(raises=True))
+
+    with pytest.raises(WorkflowException):
+        await engine.run({"user_message": "x"})
+
+    assert [call for call in telemetry.calls if call[0] == "end_run"] == [
+        ("end_run", "failed")
+    ]
+    (result,) = telemetry.runs[0]["ended"]
+    assert result["error"]
+    answer = telemetry.nodes[1]
+    assert answer["ended"] and isinstance(answer["error"], Exception)
+    assert telemetry.nodes[0]["error"] is None
+
+
+async def test_telemetry_ends_a_run_that_halts_with_a_workflow_exception():
+    nodes = [
+        {"name": "s", "type": "start", "next": "route"},
+        {
+            "name": "route",
+            "type": "switch",
+            "expr": "input.user_message",
+            "cases": {"hello": "e"},
+        },
+        {"name": "e", "type": "end", "output": "input"},
+    ]
+    engine, telemetry = _telemetry_engine(nodes)
+
+    with pytest.raises(WorkflowException, match="no next node"):
+        await engine.run({"user_message": "x"})
+
+    assert telemetry.calls[-1] == ("end_run", "failed")
+    assert telemetry.nodes[1]["attributes"] == {"taken": None, "matched": False}
+
+
+async def test_telemetry_ends_a_timed_out_run_once():
+    engine, telemetry = _telemetry_engine(
+        client_factory=lambda *a, **k: _SlowClient(), run_timeout=0.05
+    )
+
+    with pytest.raises(WorkflowException, match="time limit"):
+        await engine.run({"user_message": "x"})
+
+    (result,) = telemetry.runs[0]["ended"]
+    assert result["status"] == "failed" and "time limit" in result["error"]
+    assert telemetry.nodes[1]["ended"]
+
+
+async def test_telemetry_ends_a_run_whose_consumer_went_away():
+    engine, telemetry = _telemetry_engine()
+    stream = engine.run_stream({"user_message": "x"})
+    async for event in stream:
+        if event.type == "node_started" and event.name == "answer":
+            break
+    await stream.aclose()
+
+    (result,) = telemetry.runs[0]["ended"]
+    assert result["status"] == "failed" and "aborted" in result["error"]
+    # The abandoned walk is finalised by the event loop, a generator at a
+    # time, so the node's span ends shortly after the run's.
+    answer = telemetry.nodes[1]
+    for _ in range(100):
+        if answer.get("ended"):
+            break
+        await asyncio.sleep(0.01)
+    # Abandoning a run is not an error of the node it was in.
+    assert answer["ended"] and answer["error"] is None

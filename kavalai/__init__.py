@@ -78,6 +78,7 @@ from kavalai.llm_clients.registry import (
 
 from kavalai.agent import Agent, ToolCall
 from kavalai.run_context import RunContext
+from kavalai.telemetry import Telemetry
 from kavalai.functionkernel import (
     FunctionKernel,
     FunctionKernelException,
@@ -210,6 +211,7 @@ __all__ = [
     "StatsBridge",
     "TokenAccumulator",
     "SqliteTaskLogger",
+    "Telemetry",
     "make_client",
     # Agent & tools
     "Agent",

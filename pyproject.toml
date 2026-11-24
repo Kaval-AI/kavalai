@@ -83,10 +83,18 @@ backoffice = [
     "sse-starlette",
 ]
 
+# OpenTelemetry export (`kavalai.otel`): the SDK and the OTLP exporter over
+# HTTP. HTTP rather than gRPC keeps `grpcio` out of the install, and it is the
+# only push path some backends accept.
+otel = [
+    "opentelemetry-sdk",
+    "opentelemetry-exporter-otlp-proto-http",
+]
+
 # Everything above — `pip install "kavalai[common]"` is the normal,
 # non-browser install.
 common = [
-    "kavalai[runtime,webtools,fastembed,backoffice]",
+    "kavalai[runtime,webtools,fastembed,backoffice,otel]",
 ]
 
 # The browser counterpart of `common`: what the core install additionally needs

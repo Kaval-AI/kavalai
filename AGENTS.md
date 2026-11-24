@@ -46,6 +46,7 @@ Two components:
 | `docs/`, `notebooks/` | Sphinx documentation; the five tutorial notebooks are the source of truth |
 | `tools/` | Standalone product tooling outside the wheel; `zerocostchatbot/` scrapes a site into a resumable pages database (`python -m tools.zerocostchatbot.scrape`) and builds a RAG index from it (`python -m tools.zerocostchatbot.build_index`, fastembed by default) and compiles a static demo folder (`python -m tools.zerocostchatbot.make_demo`) from `archive.html`, the in-browser viewer of a pages database with the chat widget answering from its RAG index |
 | `kavalai/widget/` | Production chat widget shipped in the wheel (`widget_dir()`/`asset_path()`); floating/inline, `--kcb-*` theming, `texts` i18n, default-on AI disclosure label, `onFeedback` thumbs, `on()` events, agent-server SSE connector with headers/onResponse/storage; reference `docs/reference/widget.rst`; tests via `node --test kavalai/widget/tests/kaval-chatbot.test.js` |
+| `kavalai/telemetry.py`, `kavalai/otel.py` | The tracing seam (`Telemetry`, no-op, base install only) and its OpenTelemetry implementation (`OtelTelemetry`, `configure_sdk`; extra `otel`, reads no environment variable, content off by default) |
 | `kavalai/net.py`, `kavalai/testing.py`, `kavalai/text.py` | The SSRF guard the bundled web tools use; offline test doubles (`ScriptedLlmClient`, `FakeEmbeddingClient`, `fake_providers`); HTML parsing and chunking for RAG indexes. None is imported by `kavalai/__init__.py` |
 | `examples/` | Runnable examples; `green_village/` (RAG chatbot, port 25000), `bakery/` (a YAML workflow with side effects, ports 25100/25101) and `business_info_agent/` (web research: search, crawl, summarise, port 25200) each ship an `eval_cases.yaml`; `support_agent/support_agent.yaml` is the branching-DAG example the docs load |
 
@@ -64,7 +65,9 @@ check a change against the list before proposing it.
    engine.** The token accumulator is per run and must be forwarded by
    `_branch_context`. The `FunctionKernel` and its MCP sessions are opened by
    `await engine.connect()` and released by `await engine.aclose()` — never per
-   run.
+   run. A `Telemetry` is engine-level too: no span is stored on `RunContext`,
+   and a span is made current for one step of the event stream only, never
+   across a `yield` (`OtelTelemetry.within`).
 4. **Library code reads no environment variables.** Only entry-point `main()`
    functions do, through `kavalai/settings.py` where two of them read the
    same names; `tests/test_config_drift.py` pins the list of modules allowed
@@ -85,8 +88,9 @@ check a change against the list before proposing it.
    will not be rebuilt.
 6. **The base package stays Pyodide-compatible.** No greenlet, no native
    extensions beyond the prebuilt Pyodide packages. Everything else goes in an
-   extra grouped by weight — `runtime`, `webtools`, `fastembed`, `backoffice` —
-   which `common` combines. Install hints name the narrowest one. `runtime`
+   extra grouped by weight — `runtime`, `webtools`, `fastembed`, `backoffice`,
+   `otel` — which `common` combines. `kavalai/otel.py` is the only module that
+   imports OpenTelemetry; the engine calls the no-op `kavalai.telemetry.Telemetry`. Install hints name the narrowest one. `runtime`
    requests `sqlalchemy[asyncio]`: the async engine needs greenlet, and
    SQLAlchemy 2.1 no longer installs it by default.
 7. **Every boundary validates, and failures are loud.** An unresolvable prompt

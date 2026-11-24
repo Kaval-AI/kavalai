@@ -34,3 +34,18 @@ def test_entrypoint_modules_are_importable(script, module):
     assert (
         importlib.util.find_spec(module) is not None
     ), f"{script} runs 'python -m {module}', which does not exist"
+
+
+def test_agent_image_installs_real_extras_including_opentelemetry():
+    """``KAVALAI_AGENT_OTEL=true`` has to work on the stock agent image."""
+    import tomllib
+
+    root = Path(__file__).parent.parent
+    dockerfile = (root / "dockerfiles" / "agent.Dockerfile").read_text()
+    extras = re.search(r"^ARG EXTRAS=(\S+)$", dockerfile, re.MULTILINE).group(1)
+    declared = tomllib.loads((root / "pyproject.toml").read_text())["project"][
+        "optional-dependencies"
+    ]
+
+    assert set(extras.split(",")) <= set(declared)
+    assert {"runtime", "otel"} <= set(extras.split(","))

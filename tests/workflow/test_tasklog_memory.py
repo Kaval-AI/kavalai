@@ -355,3 +355,23 @@ async def test_tee_forwards_the_ids_and_keeps_each_loggers_options():
         assert (call.agent_id, call.session_id, call.run_id) == ("a1", "s1", "r1")
     assert full.model_calls[0].request_data is not None
     assert slim.model_calls[0].request_data is None
+
+
+async def test_stats_bridge_and_accumulator_report_to_telemetry(task_logger):
+    from kavalai.telemetry import Telemetry
+
+    class Recording(Telemetry):
+        def __init__(self):
+            self.seen = []
+
+        def model_call(self, stats):
+            self.seen.append(stats)
+
+    telemetry = Recording()
+    call = a_model_call()
+    StatsBridge(task_logger, telemetry=telemetry).receive_model_stats(call)
+    TokenAccumulator(telemetry=telemetry).receive_model_stats(call)
+    await task_logger.flush()
+
+    assert telemetry.seen == [call, call]
+    assert len(task_logger.model_calls) == 1

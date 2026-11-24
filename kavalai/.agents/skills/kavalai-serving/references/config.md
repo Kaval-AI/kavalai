@@ -64,6 +64,10 @@ Read by `python -m kavalai.server` and `python -m kavalai.migrate_db agents`.
 | `KAVALAI_AGENT_PORT` | Port. Default `10000` |
 | `KAVALAI_AGENT_BASIC_AUTH_USER` | Basic-auth username. Auth is enabled only when **both** this and the password are set |
 | `KAVALAI_AGENT_BASIC_AUTH_PASSWORD` | Basic-auth password |
+| `KAVALAI_AGENT_OTEL` | Export every run to OpenTelemetry over OTLP/HTTP (a trace per run, token and latency histograms). Default `false`. Needs `kavalai[otel]` |
+| `KAVALAI_AGENT_OTEL_CAPTURE_CONTENT` | Attach each model call's request and response to its span. Default `false` — spans carry no prompt or answer otherwise |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` / `OTEL_EXPORTER_OTLP_HEADERS` | Read by the OpenTelemetry SDK, not Kaval.AI: where the exporters send and the headers they send. Per-signal forms (`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`, `OTEL_EXPORTER_OTLP_TRACES_HEADERS`, `OTEL_EXPORTER_OTLP_METRICS_HEADERS`) take precedence |
+| `OTEL_SERVICE_NAME` | Read by the OpenTelemetry SDK: the service name on every span and metric. The workflow's name when unset |
 
 ## Backoffice
 

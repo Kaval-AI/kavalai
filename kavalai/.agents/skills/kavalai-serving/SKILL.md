@@ -94,6 +94,16 @@ reasons, and replaces a failure's text with a fixed message quoting the run
 id. Which nodes stream content is still the workflow's `stream_output`.
 `KAVALAI_AGENT_RUN_TIMEOUT_SECONDS` bounds a run's duration.
 
+**OpenTelemetry export is off unless asked, and exports no content when on.**
+`KAVALAI_AGENT_OTEL=true` (or `WorkflowEngine(..., telemetry=OtelTelemetry())`,
+from `kavalai.otel`, extra `kavalai[otel]`) sends one trace per run plus token
+and latency histograms over OTLP/HTTP; the destination is the OpenTelemetry
+SDK's own `OTEL_EXPORTER_OTLP_*` variables. Spans carry names, timings, token
+counts and error types — no prompt or answer — unless
+`KAVALAI_AGENT_OTEL_CAPTURE_CONTENT=true` / `capture_content=True`. That is
+the opposite default from the task logger. A host with OpenTelemetry already
+configured passes `telemetry=OtelTelemetry()` and sets neither variable.
+
 ## Calling it from Python
 
 ```python

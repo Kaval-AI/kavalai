@@ -329,10 +329,14 @@ delegation. You get one agent loop per node and a graph to route between them.
 If your mental model is "a team of specialists negotiating", CrewAI or the
 Microsoft Agent Framework fit that shape and Kaval.AI does not.
 
-**No OpenTelemetry export.** Observability is Kaval.AI's own tables plus
-``loguru``. Pydantic AI, the OpenAI Agents SDK and the Microsoft Agent Framework
-all emit OTel spans, which drop into an existing tracing stack without further
-work.
+**OpenTelemetry export is optional.** The record of a run is Kaval.AI's own
+tables. With the ``otel`` extra a run is also exported as a trace — run,
+node, tool call and model call spans — with token and latency histograms, as
+Pydantic AI, the OpenAI Agents SDK and the Microsoft Agent Framework do. The
+export has limits: prompts and answers are exported only on request, a
+model-call span is created when the call has finished rather than while it
+runs, and log lines, database writes and the backoffice are not exported. See
+:ref:`observability-opentelemetry`.
 
 **No long-term memory.** Memory is the session's chat history and ``history:``
 inputs. There is no semantic or summarising memory that persists across

@@ -238,6 +238,19 @@ privileged component: it adds nothing the tables do not already contain. The
 schema, and the reasoning behind each table, is documented in
 :doc:`../guides/data_model`.
 
+A third, optional output reports the same run to a tracing system. The
+engine, the function kernel and the token accumulator call a
+:class:`~kavalai.Telemetry`, whose base class does nothing;
+:class:`kavalai.otel.OtelTelemetry` turns the calls into an OpenTelemetry
+trace — run, node, tool call and model call — and a few histograms. The
+interface exists so that the base package imports no OpenTelemetry module: a
+browser tab has no collector to send spans to. A span is made current for one
+step of the event stream at a time and never across a ``yield``, because the
+code that runs between two events is the consumer's, and no span is stored on
+``RunContext``: a child finds its parent through the current context, which
+is also what places an instrumented HTTP client's spans under the node that
+made the request. See :ref:`observability-opentelemetry`.
+
 Portability: the same engine in three places
 ============================================
 
@@ -335,6 +348,10 @@ The invariants most often at issue are collected here for convenience:
      - One engine serves many concurrent runs. A registered RAG service is
        engine-level state too: built on first use and kept, so its caches
        outlive a single query.
+   * - Telemetry is engine-level; a span is current for one step only
+     - One ``Telemetry`` serves every concurrent run and holds no per-run
+       data. No span is stored on ``RunContext``, and none is current across
+       a ``yield``, where the consumer's code runs.
    * - Recording less is explicit, never silent
      - ``record_nodes``, ``record_payloads`` and ``record_context`` are
        options a deployer sets; nothing else drops a record, and an unknown
@@ -360,9 +377,9 @@ Known limitations
 
 The architecture has costs, and they are recorded rather than elided. A run has
 no mid-execution checkpoint, so a crashed process loses the run; there is no
-primitive for pausing a run pending human approval; there is no agent-to-agent
-handoff, delegation or group-chat pattern; and observability is Kaval.AI's
-own tables rather than OpenTelemetry. Each is discussed in :doc:`comparison`.
+primitive for pausing a run pending human approval; and there is no
+agent-to-agent handoff, delegation or group-chat pattern. Each is discussed
+in :doc:`comparison`.
 
 Where to next
 =============
