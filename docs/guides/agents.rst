@@ -61,7 +61,8 @@ agent answers in the context of what was said before. The current user message
 belongs in the prompt, not in the history, or the model reads it twice.
 
 ``inputs`` is the mapping the system prompt lists as **context variables**, and
-what a tool call's ``input_args`` resolve against. Without it the agent lists
+what a tool call's ``input`` reference resolves against (see
+:ref:`agents-tool-calls`). Without it the agent lists
 the run context's ``data``. The workflow engine passes an agent node's
 resolved ``inputs``, so the model sees the values the node declares — a
 retrieved passage list, a classification — and not every output the run has
@@ -80,7 +81,7 @@ Each step of the loop performs the same four operations:
    last message leaves the system prompt constant across the steps of a run,
    which is what a provider's prompt cache can reuse.
 #. **Reason** — the LLM returns a ``StepOutput``: a list of ``tool_calls`` plus
-   an optional final output.
+   an optional final output (see :ref:`agents-tool-calls`).
 #. **Act** — the requested tool calls execute *in parallel* through the
    :class:`~kavalai.FunctionKernel`, and their results feed into the next step.
 #. **Decide** — the loop stops when the model returns output with no further
@@ -89,6 +90,69 @@ Each step of the loop performs the same four operations:
 This explicit bound is a safety feature: an agent can never loop forever, and it
 can only act through tools you have registered (see :doc:`tools` and
 :doc:`safety`).
+
+.. _agents-tool-calls:
+
+How a tool call is written
+--------------------------
+
+A step is one structured output, and the model is asked for it with a schema
+built from the tools the agent may use: one call model per tool, with ``name``
+fixed to that tool's URI and ``args`` held to its input schema. A provider that
+enforces its structured output therefore cannot produce a call that misspells
+an argument or gives it a value of the wrong type. The first step of an agent
+with one tool, ``get_weather(city, unit)``, asked for the weather in Tartu:
+
+.. code-block:: json
+
+   {
+     "instructions": "Get the current weather in Tartu in Celsius.",
+     "tool_calls": [
+       {
+         "name": "python://get_weather",
+         "args": {"city": "Tartu", "unit": "celsius"},
+         "refs": [],
+         "call_id": "weather_tartu"
+       }
+     ],
+     "output": null
+   }
+
+``args``
+    The argument values the model writes out. A ``null`` means the argument
+    is not supplied, so the tool's default applies.
+``refs``
+    Arguments taken from elsewhere, so that the model does not retype them.
+    Each entry names the argument (``arg``), a ``source`` and a ``key``:
+    ``{"arg": "document", "source": "step", "key": "doc"}`` passes the whole
+    output of the earlier tool call whose ``call_id`` is ``doc``, and
+    ``"source": "input"`` passes the context variable named by ``key``. A
+    value written in ``args`` takes precedence over a reference to the same
+    argument.
+``call_id``
+    The name under which later steps refer to the call's result.
+
+A tool whose input has a free-form value — a ``dict`` parameter, and most MCP
+and REST tools, whose nested objects are not described — cannot be typed,
+because a schema that enforces nothing is refused by strict structured output.
+Such a tool takes ``args_json`` in place of ``args``: the same object, written
+as a JSON string. Declaring a Pydantic model for the parameter makes the tool
+typed.
+
+Nothing about a call's arguments ends a run. Arguments that are not valid
+JSON, a reference to a ``call_id`` or a context variable that does not exist,
+and arguments the tool refuses each become that call's result, as an error
+message the model reads on its next step. A tool is not run with part of its
+arguments.
+
+Not every provider holds a model to the schema it is given. The agent
+therefore reads a reply more leniently than it asks for it, and accepts the
+form used before arguments were typed — ``literal_args``, ``planner_context_args`` and
+``input_args`` as JSON strings — where a model, or a scripted test reply,
+still writes it.
+
+A custom ``prompt_template`` has to describe this form. It receives
+``json_argument_tools``, the URIs of the tools that take ``args_json``.
 
 Narrow it further with ``allowed_tools``, a list of tool URIs
 (``python://web.crawl``, or ``rest://api.*`` for a whole server). Excluded tools

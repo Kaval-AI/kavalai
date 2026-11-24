@@ -34,7 +34,7 @@ Two components:
 
 | Path | Contents |
 |------|----------|
-| `kavalai/` | Runtime: `agent.py`, `agent_service.py`, `db.py`, `server.py`, `run_context.py`, `functionkernel.py`, `schema_parser.py` |
+| `kavalai/` | Runtime: `agent.py`, `agent_service.py`, `db.py`, `server.py`, `run_context.py`, `functionkernel.py`, `schema_parser.py`; `step_schema.py` builds the typed step schema an agent sends (one call model per tool; arguments are typed, there is no string mode) |
 | `kavalai/workflow/` | Engine v2: `models.py` (the graph), `engine.py`, `builder.py`, `expressions.py`, `render.py`, `tasklog/` |
 | `kavalai/llm_clients/` | OpenAI, Gemini, Anthropic, Scaleway, Ollama and in-browser clients behind one streaming interface; `registry.py` makes that set extensible |
 | `kavalai/eval/` | Evaluation against a **running** agent server: `base.py` (`AgentEvaluator`, `EvalResult`), `simple_evaluator.py` (literal matchers), `judge_evaluator.py` (a model grades a plain-language criterion), `eval_runner.py` (YAML cases + the `kavalai-eval` console script) |

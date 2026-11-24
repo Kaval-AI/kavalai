@@ -60,6 +60,24 @@ Added
 Changed
 ^^^^^^^
 
+* **Typed tool arguments.** An agent step is requested with one call model
+  per allowed tool: ``name`` is the tool's URI and ``args`` an object held to
+  the tool's input schema, where a call used to carry its arguments as JSON
+  inside the strings ``literal_args``, ``planner_context_args`` and
+  ``input_args``. By-reference arguments are a ``refs`` list of
+  ``{arg, source, key}``, with ``source`` ``step`` (an earlier call's result)
+  or ``input`` (a context variable). A tool whose input has a free-form value
+  takes ``args_json``, a JSON string. Measured on seven models of three
+  providers, the share of steps with the correct tool calls rose from 65% to
+  96%. :mod:`kavalai.step_schema` builds the schema; see
+  :ref:`agents-tool-calls`.
+
+* **Unusable tool arguments are an error the model reads.** Arguments that
+  are not valid JSON, and a reference to a ``call_id`` or a context variable
+  that does not exist, become the call's error result and the tool is not
+  run. The first was logged and the tool called without arguments; the second
+  passed ``None``.
+
 * **Google sign-in is optional.** With neither
   ``KAVALAI_BO_GOOGLE_CLIENT_ID`` nor ``KAVALAI_BO_GOOGLE_CLIENT_SECRET`` set
   the backoffice starts and offers password sign-in only;
@@ -76,6 +94,12 @@ Upgrading
 * The OpenTelemetry export needs no migration and is off unless
   ``telemetry=`` or ``KAVALAI_AGENT_OTEL`` turns it on. An image built with
   ``--build-arg EXTRAS=…`` names ``otel`` itself to keep the switch working.
+* Remove instructions about the tool-call format from agent prompts, and
+  rewrite a custom ``Agent(prompt_template=…)`` for the typed form: the model
+  is now held to a schema without ``literal_args``. No workflow file changes.
+  A reply in the earlier form is still read, so scripted test replies that
+  use ``literal_args`` keep passing; ``ToolCall``'s three string fields are
+  now optional and default to ``None``, not ``"{}"``.
 * Delete any type-checker override for ``kavalai`` (``ignore_missing_imports``
   or ``follow_untyped_imports``). Calls into the package are then checked, so
   a project may see errors that the override had hidden.

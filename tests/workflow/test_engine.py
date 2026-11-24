@@ -1760,7 +1760,7 @@ async def test_agent_tool_calls_become_child_rows():
                         {
                             "name": "python://lookup",
                             "call_id": "c1",
-                            "literal_args": '{"order_id": "4471"}',
+                            "args": {"order_id": "4471"},
                         }
                     ],
                     "output": None,

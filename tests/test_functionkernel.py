@@ -1180,6 +1180,26 @@ async def test_get_tool_descriptions_applies_the_allowed_tools_filter():
     assert [tool["name"] for tool in described] == ["python://math.add"]
 
 
+async def test_get_tool_definitions_keys_tools_by_the_uri_a_model_writes():
+    kernel = FunctionKernel()
+    kernel.register_python_tool("math.add", sync_add)
+    kernel.register_python_tool("math.multiply", async_multiply)
+    kernel.register_rest_tool("crm", "find", "post", {"properties": {}}, {"properties": {}})
+
+    definitions = await kernel.get_tool_definitions()
+    assert list(definitions) == [
+        "python://math.add",
+        "python://math.multiply",
+        "rest://crm.find [POST]",
+    ]
+    assert definitions["python://math.add"] is kernel.get_tool_definition("python://math.add")
+
+    assert list(await kernel.get_tool_definitions(["rest://crm.*"])) == ["rest://crm.find [POST]"]
+    assert await kernel.get_tool_definitions([]) == {}
+    described = json.loads(await kernel.get_tool_descriptions())
+    assert [tool["name"] for tool in described] == list(definitions)
+
+
 @pytest.mark.asyncio
 async def test_mcp_tools_are_described_without_a_prior_call():
     """An agent must see MCP tools before anything has called one.

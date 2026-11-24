@@ -251,7 +251,7 @@ async def test_agent_node_tool_calls_are_children_of_the_node(recorder):
     step = {
         "instructions": "call the tool",
         "tool_calls": [
-            {"name": "python://greet", "literal_args": json.dumps({"name": "Sam"})}
+            {"name": "python://greet", "args": {"name": "Sam"}}
         ],
         "output": None,
     }
