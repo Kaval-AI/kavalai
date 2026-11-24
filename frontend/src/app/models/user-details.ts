@@ -21,4 +21,5 @@ export interface UserDetails {
   is_admin: boolean
   picture: string
   active_project_id?: string
+  has_password?: boolean
 }

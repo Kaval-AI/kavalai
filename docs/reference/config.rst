@@ -195,18 +195,22 @@ Backoffice
    * - ``KAVALAI_BO_PORT``
      - Port for the backoffice server. Default ``8000``.
    * - ``KAVALAI_BO_GOOGLE_CLIENT_ID``
-     - Google OAuth client id for sign-in. Required.
+     - Google OAuth client id. Optional: with neither this nor the secret
+       set, users sign in with a password only.
    * - ``KAVALAI_BO_GOOGLE_CLIENT_SECRET``
-     - Google OAuth client secret. Required.
+     - Google OAuth client secret. Set together with the client id, or not
+       at all.
    * - ``KAVALAI_BO_SESSION_SECRET_KEY``
      - Signing key for session cookies. Required, with no development
        fallback: a cookie signed with a well-known key is a backoffice that
        looks as if it works until it is exposed.
    * - ``KAVALAI_BO_FRONTEND_URL``
-     - Where a completed sign-in is redirected to. Required.
+     - Where a completed Google sign-in is redirected to. Required when the
+       Google client is set, unused otherwise.
 
-The backoffice refuses to start when any of the four is unset, with a message
-naming the missing variable.
+The backoffice refuses to start without the session key, with only one of the
+two Google variables, or with a Google client and no front-end URL; the
+message names the missing variable.
 
 Tools
 -----
@@ -245,9 +249,10 @@ A ``.env`` for local development against Docker Compose:
    # Backoffice (its own database)
    KAVALAI_BO_DB_URI=postgresql://kavalai:kavalai@localhost:5432/kavalai
    KAVALAI_BO_DB_SCHEMA=backoffice
+   KAVALAI_BO_SESSION_SECRET_KEY=change-me
+   # Optional: Google sign-in beside passwords.
    KAVALAI_BO_GOOGLE_CLIENT_ID=...
    KAVALAI_BO_GOOGLE_CLIENT_SECRET=...
-   KAVALAI_BO_SESSION_SECRET_KEY=change-me
    KAVALAI_BO_FRONTEND_URL=http://localhost:4200
 
 .. warning::

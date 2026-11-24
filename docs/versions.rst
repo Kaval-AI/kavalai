@@ -13,10 +13,18 @@ Unreleased
 ----------
 
 The package is typed: it ships a ``py.typed`` marker, so a type checker reads
-its annotations. No migration.
+its annotations. The backoffice gains password sign-in and no longer requires
+Google OAuth. One backoffice migration.
 
 Added
 ^^^^^
+
+* **Password sign-in for the backoffice.** ``POST /auth/login`` takes an
+  address and a password, and the sign-in page shows the form.
+  ``users.password_hash`` holds a salted scrypt hash, never the password, and
+  no user endpoint returns it. ``python -m kavalai.backoffice.users add``
+  creates a user and ``set-password`` replaces a password; both prompt for it
+  or read it from standard input.
 
 * **``py.typed`` (PEP 561).** mypy no longer reports ``kavalai`` as missing
   library stubs, and calls into the package are checked against its real
@@ -27,9 +35,22 @@ Added
   are declared for type checkers, so a misspelt import from ``kavalai`` is an
   error rather than ``Any``.
 
+Changed
+^^^^^^^
+
+* **Google sign-in is optional.** With neither
+  ``KAVALAI_BO_GOOGLE_CLIENT_ID`` nor ``KAVALAI_BO_GOOGLE_CLIENT_SECRET`` set
+  the backoffice starts and offers password sign-in only;
+  ``KAVALAI_BO_FRONTEND_URL`` is required only with the Google client.
+  ``GET /auth/methods`` reports which methods are on. The ``/users``
+  endpoints return ``has_password`` and accept ``password``.
+
 Upgrading
 ^^^^^^^^^
 
+* Run ``python -m kavalai.migrate_db backoffice`` (revision 0005 adds
+  ``users.password_hash``). Existing users keep signing in through Google
+  until they are given a password.
 * Delete any type-checker override for ``kavalai`` (``ignore_missing_imports``
   or ``follow_untyped_imports``). Calls into the package are then checked, so
   a project may see errors that the override had hidden.

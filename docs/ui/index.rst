@@ -24,8 +24,7 @@ Running the backoffice
 ----------------------
 
 Three things must exist before the interface is usable: a database carrying
-both schemas, a Google OAuth client for sign-in, and one user row to sign in
-as. They are treated in that order below. PostgreSQL is the production choice;
+both schemas, a configured sign-in, and one user to sign in as. They are treated in that order below. PostgreSQL is the production choice;
 SQLite serves a single machine, as described at the end of this section.
 
 Setting up PostgreSQL
@@ -109,20 +108,36 @@ deployment with more than one host.
 Configuring sign-in
 ^^^^^^^^^^^^^^^^^^^
 
-Authentication is delegated to Google OAuth; the backoffice stores no
-passwords. Create an OAuth client in the Google Cloud console, register
-``{backoffice}/auth/google/callback`` as its authorised redirect URI, and set:
+A user signs in with an address and a password, with a Google account, or
+with either. Password sign-in needs no configuration beyond the key that
+signs the session cookie:
+
+.. code-block:: bash
+
+   # Signs the session cookie. Required: there is no development fallback.
+   KAVALAI_BO_SESSION_SECRET_KEY=...
+
+Google sign-in is optional. To offer it, create an OAuth client in the Google
+Cloud console, register ``{backoffice}/auth/google/callback`` as its authorised
+redirect URI, and set:
 
 .. code-block:: bash
 
    KAVALAI_BO_GOOGLE_CLIENT_ID=...
    KAVALAI_BO_GOOGLE_CLIENT_SECRET=...
 
-   # Signs the session cookie. Required: there is no development fallback.
-   KAVALAI_BO_SESSION_SECRET_KEY=...
-
-   # Where a completed sign-in is redirected to.
+   # Where a completed Google sign-in is redirected to.
    KAVALAI_BO_FRONTEND_URL=http://localhost:8000
+
+With neither Google variable set, the sign-in page shows the password form
+alone and the Google routes answer ``404``. Setting one without the other
+stops the start-up, since a half-configured client is a mistake rather than a
+choice.
+
+The backoffice stores no passwords. ``users.password_hash`` holds a salted
+scrypt hash that records its own cost parameters, so the parameters can be
+raised later without invalidating existing accounts. A user whose hash is
+``NULL`` can sign in through Google only.
 
 Starting the service
 ^^^^^^^^^^^^^^^^^^^^
@@ -148,44 +163,55 @@ the Angular port:
 Signing in
 ^^^^^^^^^^
 
-The landing page offers a single action.
-
-.. image:: loginpage.png
-   :alt: Backoffice sign-in page with a single "Sign in with Google" action
-   :width: 100%
+The landing page shows a form for the address and the password, and beneath
+it a **Sign in with Google** button when a Google client is configured. A
+refused password sign-in answers ``401 Invalid email or password`` whether the
+address is unknown, has no password or the password is wrong, so the page
+does not reveal which addresses are registered.
 
 Creating the first user
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-Sign-in authenticates an identity; it does not grant one. A Google account is
-admitted only if its address already appears in the ``users`` table — an
-unknown address is refused with ``403 User not registered in the system`` and
-the attempt is logged. Nothing self-registers, which is why an installation
-that has just been migrated cannot yet be entered by anyone.
+Sign-in authenticates an identity; it does not grant one. An address is
+admitted only if it already appears in the ``users`` table — a Google account
+with an unknown address is refused with ``403 User not registered in the
+system`` and the attempt is logged. Nothing self-registers, which is why an
+installation that has just been migrated cannot yet be entered by anyone.
 
-The first user is therefore inserted by hand, once, directly into the
-backoffice schema. Make it an administrator: only administrators may create
-projects and further users.
-
-.. code-block:: sql
-
-   INSERT INTO backoffice.users (id, email, name, is_admin, created_at, updated_at)
-   VALUES (gen_random_uuid(), 'you@example.com', 'Your Name', true, now(), now());
-
-The address must match the Google account exactly; ``name`` and ``picture`` are
-overwritten from the Google profile on every sign-in, so their initial values
-matter little. Against the development stack the statement can be applied with:
+The first user is therefore created from the command line, with the script
+that ships in the package. Make it an administrator: only administrators may
+create projects and further users.
 
 .. code-block:: bash
 
-   docker compose exec postgres_db \
-     psql -U kavalai_dev -d kavalai_dev -c "INSERT INTO backoffice.users \
-     (id, email, name, is_admin, created_at, updated_at) VALUES \
-     (gen_random_uuid(), 'you@example.com', 'Your Name', true, now(), now());"
+   python -m kavalai.backoffice.users add you@example.com \
+     --name "Your Name" --admin
 
-This is the only step that requires database access. Once that account can sign
-in, every further user is added from the **Users** page and every project from
-the interface itself.
+The script prompts for the password twice and stores only its hash. The
+password is never a command-line argument, which would leave it in the shell
+history and the process list; ``--password-stdin`` reads it from standard
+input instead, for use from a provisioning script. A password is at least
+eight characters long. The script reads ``KAVALAI_BO_DB_URI`` and
+``KAVALAI_BO_DB_SCHEMA`` as the server does, or takes ``--db-uri`` and
+``--db-schema``; in a container it is run with ``docker exec`` in the
+backoffice container.
+
+Two further forms cover the remaining cases:
+
+.. code-block:: bash
+
+   # A user that signs in through Google only: no password is stored.
+   python -m kavalai.backoffice.users add you@example.com --admin --no-password
+
+   # Replace the password of an existing user.
+   python -m kavalai.backoffice.users set-password you@example.com
+
+For Google sign-in the address must match the Google account exactly;
+``name`` and ``picture`` are overwritten from the Google profile on every such
+sign-in, so their initial values matter little.
+
+Once that account can sign in, further users are added from the **Users**
+page or with the same script, and every project from the interface itself.
 
 
 Projects
@@ -463,7 +489,9 @@ Users and access
 
 The **Users** page is administrator-only. It is where accounts are created
 after the first — an address and a name, with the administrator flag granted or
-withheld — and where they are removed. An administrator cannot delete their own
+withheld — and where they are removed. An account created there has no
+password and signs in through Google; a password is given with
+``python -m kavalai.backoffice.users set-password``. An administrator cannot delete their own
 account, which prevents an installation from being locked out of itself.
 
 Membership is granted per project, in one of two roles. A **viewer** may read

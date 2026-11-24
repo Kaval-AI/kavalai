@@ -76,6 +76,14 @@ class Base(DeclarativeBase):
 
 
 class User(Base):
+    """A backoffice account.
+
+    ``password_hash`` is a salted scrypt hash in the format of
+    ``kavalai.backoffice.users.hash_password``; ``None`` is an account that
+    signs in through OAuth only. It never leaves the server — API responses
+    are built by ``kavalai.backoffice.server.public_user``.
+    """
+
     __tablename__ = "users"
 
     id: Mapped[UUID] = mapped_column(uuid_column(), primary_key=True, default=uuid4)
@@ -83,6 +91,7 @@ class User(Base):
     name: Mapped[str] = mapped_column(TEXT, nullable=False)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     picture: Mapped[str | None] = mapped_column(TEXT)
+    password_hash: Mapped[str | None] = mapped_column(TEXT)
     active_project_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("projects.id", ondelete="SET NULL")
     )

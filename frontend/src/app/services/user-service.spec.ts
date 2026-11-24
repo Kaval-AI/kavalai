@@ -83,6 +83,39 @@ describe('UserService', () => {
     expect(spy).toHaveBeenCalledWith('/api/login');
   });
 
+  it('should read the sign-in methods', () => {
+    let methods: any;
+    service.getAuthMethods().subscribe((m) => (methods = m));
+    const req = httpMock.expectOne('/api/auth/methods');
+    expect(req.request.method).toBe('GET');
+    req.flush({ password: true, google: false });
+
+    expect(methods).toEqual({ password: true, google: false });
+  });
+
+  it('should log in with a password', () => {
+    const mockUser: UserDetails = { id: 'user1', email: 'test@test.com', name: 'Test', picture: '', is_admin: true, active_project_id: 'proj1' };
+    service.loginWithPassword('test@test.com', 'correct horse').subscribe();
+
+    const req = httpMock.expectOne('/api/auth/login');
+    expect(req.request.method).toBe('POST');
+    expect(req.request.body).toEqual({ email: 'test@test.com', password: 'correct horse' });
+    req.flush(mockUser);
+
+    expect(service.getIsLoggedIn()).toBeTrue();
+    expect(service.getIsAdmin()).toBeTrue();
+    expect(service.getUserDetailsValue()).toEqual(mockUser);
+  });
+
+  it('should stay logged out when the password is refused', () => {
+    let failed = false;
+    service.loginWithPassword('test@test.com', 'wrong').subscribe({ error: () => (failed = true) });
+    httpMock.expectOne('/api/auth/login').flush({}, { status: 401, statusText: 'Unauthorized' });
+
+    expect(failed).toBeTrue();
+    expect(service.getIsLoggedIn()).toBeFalse();
+  });
+
   it('should handle updateUserDetails error', () => {
     service.updateUserDetails();
     const req = httpMock.expectOne('/api/user/get_details');

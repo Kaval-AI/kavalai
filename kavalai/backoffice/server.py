@@ -48,6 +48,11 @@ from kavalai.backoffice import db
 from kavalai.backoffice import sessions as agent_sessions
 from kavalai.backoffice.db import is_member, is_owner
 from kavalai.backoffice.embedding_projector import train_pca
+from kavalai.backoffice.users import (
+    hash_password,
+    validate_password,
+    verify_password,
+)
 from kavalai.backoffice.project_service import (
     ProjectService,
     project_fields,
@@ -112,33 +117,57 @@ def required_setting(name: str) -> str:
     """A setting the backoffice cannot run without.
 
     There is no development fallback on purpose: a cookie signed with a
-    well-known key, or an OAuth client with no id, is a backoffice that looks
-    as if it works right up to the moment it is exposed.
+    well-known key is a backoffice that looks as if it works right up to the
+    moment it is exposed.
     """
     value = os.environ.get(name, "")
     if not value:
         raise RuntimeError(
-            f"{name} is not set. The backoffice needs KAVALAI_BO_GOOGLE_CLIENT_ID, "
-            "KAVALAI_BO_GOOGLE_CLIENT_SECRET, KAVALAI_BO_SESSION_SECRET_KEY and "
-            "KAVALAI_BO_FRONTEND_URL — see .env.example."
+            f"{name} is not set. The backoffice needs "
+            "KAVALAI_BO_SESSION_SECRET_KEY, and KAVALAI_BO_FRONTEND_URL when "
+            "Google sign-in is configured — see .env.example."
         )
     return value
+
+
+def google_oauth_settings() -> dict[str, str] | None:
+    """The Google OAuth client, or ``None`` when Google sign-in is not configured.
+
+    Google sign-in is optional: with neither ``KAVALAI_BO_GOOGLE_CLIENT_ID``
+    nor ``KAVALAI_BO_GOOGLE_CLIENT_SECRET`` set, users sign in with a
+    password only. One without the other is a mistake rather than a choice,
+    and so is a client with nowhere to redirect to; both stop the start-up.
+    """
+    client_id = os.environ.get("KAVALAI_BO_GOOGLE_CLIENT_ID", "")
+    client_secret = os.environ.get("KAVALAI_BO_GOOGLE_CLIENT_SECRET", "")
+    if not client_id and not client_secret:
+        return None
+    if not client_id or not client_secret:
+        raise RuntimeError(
+            "Google sign-in needs both KAVALAI_BO_GOOGLE_CLIENT_ID and "
+            "KAVALAI_BO_GOOGLE_CLIENT_SECRET; set both, or neither to sign in "
+            "with passwords only."
+        )
+    return {
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "frontend_url": required_setting("KAVALAI_BO_FRONTEND_URL"),
+    }
 
 
 # Trust X-Forwarded-* headers from the reverse proxy / Docker network.
 app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
 
-oauth.register(
-    name="google",
-    client_id=required_setting("KAVALAI_BO_GOOGLE_CLIENT_ID"),
-    client_secret=required_setting("KAVALAI_BO_GOOGLE_CLIENT_SECRET"),
-    server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
-    client_kwargs={"scope": "openid email profile"},
-)
+GOOGLE_OAUTH = google_oauth_settings()
 
-# Where a completed sign-in lands. Read once, so a missing value fails at
-# start-up rather than at the first login.
-FRONTEND_URL = required_setting("KAVALAI_BO_FRONTEND_URL")
+if GOOGLE_OAUTH is not None:
+    oauth.register(
+        name="google",
+        client_id=GOOGLE_OAUTH["client_id"],
+        client_secret=GOOGLE_OAUTH["client_secret"],
+        server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+        client_kwargs={"scope": "openid email profile"},
+    )
 
 app.add_middleware(
     SessionMiddleware,
@@ -148,6 +177,60 @@ app.add_middleware(
     domain=None,  # Should be None for localhost/development
     path="/",
 )
+
+
+def session_user_info(user: db.User) -> dict:
+    """What the session cookie carries about a signed-in user."""
+    return {
+        "id": str(user.id),
+        "email": user.email,
+        "name": user.name,
+        "picture": user.picture,
+        "is_admin": user.is_admin,
+        "active_project_id": str(user.active_project_id)
+        if user.active_project_id
+        else None,
+    }
+
+
+def public_user(user: db.User) -> dict:
+    """A user as the API returns it: every column except the password hash."""
+    return {
+        "id": str(user.id),
+        "email": user.email,
+        "name": user.name,
+        "is_admin": user.is_admin,
+        "picture": user.picture,
+        "active_project_id": str(user.active_project_id)
+        if user.active_project_id
+        else None,
+        "has_password": user.password_hash is not None,
+        "created_at": user.created_at,
+        "updated_at": user.updated_at,
+    }
+
+
+def user_fields(data: dict) -> dict:
+    """The columns a create/update body may set on a user.
+
+    ``password`` is hashed into ``password_hash`` (an empty one is left out,
+    so an edit form that does not touch the password keeps it); a
+    ``password_hash`` sent by the client is dropped, as is ``has_password``,
+    which :func:`public_user` adds and a form may send back.
+    """
+    fields = {
+        key: value
+        for key, value in data.items()
+        if key not in ("password", "password_hash", "has_password")
+    }
+    password = data.get("password")
+    if password:
+        try:
+            validate_password(password)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        fields["password_hash"] = hash_password(password)
+    return fields
 
 
 async def authenticate_and_sync_user(user_info: dict):
@@ -228,15 +311,55 @@ async def get_project_and_assert_access(
         return project
 
 
+def assert_google_sign_in() -> None:
+    if GOOGLE_OAUTH is None:
+        raise HTTPException(status_code=404, detail="Google sign-in is not configured.")
+
+
+@app.get("/auth/methods")
+async def auth_methods():
+    """The sign-in methods this installation offers; read by the login page."""
+    return {"password": True, "google": GOOGLE_OAUTH is not None}
+
+
+@app.post("/auth/login")
+async def password_login(request: Request, data: dict = Body(...)):
+    """Sign in with an address and a password.
+
+    Every failure — unknown address, no password set, wrong password —
+    answers the same 401, so the endpoint does not reveal which addresses
+    are registered.
+    """
+    email = data.get("email")
+    password = data.get("password")
+    if not isinstance(email, str) or not isinstance(password, str):
+        raise HTTPException(status_code=400, detail="Email and password are required.")
+
+    async with get_backoffice_session() as session:
+        stmt = select(db.User).where(db.User.email == email)
+        user = (await session.execute(stmt)).scalars().first()
+        stored = user.password_hash if user else None
+        # scrypt is deliberately slow; keep it off the event loop.
+        if not await asyncio.to_thread(verify_password, password, stored):
+            logger.warning(f"Failed password login attempt: {email}")
+            raise HTTPException(status_code=401, detail="Invalid email or password.")
+        await db.resolve_active_project_id(session, user.id)
+        await session.refresh(user)
+
+    request.session["user_info"] = session_user_info(user)
+    return request.session["user_info"]
+
+
 @app.get("/login")
 async def login(request: Request):
+    assert_google_sign_in()
     redirect_uri = request.url_for("google_auth_callback")
     return await oauth.google.authorize_redirect(request, redirect_uri)
 
 
 @app.get("/logout")
 async def logout(request: Request):
-    del request.session["user_info"]
+    request.session.pop("user_info", None)
     return JSONResponse({"logged_in": is_logged_in(request)})
 
 
@@ -263,26 +386,17 @@ async def user_details(request: Request):
 
 @app.get("/auth/google/callback")
 async def google_auth_callback(request: Request):
+    assert_google_sign_in()
     try:
         token = await oauth.google.authorize_access_token(request)
         user_info = await oauth.google.userinfo(token=token)
         db_user = await authenticate_and_sync_user(user_info)
-        # Store essential info in the session
-        request.session["user_info"] = {
-            "id": str(db_user.id),
-            "email": db_user.email,
-            "name": db_user.name,
-            "picture": db_user.picture,
-            "is_admin": db_user.is_admin,
-            "active_project_id": str(db_user.active_project_id)
-            if db_user.active_project_id
-            else None,
-        }
+        request.session["user_info"] = session_user_info(db_user)
         # Clear OAuth state from session after successful login
         if "_google_authlib_state_" in request.session:
             del request.session["_google_authlib_state_"]
 
-        return RedirectResponse(url=FRONTEND_URL)
+        return RedirectResponse(url=GOOGLE_OAUTH["frontend_url"])
     except HTTPException:
         raise
     except Exception as e:
@@ -359,7 +473,7 @@ async def users_get_all(request: Request):
     assert_logged_in(request)
     assert_is_admin(request)
     async with get_backoffice_session() as session:
-        return await get_all(session, db.User)
+        return [public_user(user) for user in await get_all(session, db.User)]
 
 
 @app.post("/users/create")
@@ -367,7 +481,7 @@ async def users_create(request: Request, data: dict = Body(...)):
     assert_logged_in(request)
     assert_is_admin(request)
     async with get_backoffice_session() as session:
-        return await insert(session, db.User, data)
+        return public_user(await insert(session, db.User, user_fields(data)))
 
 
 @app.put("/users/update/{user_id}")
@@ -375,10 +489,10 @@ async def users_update(user_id: UUID, request: Request, data: dict = Body(...)):
     assert_logged_in(request)
     assert_is_admin(request)
     async with get_backoffice_session() as session:
-        updated = await update(session, db.User, user_id, data)
+        updated = await update(session, db.User, user_id, user_fields(data))
         if not updated:
             raise HTTPException(status_code=404, detail="User not found.")
-        return updated
+        return public_user(updated)
 
 
 @app.delete("/users/delete/{user_id}")
