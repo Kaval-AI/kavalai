@@ -25,7 +25,6 @@ describe('routes', () => {
       'conversations',
       'conversations/:sessionId',
       'conversations/:sessionId/runs/:runId/tasks',
-      'workflows',
       'llm-call-stats',
       'agents',
       'rag',
@@ -47,6 +46,10 @@ describe('routes', () => {
     expect(routes.find((r) => r.path === 'user-edit/:id')!.redirectTo).toBe('users');
     expect(routes.find((r) => r.path === 'profile')!.component).toBe(UserEditPage);
     expect(routes.find((r) => r.path === 'users')!.component).toBe(UsersPage);
+  });
+
+  it('sends the removed Runs page to the conversations, where the runs are', () => {
+    expect(routes.find((r) => r.path === 'workflows')!.redirectTo).toBe('conversations');
   });
 
   it('names the product after the page', () => {

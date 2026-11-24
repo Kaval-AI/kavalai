@@ -41,7 +41,7 @@
   } @else if (summary(); as s) {
     <ui-stats data-testid="summary">
       <ui-stat label="Conversations" link="/conversations" data-testid="stat-sessions">{{ s.total_sessions | number }}</ui-stat>
-      <ui-stat label="Runs" link="/workflows" data-testid="stat-runs">{{ s.total_runs ?? 0 | number }}</ui-stat>
+      <ui-stat label="Runs" link="/conversations" data-testid="stat-runs">{{ s.total_runs ?? 0 | number }}</ui-stat>
       <ui-stat label="Messages" data-testid="stat-messages">{{ s.total_messages | number }}</ui-stat>
       <ui-stat label="Tasks" data-testid="stat-tasks">{{ s.total_tasks | number }}</ui-stat>
       <ui-stat label="Input tokens" link="/llm-call-stats" data-testid="stat-input">{{ s.total_prompt_tokens ?? 0 | number }}</ui-stat>

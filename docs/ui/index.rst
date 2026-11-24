@@ -17,8 +17,8 @@ interface without their runtime data ever meeting.
 
 Every page sits in one frame: a top bar with the user menu (**Profile**,
 **Sign out**), and a sidebar with the **project switcher** above the pages of
-the active project — **Overview**, **Conversations**, **Runs**, **Model
-calls**, **Agents**, **RAG** and **Settings** — and, for administrators,
+the active project — **Overview**, **Conversations**, **Model calls**,
+**Agents**, **RAG** and **Settings** — and, for administrators,
 **Users**. The switcher names the active project and the database its runs are
 read from; it is the one place the active project changes, and every page
 follows it.
@@ -303,16 +303,6 @@ names carry their type beneath them — ``rag_query``, ``llm``, ``start``,
 The counters below it (total sessions, messages, runs and tasks) and the
 seven-day charts describe one agent rather than the whole project, which makes
 this the quickest view for judging how heavily a single agent is used.
-
-
-Runs
-----
-
-The **Runs** page is a monitoring timeline: one card per agent, one strip per
-recent run, one square per task — lime for a task that completed, raspberry for
-one that recorded an error. It gives an at-a-glance health view across every
-agent in the project, and a square opens its task, with links to its
-conversation and its run.
 
 
 Conversations

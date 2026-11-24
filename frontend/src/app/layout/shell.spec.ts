@@ -94,7 +94,6 @@ describe('Shell', () => {
     expect(navLabels('project-nav')).toEqual([
       'Overview',
       'Conversations',
-      'Runs',
       'Model calls',
       'Agents',
       'RAG',

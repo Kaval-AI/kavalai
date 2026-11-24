@@ -15,7 +15,6 @@ limitations under the License.
 */
 import { Routes } from '@angular/router';
 import { ConversationsPage } from './components/conversations-page/conversations-page';
-import { WorkflowsPage } from './components/workflows-page/workflows-page';
 import { LlmCallStatsPage } from './components/llm-call-stats-page/llm-call-stats-page';
 import { RagPage } from './components/rag-page/rag-page';
 import { SessionDetailPage } from './components/session-detail-page/session-detail-page';
@@ -41,7 +40,7 @@ export const routes: Routes = [
     component: RunTasksPage,
     title: pageTitle('Run'),
   },
-  { path: 'workflows', component: WorkflowsPage, title: pageTitle('Runs') },
+  { path: 'workflows', redirectTo: 'conversations' },
   { path: 'llm-call-stats', component: LlmCallStatsPage, title: pageTitle('Model calls') },
   { path: 'agents', component: AgentsPage, title: pageTitle('Agents') },
   { path: 'rag', component: RagPage, title: pageTitle('RAG') },

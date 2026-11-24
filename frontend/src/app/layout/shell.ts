@@ -34,7 +34,6 @@ export interface NavItem {
 export const PROJECT_NAV: NavItem[] = [
   { link: '/', label: 'Overview', icon: 'fa-gauge-high', exact: true },
   { link: '/conversations', label: 'Conversations', icon: 'fa-comments' },
-  { link: '/workflows', label: 'Runs', icon: 'fa-diagram-project' },
   { link: '/llm-call-stats', label: 'Model calls', icon: 'fa-microchip' },
   { link: '/agents', label: 'Agents', icon: 'fa-robot' },
   { link: '/rag', label: 'RAG', icon: 'fa-layer-group' },
