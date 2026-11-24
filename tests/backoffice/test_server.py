@@ -990,3 +990,160 @@ async def test_creating_a_project_answers_without_the_password(client, backoffic
     assert "pw-123" not in created.text
     assert created.json()["has_password"] is True
     assert created.json()["role"] == "owner"
+
+
+async def _password_user(client, backoffice_db, **fields):
+    """A user with a password, signed in through ``/auth/login``."""
+    from kavalai.backoffice.users import hash_password
+
+    user = db.User(
+        id=uuid.uuid4(),
+        email=f"{uuid.uuid4()}@test",
+        name="Ada",
+        password_hash=hash_password("correct horse"),
+        **fields,
+    )
+    backoffice_db.add(user)
+    await backoffice_db.commit()
+    response = await client.post(
+        "/auth/login", json={"email": user.email, "password": "correct horse"}
+    )
+    assert response.status_code == 200
+    return user
+
+
+@pytest.mark.asyncio
+async def test_the_profile_endpoints_need_a_signed_in_user(client, backoffice_db):
+    assert (await client.get("/user/me")).status_code == 401
+    assert (await client.patch("/user/me", json={"name": "X"})).status_code == 401
+    response = await client.post(
+        "/user/me/password", json={"new_password": "battery staple"}
+    )
+    assert response.status_code == 401
+
+    # A session whose user has since been deleted is refused too.
+    gone = db.User(id=uuid.uuid4(), email="gone@test", name="Gone")
+    _, session = _signed_in(gone)
+    with session:
+        assert (await client.get("/user/me")).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_a_user_reads_and_edits_their_own_profile(client, backoffice_db):
+    user = await _password_user(client, backoffice_db, is_admin=False)
+
+    me = await client.get("/user/me")
+    assert me.status_code == 200
+    assert me.json()["id"] == str(user.id)
+    assert me.json()["has_password"] is True
+    assert "password_hash" not in me.json()
+
+    saved = await client.patch(
+        "/user/me", json={"name": "  Ada Lovelace ", "picture": "https://x/a.png"}
+    )
+    assert saved.status_code == 200
+    assert saved.json()["name"] == "Ada Lovelace"
+    assert saved.json()["picture"] == "https://x/a.png"
+    assert "password_hash" not in saved.json()
+    # The session the shell reads carries the new name.
+    details = (await client.get("/user/get_details")).json()
+    assert details["name"] == "Ada Lovelace"
+    assert details["picture"] == "https://x/a.png"
+
+    cleared = await client.patch("/user/me", json={"picture": "  "})
+    assert cleared.json()["picture"] is None
+    assert cleared.json()["name"] == "Ada Lovelace"
+    assert (await client.patch("/user/me", json={})).json()["name"] == "Ada Lovelace"
+    assert (await client.patch("/user/me", json={"picture": None})).status_code == 200
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "body, detail",
+    [
+        ({"is_admin": True}, "not is_admin"),
+        ({"name": "X", "email": "x@test", "id": "1"}, "not email, id"),
+        ({"name": ""}, "The name is required."),
+        ({"name": 3}, "The name is required."),
+        ({"picture": 5}, "The picture must be a URL."),
+    ],
+)
+async def test_a_profile_edit_changes_only_name_and_picture(
+    client, backoffice_db, body, detail
+):
+    user = await _password_user(client, backoffice_db, is_admin=False)
+    user_id, email = user.id, user.email
+
+    response = await client.patch("/user/me", json=body)
+
+    assert response.status_code == 400
+    assert detail in response.json()["detail"]
+    backoffice_db.expire_all()
+    row = await backoffice_db.get(db.User, user_id)
+    assert (row.name, row.email, row.is_admin) == ("Ada", email, False)
+
+
+@pytest.mark.asyncio
+async def test_changing_a_password_asks_for_the_current_one(client, backoffice_db):
+    from kavalai.backoffice.users import verify_password
+
+    user_id = (await _password_user(client, backoffice_db)).id
+
+    for current in ["wrong horse", None, 12]:
+        body = {"new_password": "battery staple"}
+        if current is not None:
+            body["current_password"] = current
+        refused = await client.post("/user/me/password", json=body)
+        assert refused.status_code == 400
+        assert refused.json() == {"detail": "The current password is not correct."}
+
+    short = await client.post(
+        "/user/me/password",
+        json={"current_password": "correct horse", "new_password": "short"},
+    )
+    assert short.status_code == 400
+    assert "at least 8" in short.json()["detail"]
+    missing = await client.post(
+        "/user/me/password", json={"current_password": "correct horse"}
+    )
+    assert missing.json() == {"detail": "The new password is required."}
+
+    changed = await client.post(
+        "/user/me/password",
+        json={"current_password": "correct horse", "new_password": "battery staple"},
+    )
+    assert changed.status_code == 200
+    assert changed.json()["has_password"] is True
+    assert "password_hash" not in changed.json()
+
+    backoffice_db.expire_all()
+    row = await backoffice_db.get(db.User, user_id)
+    assert verify_password("battery staple", row.password_hash)
+    assert not verify_password("correct horse", row.password_hash)
+
+
+@pytest.mark.asyncio
+async def test_a_google_only_user_sets_a_first_password(client, backoffice_db):
+    from kavalai.backoffice.users import verify_password
+
+    user = db.User(id=uuid.uuid4(), email=f"{uuid.uuid4()}@test", name="G")
+    other = db.User(id=uuid.uuid4(), email=f"{uuid.uuid4()}@test", name="O")
+    user_id, other_id = user.id, other.id
+    backoffice_db.add_all([user, other])
+    await backoffice_db.commit()
+
+    login, session = _signed_in(user)
+    with login, session:
+        assert (await client.get("/user/me")).json()["has_password"] is False
+        response = await client.post(
+            "/user/me/password", json={"new_password": "battery staple"}
+        )
+
+    assert response.status_code == 200
+    assert response.json()["has_password"] is True
+    backoffice_db.expire_all()
+    assert verify_password(
+        "battery staple", (await backoffice_db.get(db.User, user_id)).password_hash
+    )
+    # Only the signed-in user's own record changed.
+    assert (await backoffice_db.get(db.User, other_id)).password_hash is None

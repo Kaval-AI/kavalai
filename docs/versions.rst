@@ -48,6 +48,12 @@ Added
   creates a user and ``set-password`` replaces a password; both prompt for it
   or read it from standard input.
 
+* **A profile for every backoffice user.** ``GET /user/me`` returns the
+  signed-in user's own record, ``PATCH /user/me`` changes its ``name`` and
+  ``picture`` and refuses any other field, and ``POST /user/me/password``
+  changes the password given the current one, or sets a first one for a user
+  who signs in through Google only. The **Profile** page uses them, and the
+  **Users** page's form now sets a password.
 
 * **``py.typed`` (PEP 561).** mypy no longer reports ``kavalai`` as missing
   library stubs, and calls into the package are checked against its real

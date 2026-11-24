@@ -424,6 +424,106 @@ async def set_active_project(project_id: UUID, request: Request):
         return {"status": "ok", "active_project_id": project_id}
 
 
+PROFILE_FIELDS = ("name", "picture")
+"""What a signed-in user may change on their own record through ``PATCH /user/me``."""
+
+WRONG_CURRENT_PASSWORD = "The current password is not correct."
+
+
+async def signed_in_user(session: db.AsyncSession, request: Request) -> db.User:
+    """The signed-in user's own row; a session whose user was deleted is refused."""
+    assert_logged_in(request)
+    user = await get_one(session, db.User, UUID(request.session["user_info"]["id"]))
+    if user is None:
+        raise HTTPException(status_code=401, detail="Unauthorized.")
+    return user
+
+
+def profile_fields(data: dict) -> dict:
+    """The name and picture from a profile body, checked.
+
+    Any other key is refused rather than ignored, so a client that tries to
+    change its address or its administrator flag here learns that it cannot.
+    An empty picture clears it.
+    """
+    unknown = sorted(set(data) - set(PROFILE_FIELDS))
+    if unknown:
+        refused = ", ".join(unknown)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Only the name and the picture can be changed here, not {refused}.",
+        )
+    fields: dict = {}
+    if "name" in data:
+        name = data["name"]
+        if not isinstance(name, str) or not name.strip():
+            raise HTTPException(status_code=400, detail="The name is required.")
+        fields["name"] = name.strip()
+    if "picture" in data:
+        picture = data["picture"]
+        if picture is not None and not isinstance(picture, str):
+            raise HTTPException(status_code=400, detail="The picture must be a URL.")
+        fields["picture"] = picture.strip() if picture and picture.strip() else None
+    return fields
+
+
+@app.get("/user/me")
+async def user_me(request: Request):
+    """The signed-in user's own record, including ``has_password``."""
+    async with get_backoffice_session() as session:
+        return public_user(await signed_in_user(session, request))
+
+
+@app.patch("/user/me")
+async def user_me_update(request: Request, data: dict = Body(...)):
+    """Change the signed-in user's own name and picture.
+
+    The session carries the name and picture the shell shows, so it is
+    refreshed with the saved values.
+    """
+    async with get_backoffice_session() as session:
+        user = await signed_in_user(session, request)
+        fields = profile_fields(data)
+        if fields:
+            user = await update(session, db.User, user.id, fields)
+    user_info = request.session["user_info"]
+    user_info["name"] = user.name
+    user_info["picture"] = user.picture
+    request.session["user_info"] = user_info
+    return public_user(user)
+
+
+@app.post("/user/me/password")
+async def user_me_password(request: Request, data: dict = Body(...)):
+    """Set or change the signed-in user's own password.
+
+    A user who has a password must give it; a missing and a wrong one get the
+    same answer. A user who signs in through Google only has none to give and
+    may set a first one.
+    """
+    current = data.get("current_password")
+    new = data.get("new_password")
+    if not isinstance(new, str):
+        raise HTTPException(status_code=400, detail="The new password is required.")
+    try:
+        validate_password(new)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    async with get_backoffice_session() as session:
+        user = await signed_in_user(session, request)
+        if user.password_hash is not None:
+            given = current if isinstance(current, str) else ""
+            # scrypt is deliberately slow; keep it off the event loop.
+            if not await asyncio.to_thread(verify_password, given, user.password_hash):
+                logger.warning(f"Failed password change by {user.email}")
+                raise HTTPException(status_code=400, detail=WRONG_CURRENT_PASSWORD)
+        password_hash = await asyncio.to_thread(hash_password, new)
+        user = await update(session, db.User, user.id, {"password_hash": password_hash})
+    logger.info(f"Password changed by {user.email}")
+    return public_user(user)
+
+
 @app.post("/projects/create")
 async def projects_create(request: Request, data: dict = Body(...)):
     assert_logged_in(request)
