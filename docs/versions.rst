@@ -19,6 +19,14 @@ Google OAuth. One backoffice migration.
 Added
 ^^^^^
 
+* **Scaleway as a built-in provider.** ``scaleway/<model>`` names a chat
+  model of Scaleway Generative APIs (:class:`~kavalai.ScalewayClient`, on the
+  Chat Completions API) and an embedding model
+  (``ScalewayEmbeddingClient``; ``dimensions=`` shortens the vectors of
+  ``qwen3-embedding-8b``). The key is read from ``SCW_SECRET_KEY`` and the
+  optional billing project from ``SCW_DEFAULT_PROJECT_ID``. No new
+  dependency: both clients use the ``openai`` SDK.
+
 * **Password sign-in for the backoffice.** ``POST /auth/login`` takes an
   address and a password, and the sign-in page shows the form.
   ``users.password_hash`` holds a salted scrypt hash, never the password, and

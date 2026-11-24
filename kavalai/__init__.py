@@ -23,7 +23,8 @@ limitations under the License.
 #   * ``WorkflowEngine`` / ``WorkflowBuilder`` -- define and run workflows.
 #   * ``Agent``                                -- the multi-step tool-calling agent.
 #   * ``FunctionKernel`` / ``pythontool``      -- register and call tools.
-#   * ``OpenAIClient`` / ``GeminiClient`` / ``AnthropicClient`` / ``OllamaClient`` -- LLM backends.
+#   * ``OpenAIClient`` / ``GeminiClient`` / ``AnthropicClient`` /
+#     ``ScalewayClient`` / ``OllamaClient``     -- LLM backends.
 #   * ``PostgresRagService``                   -- index and query embeddings.
 #
 # The persistence-layer ORM table classes (Agent row, Run, Task, ...) live in
@@ -108,9 +109,9 @@ from kavalai.llm_clients.browser_client import BrowserLLMClient
 
 
 # The provider LLM clients (``OpenAIClient`` / ``GeminiClient`` /
-# ``AnthropicClient`` / ``OllamaClient``) pull in optional SDKs that are not
-# part of the pyodide-compatible core (``openai`` / ``google-genai`` /
-# ``anthropic`` / ``ollama``). They are resolved lazily via ``__getattr__``
+# ``AnthropicClient`` / ``ScalewayClient`` / ``OllamaClient``) pull in
+# optional SDKs that are not part of the pyodide-compatible core (``openai`` /
+# ``google-genai`` / ``anthropic`` / ``ollama``). They are resolved lazily via ``__getattr__``
 # below so that ``import kavalai`` works in lightweight / pyodide environments
 # where only the core dependencies are installed. Install ``kavalai[runtime]``
 # (or just the one SDK) to use them.
@@ -145,6 +146,7 @@ if TYPE_CHECKING:
     from kavalai.llm_clients.gemini_client import GeminiClient
     from kavalai.llm_clients.ollama_client import OllamaClient
     from kavalai.llm_clients.openai_client import OpenAIClient
+    from kavalai.llm_clients.scaleway_client import ScalewayClient
 else:
 
     def __getattr__(name: str) -> Any:
@@ -237,6 +239,7 @@ __all__ = [
     "OpenAIClient",
     "GeminiClient",
     "AnthropicClient",
+    "ScalewayClient",
     "OllamaClient",
     "BrowserLLMClient",
     "BaseEmbeddingClient",

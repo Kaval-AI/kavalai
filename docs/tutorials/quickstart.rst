@@ -16,8 +16,8 @@ Install
    pip install "kavalai[common]"
    export OPENAI_API_KEY="sk-..."
 
-Kaval.AI needs Python 3.12+. Any of OpenAI, Gemini, Anthropic or a local Ollama
-will do — see :doc:`installation`.
+Kaval.AI needs Python 3.12+. Any of OpenAI, Gemini, Anthropic, Scaleway or a local
+Ollama will do — see :doc:`installation`.
 
 1. Call a model
 ---------------

@@ -272,6 +272,7 @@ _BUILTIN_LLM_PROVIDERS = {
     "openai": "kavalai.llm_clients.openai_client.OpenAIClient",
     "gemini": "kavalai.llm_clients.gemini_client.GeminiClient",
     "anthropic": "kavalai.llm_clients.anthropic_client.AnthropicClient",
+    "scaleway": "kavalai.llm_clients.scaleway_client.ScalewayClient",
     "ollama": "kavalai.llm_clients.ollama_client.OllamaClient",
     "browser": "kavalai.llm_clients.browser_client.BrowserLLMClient",
 }
@@ -280,12 +281,14 @@ BUILTIN_LLM_PACKAGES = {
     "openai": "openai",
     "gemini": "google-genai",
     "anthropic": "anthropic",
+    "scaleway": "openai",
     "ollama": "ollama",
 }
 
 _BUILTIN_EMBEDDING_PROVIDERS = {
     "openai": "kavalai.llm_clients.embeddings.OpenAIEmbeddingClient",
     "gemini": "kavalai.llm_clients.embeddings.GeminiEmbeddingClient",
+    "scaleway": "kavalai.llm_clients.scaleway_client.ScalewayEmbeddingClient",
     "ollama": "kavalai.llm_clients.embeddings.OllamaEmbeddingClient",
     "fastembed": "kavalai.llm_clients.embeddings.FastEmbedClient",
     "browser": "kavalai.llm_clients.embeddings.BrowserEmbeddingClient",

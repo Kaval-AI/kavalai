@@ -81,10 +81,11 @@ name is rejected: `make_client` raises `Model must be in 'provider/model'
 form, got 'x'.`, and a workflow fails to load with `… is 'x', which is not in
 'provider/model' form.`
 
-Providers: `openai/…`, `gemini/…`, `anthropic/…`, `ollama/…`, `browser/…`.
-Switching provider is a change of one string; nothing else moves. Keys come
-from `OPENAI_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY` (note the `_API_`
-— `ANTHROPIC_KEY` is not read) and `OLLAMA_HOST`. Each client also accepts
+Providers: `openai/…`, `gemini/…`, `anthropic/…`, `scaleway/…`, `ollama/…`,
+`browser/…`. Switching provider is a change of one string; nothing else moves.
+Keys come from `OPENAI_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY` (note
+the `_API_` — `ANTHROPIC_KEY` is not read), `SCW_SECRET_KEY` (Scaleway) and
+`OLLAMA_HOST`. Each client also accepts
 `api_key=` / `host=` directly, which wins over the environment.
 
 The clients are async: `asyncio.run(main())` in a script, bare `await` in a

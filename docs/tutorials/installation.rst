@@ -41,7 +41,7 @@ all four; it is the normal install.
        ``backoffice`` together.
    * - ``kavalai[runtime]``
      - What a workflow needs to run and be served: the OpenAI, Gemini,
-       Anthropic and Ollama clients, MCP, the agent server (FastAPI), the
+       Anthropic, Scaleway and Ollama clients, MCP, the agent server (FastAPI), the
        asyncpg driver — which the migrations also use — and the
        ``sqlite-vector`` extension.
    * - ``kavalai[webtools]``
@@ -152,6 +152,7 @@ have:
    export OPENAI_API_KEY="sk-..."          # openai/…
    export GEMINI_API_KEY="..."             # gemini/…
    export ANTHROPIC_API_KEY="..."          # anthropic/…
+   export SCW_SECRET_KEY="..."             # scaleway/…
    # Ollama runs locally and needs no key; set OLLAMA_HOST if it is not
    # on http://localhost:11434
 

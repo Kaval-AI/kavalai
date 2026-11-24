@@ -28,6 +28,9 @@ reads the matching credential from the environment:
    * - ``anthropic/``
      - :class:`~kavalai.AnthropicClient`
      - ``ANTHROPIC_API_KEY``
+   * - ``scaleway/``
+     - :class:`~kavalai.ScalewayClient`
+     - ``SCW_SECRET_KEY``
    * - ``ollama/``
      - :class:`~kavalai.OllamaClient`
      - ``OLLAMA_HOST`` (no key)
@@ -73,6 +76,8 @@ Provider clients
 .. automodule:: kavalai.llm_clients.gemini_client
 
 .. automodule:: kavalai.llm_clients.anthropic_client
+
+.. automodule:: kavalai.llm_clients.scaleway_client
 
 .. automodule:: kavalai.llm_clients.ollama_client
 

@@ -36,6 +36,11 @@ Chat models
      - ``ANTHROPIC_API_KEY``
      - `Claude models
        <https://docs.claude.com/en/docs/about-claude/models/overview>`_
+   * - ``scaleway/``
+     - :class:`~kavalai.llm_clients.scaleway_client.ScalewayClient`
+     - ``SCW_SECRET_KEY``; ``SCW_DEFAULT_PROJECT_ID`` optional
+     - `Scaleway supported models
+       <https://www.scaleway.com/en/docs/generative-apis/reference-content/supported-models/>`_
    * - ``ollama/``
      - :class:`~kavalai.llm_clients.ollama_client.OllamaClient`
      - ``OLLAMA_HOST`` (default ``http://localhost:11434``)
@@ -49,6 +54,15 @@ Chat models
 The client accepts ``api_key=`` (or ``host=``) directly, which wins over the
 environment. ``openai/`` also takes ``base_url=``, which is what makes it serve
 any OpenAI-compatible endpoint — see :doc:`../tutorials/llm_clients`.
+
+``scaleway/`` serves the open-weight models of `Scaleway Generative APIs
+<https://www.scaleway.com/en/generative-apis/>`_ through the Chat Completions
+API, which every Scaleway chat model supports. Requests are billed to the
+default project of the key's organisation unless ``project_id=`` or
+``SCW_DEFAULT_PROJECT_ID`` names another; ``base_url=`` points the client at a
+dedicated deployment instead of the serverless endpoint. A missing key is
+refused when the client is built, because the ``openai`` SDK underneath would
+otherwise fall back to ``OPENAI_API_KEY`` and send that credential to Scaleway.
 
 Output caps and truncation
 --------------------------
@@ -77,6 +91,10 @@ sent, so the provider's default applies.
      - ``max_tokens``; ``64000`` when unset, since the API requires a value
      - ``output_config.effort``
      - ``stop_reason: max_tokens``
+   * - ``scaleway/``
+     - ``max_completion_tokens``
+     - ``reasoning_effort``
+     - ``finish_reason: length``
    * - ``ollama/``
      - ``options.num_predict``
      - ``think``; ``"none"`` sends ``false``
@@ -150,6 +168,11 @@ Embeddings use the same string through a separate registry: the lookup behind
      - ``GEMINI_API_KEY``
      - `Gemini embeddings
        <https://ai.google.dev/gemini-api/docs/embeddings>`_
+   * - ``scaleway/``
+     - :class:`~kavalai.llm_clients.scaleway_client.ScalewayEmbeddingClient`
+     - ``SCW_SECRET_KEY``; ``SCW_DEFAULT_PROJECT_ID`` optional
+     - `Scaleway supported models
+       <https://www.scaleway.com/en/docs/generative-apis/reference-content/supported-models/>`_
    * - ``ollama/``
      - :class:`~kavalai.llm_clients.embeddings.OllamaEmbeddingClient`
      - ``OLLAMA_HOST``
@@ -367,8 +390,8 @@ registrations too:
 
 .. code-block:: text
 
-   ['anthropic', 'browser', 'gemini', 'ollama', 'openai']
-   ['browser', 'fastembed', 'gemini', 'ollama', 'openai']
+   ['anthropic', 'browser', 'gemini', 'ollama', 'openai', 'scaleway']
+   ['browser', 'fastembed', 'gemini', 'ollama', 'openai', 'scaleway']
    ['postgres', 'sqlite']
 
 Note what these are: **provider names, not model catalogues**. Anything added
@@ -400,8 +423,9 @@ any request is made, and the message names every provider that does exist:
 
    kavalai.llm_clients.registry.RegistryError: Unsupported embedding provider
    'cohere/embed-v4': tried 'cohere/embed-v4' and 'cohere'. Registered:
-   browser, fastembed, gemini, ollama, openai. Add your own with
-   register_embedding_provider(), which must run before the workflow is loaded.
+   browser, fastembed, gemini, ollama, openai, scaleway. Add your own with
+   register_embedding_provider(), which must run before the workflow is
+   loaded.
 
 An unknown **model** reaches the provider and fails there, with the provider's
 own message — ``The requested model 'gpt-nonexistent-9' does not exist`` from
@@ -470,6 +494,41 @@ Anthropic
 
    ['claude-opus-5', 'claude-sonnet-5', 'claude-fable-5', 'claude-opus-4-8',
     'claude-opus-4-7']
+
+Scaleway
+~~~~~~~~
+
+The API is OpenAI-compatible, so the ``openai`` SDK lists the serverless
+models when pointed at Scaleway. The list mixes chat, embedding, OCR and
+transcription models; ``scaleway/`` serves the chat and embedding ones.
+
+.. code-block:: python
+
+   import os
+
+   from openai import OpenAI
+
+   client = OpenAI(
+       base_url="https://api.scaleway.ai/v1",
+       api_key=os.environ["SCW_SECRET_KEY"],
+   )
+   print(sorted(model.id for model in client.models.list()))
+
+.. code-block:: text
+
+   ['bge-multilingual-gemma2', 'deepseek-v4-flash-0731',
+    'deepseek-v4.1-flash-1017', 'gemma-4-26b-a4b-it', 'glm-5.3',
+    'gpt-oss-120b', 'lightonocr-3-0.8b', 'llama-3.3-70b-instruct',
+    'mistral-medium-3.5-128b', 'mistral-small-3.2-24b-instruct-2506',
+    'qwen3-235b-a22b-instruct-2507', 'qwen3-embedding-8b',
+    'qwen3.5-397b-a17b', 'qwen3.6-35b-a3b', 'qwen3.8-27b',
+    'whisper-large-v3']
+
+Scaleway retires models on a published schedule and routes a retired name to
+its successor for a period, so the model a name reaches can change; pin a
+current name. ``qwen3-embedding-8b`` returns 4096-dimensional vectors and
+accepts ``dimensions=`` from 32 to 4096; ``bge-multilingual-gemma2`` is fixed
+at 3584.
 
 Ollama
 ~~~~~~

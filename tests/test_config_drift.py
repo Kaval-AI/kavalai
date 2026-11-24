@@ -49,6 +49,7 @@ ENVIRONMENT_READERS = {
     "llm_clients/gemini_client.py",
     "llm_clients/anthropic_client.py",
     "llm_clients/ollama_client.py",
+    "llm_clients/scaleway_client.py",
     "llm_clients/embeddings.py",
     # A bundled tool: its proxy is a deployment fact, not a tool argument.
     "tools/webtools/http_client.py",

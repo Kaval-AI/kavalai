@@ -13,6 +13,8 @@ arguments and a normalizer is installed with `set_default_normalizer`.
 | `OPENAI_API_KEY` | `OpenAIClient` and `openai/…` models |
 | `GEMINI_API_KEY` | `GeminiClient` and `gemini/…` models |
 | `ANTHROPIC_API_KEY` | `AnthropicClient` and `anthropic/…` models. Note the `_API_` — `ANTHROPIC_KEY` is **not** read |
+| `SCW_SECRET_KEY` | Scaleway IAM secret key, for `scaleway/…` models and embeddings |
+| `SCW_DEFAULT_PROJECT_ID` | Optional. The Scaleway project `scaleway/…` requests are billed to |
 | `OLLAMA_HOST` | Ollama endpoint. Default `http://localhost:11434`. No key needed |
 | `OPENAI_BASE_URL` | Read by the OpenAI SDK, not Kaval.AI: an OpenAI-compatible endpoint for `openai/…` models |
 | `GOOGLE_API_KEY` | Read by the `google-genai` SDK, which prefers it over `GEMINI_API_KEY`. Kaval.AI reads only `GEMINI_API_KEY` |

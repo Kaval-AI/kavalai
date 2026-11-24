@@ -21,8 +21,8 @@ tested and operated under production conditions.
 Features
 --------
 
-* **Every provider behind one interface** — OpenAI, Google Gemini, Anthropic
-  and Ollama, selected by a ``provider/model`` string
+* **Every provider behind one interface** — OpenAI, Google Gemini, Anthropic,
+  Scaleway and Ollama, selected by a ``provider/model`` string
   (see :doc:`tutorials/llm_clients`).
 * **Structured inputs, outputs, tool calls and responses**, expressed with
   Pydantic semantics and validated at every boundary
@@ -61,8 +61,8 @@ Call a model
 ------------
 
 A model is named as ``provider/model`` and :func:`~kavalai.make_client`
-does the rest. The same interface covers OpenAI, Gemini, Anthropic and
-Ollama, so substituting one provider for another is a change of one string.
+does the rest. The same interface covers OpenAI, Gemini, Anthropic,
+Scaleway and Ollama, so substituting one provider for another is a change of one string.
 
 .. code-block:: python
 

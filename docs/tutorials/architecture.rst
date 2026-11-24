@@ -173,7 +173,7 @@ Reaching outwards: models, tools and indexes
 Three subsystems connect a graph to the world, and each presents a single
 interface over several implementations.
 
-**LLM clients.** OpenAI, Gemini, Anthropic, Ollama and an in-browser WebLLM
+**LLM clients.** OpenAI, Gemini, Anthropic, Scaleway, Ollama and an in-browser WebLLM
 client sit behind one asynchronous interface, selected by a ``provider/model``
 string. That set is open rather than fixed: the built-ins are entries in a
 registry, and :func:`~kavalai.register_llm_provider` adds more under names of
