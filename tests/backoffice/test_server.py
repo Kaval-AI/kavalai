@@ -1,10 +1,12 @@
 import uuid
+from datetime import datetime, timezone
 from unittest.mock import patch, MagicMock, AsyncMock
 
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 
+from kavalai.agent_service import ModelCallSummary, ModelCallTotals
 from kavalai.backoffice import db
 from kavalai.backoffice.server import app
 
@@ -408,6 +410,9 @@ async def test_projects_get_llm_call_stats(client, backoffice_db):
                     "agent_id": str(agent_id),
                     "session_id": str(session_id),
                     "run_id": str(run_id),
+                    "search": "claims",
+                    "start_date": "2026-11-23T00:00:00Z",
+                    "end_date": "2026-11-24T23:59:59Z",
                 },
             )
 
@@ -420,7 +425,42 @@ async def test_projects_get_llm_call_stats(client, backoffice_db):
                 agent_id=agent_id,
                 session_id=session_id,
                 run_id=run_id,
+                search="claims",
+                start=datetime(2026, 11, 23, tzinfo=timezone.utc),
+                end=datetime(2026, 11, 24, 23, 59, 59, tzinfo=timezone.utc),
             )
+
+        with patch(
+            "kavalai.agent_service.AgentService.summarise_model_calls",
+            return_value=ModelCallSummary(
+                totals=ModelCallTotals(calls=2), by_model=[], by_day=[]
+            ),
+        ) as mock_summary:
+            response = await client.get(
+                f"/projects/{project_id}/llm-call-stats/summary",
+                params={"agent_id": str(agent_id), "search": "claims"},
+            )
+            assert response.status_code == 200
+            assert response.json()["totals"]["calls"] == 2
+            mock_summary.assert_called_once_with(
+                call_type=None,
+                agent_id=agent_id,
+                session_id=None,
+                run_id=None,
+                search="claims",
+                start=None,
+                end=None,
+            )
+
+        with patch(
+            "kavalai.agent_service.AgentService.summarise_model_calls",
+            side_effect=OSError("connection refused"),
+        ):
+            response = await client.get(
+                f"/projects/{project_id}/llm-call-stats/summary"
+            )
+            assert response.status_code == 503
+            assert "not connected" in response.json()["detail"]
 
 
 @pytest.mark.asyncio

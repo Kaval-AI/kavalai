@@ -754,6 +754,24 @@ async def agents_get_session_details(
         return await agent_sessions.get_session_details(session, session_id)
 
 
+async def _query_model_calls(project: db.Project, query):
+    """Run ``query`` on an ``AgentService`` over the project's database.
+
+    AgentService opens its own sessions, so a database that cannot be reached
+    surfaces here, and answers 503 like every other project page.
+    """
+    try:
+        return await query(AgentService(project_sessionmaker(project)))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to connect to project database for {project.name}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Database is not connected for project '{project.name}'. Please check your database settings.",
+        )
+
+
 @app.get("/projects/{project_id}/llm-call-stats")
 async def projects_get_llm_call_stats(
     project_id: UUID,
@@ -764,33 +782,65 @@ async def projects_get_llm_call_stats(
     agent_id: UUID | None = None,
     session_id: UUID | None = None,
     run_id: UUID | None = None,
+    search: str | None = None,
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
 ):
     """Fetch paginated model call stats for a specific project.
 
     ``agent_id``, ``session_id`` and ``run_id`` narrow the list to the calls
     attributed to that agent, conversation or run — the run's own calls are
-    what the task debugger shows beside its tasks.
+    what the task debugger shows beside its tasks. ``search`` matches the
+    model name and the request and response text; ``start_date`` and
+    ``end_date`` bound when the call was recorded.
     """
     assert_logged_in(request)
     project = await get_project_and_assert_access(request, project_id)
-
-    # AgentService opens its own sessions, so connection errors surface here.
-    try:
-        service = AgentService(project_sessionmaker(project))
-        return await service.get_model_call_stats(
+    return await _query_model_calls(
+        project,
+        lambda service: service.get_model_call_stats(
             call_type=call_type,
             limit=limit,
             offset=offset,
             agent_id=agent_id,
             session_id=session_id,
             run_id=run_id,
-        )
-    except Exception as e:
-        logger.error(f"Failed to connect to project database for {project.name}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database is not connected for project '{project.name}'. Please check your database settings.",
-        )
+            search=search,
+            start=start_date,
+            end=end_date,
+        ),
+    )
+
+
+@app.get("/projects/{project_id}/llm-call-stats/summary")
+async def projects_get_llm_call_summary(
+    project_id: UUID,
+    request: Request,
+    call_type: str | None = None,
+    agent_id: UUID | None = None,
+    session_id: UUID | None = None,
+    run_id: UUID | None = None,
+    search: str | None = None,
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+):
+    """The token usage of the calls the list endpoint would return with the
+    same filters — totals, per model and per day — across all of them, not
+    one page."""
+    assert_logged_in(request)
+    project = await get_project_and_assert_access(request, project_id)
+    return await _query_model_calls(
+        project,
+        lambda service: service.summarise_model_calls(
+            call_type=call_type,
+            agent_id=agent_id,
+            session_id=session_id,
+            run_id=run_id,
+            search=search,
+            start=start_date,
+            end=end_date,
+        ),
+    )
 
 
 def _reuse_session(session: AsyncSession):

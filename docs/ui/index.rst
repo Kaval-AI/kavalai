@@ -399,7 +399,15 @@ Neither identifier is a foreign key, so the token counts outlive the
 conversation they belong to. Selecting a call opens it beside the list: its
 figures, links to its conversation and to the run's tasks, and the request and
 response — as messages, with **Show as text**, or as JSON. Its run identifier
-narrows the page to that run's calls. The
+narrows the page to that run's calls.
+
+Above the list, **Search** matches the model name and the text of the request
+and response, and **From** and **To** bound when a call was recorded; both are
+kept in the address, so a narrowed view can be shared. The **Token usage** card
+adds up every call the filters select, not only the page shown: the calls and
+how many failed, input tokens with the cached share, output tokens with the
+reasoning share, embedding tokens, the average call, the tokens per day and a
+row per model. It reports tokens only, for the reason given above. The
 same filters are the page's ``run_id`` and ``session_id`` query parameters,
 which is how the **Model calls** button of a conversation and the task
 debugger reach it; **Show all calls** removes them.

@@ -25,13 +25,17 @@ import {
 } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { ActivatedRoute, Params, RouterLink } from '@angular/router';
+import { FormsModule } from '@angular/forms';
+import { ActivatedRoute, Params, Router, RouterLink } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { AgentService } from '../../services/agent-service';
 import { UserService } from '../../services/user-service';
-import { LLMCallStat } from '../../models/llm-call-stat';
+import { LLMCallStat, LLMCallStatFilters, LLMCallSummary } from '../../models/llm-call-stat';
+import { TOKEN_SERIES } from '../../core/daily-stats';
 import { errorMessage } from '../../core/http-error';
 import {
+  BarChart,
+  ChartBar,
   UiAlert,
   UiBadge,
   UiButton,
@@ -39,6 +43,7 @@ import {
   UiChip,
   UiCopyButton,
   UiEmptyState,
+  UiField,
   UiInfo,
   UiLoading,
   UiPageHeader,
@@ -47,6 +52,8 @@ import {
   UiStats,
   UiStatusBadge,
   UiTable,
+  UiToolbar,
+  fillDays,
 } from '../../ui';
 import { JsonTreeComponent } from '../json-tree/json-tree';
 import { formatDuration, shortId } from '../../core/format';
@@ -64,6 +71,45 @@ const FILTERS = [
 const NARROW = '(max-width: 1100px)';
 
 type FilterParam = (typeof FILTERS)[number]['param'];
+
+/** The search box and the time window, kept in the query as `search`, `from` and `to`. */
+export interface TextFilters {
+  search: string;
+  /** `datetime-local` values: local time, no zone. */
+  from: string;
+  to: string;
+}
+
+/** A gap between days with calls is drawn as quiet days only up to this many days. */
+const MAX_FILLED_DAYS = 92;
+
+/** The chart shows at least this many days, ending on the last day with calls. */
+const MIN_DAYS = 7;
+
+/**
+ * The tokens per day of a summary as chart bars: LLM input, LLM output and
+ * embedding tokens. Days without calls between the first and the last are
+ * drawn empty while the span is short enough to read, and the chart covers
+ * at least a week, so one busy day is one bar among seven.
+ */
+export function tokenDays(summary: LLMCallSummary): ChartBar[] {
+  const rows = summary.by_day.map((d) => ({
+    day: d.date,
+    values: [d.prompt_tokens, d.completion_tokens, d.embedding_tokens],
+  }));
+  if (rows.length === 0) return rows;
+  const last = Date.parse(`${rows[rows.length - 1].day}T12:00:00Z`);
+  const first = Math.min(Date.parse(`${rows[0].day}T12:00:00Z`), last - (MIN_DAYS - 1) * 86_400_000);
+  if ((last - first) / 86_400_000 > MAX_FILLED_DAYS) return rows;
+  return fillDays(rows, new Date(first), new Date(last), () => ({ day: '', values: [0, 0, 0] }));
+}
+
+/** A `datetime-local` value as an ISO time for the API; undefined when empty or invalid. */
+function isoOf(local: string): string | undefined {
+  if (!local) return undefined;
+  const time = new Date(local);
+  return Number.isNaN(time.getTime()) ? undefined : time.toISOString();
+}
 
 export interface ActiveFilter {
   param: FilterParam;
@@ -92,8 +138,10 @@ interface CallView {
   selector: 'app-llm-call-stats-page',
   standalone: true,
   imports: [
+    BarChart,
     DatePipe,
     DecimalPipe,
+    FormsModule,
     RouterLink,
     JsonTreeComponent,
     UiAlert,
@@ -103,6 +151,7 @@ interface CallView {
     UiChip,
     UiCopyButton,
     UiEmptyState,
+    UiField,
     UiInfo,
     UiLoading,
     UiPageHeader,
@@ -111,12 +160,14 @@ interface CallView {
     UiStats,
     UiStatusBadge,
     UiTable,
+    UiToolbar,
   ],
   templateUrl: './llm-call-stats-page.html',
   styleUrl: './llm-call-stats-page.css',
 })
 export class LlmCallStatsPage implements OnInit {
   private route = inject(ActivatedRoute);
+  private router = inject(Router);
   private agentService = inject(AgentService);
   private userService = inject(UserService);
   private destroyRef = inject(DestroyRef);
@@ -131,6 +182,28 @@ export class LlmCallStatsPage implements OnInit {
   readonly hasMore = signal(false);
   readonly selectedId = signal<string | null>(null);
   readonly showText = signal(true);
+
+  /** The search and time window the list and the summary are narrowed by. */
+  readonly textFilters = signal<TextFilters>({ search: '', from: '', to: '' });
+  /** The toolbar's fields, applied to the query with Search. */
+  form: TextFilters = { search: '', from: '', to: '' };
+
+  readonly summary = signal<LLMCallSummary | null>(null);
+  readonly summaryLoading = signal(false);
+  readonly summaryError = signal<string | null>(null);
+  readonly tokenSeries = TOKEN_SERIES;
+  readonly tokenBars = computed(() => {
+    const summary = this.summary();
+    return summary ? tokenDays(summary) : [];
+  });
+  readonly embeddingTokens = computed(
+    () => this.summary()?.by_model.filter((m) => m.call_type === 'embedding').reduce((t, m) => t + m.total_tokens, 0) ?? 0
+  );
+  /** Whether the search or the time window narrows the list. */
+  readonly textFiltered = computed(() => {
+    const f = this.textFilters();
+    return !!(f.search || f.from || f.to);
+  });
 
   readonly formatDuration = formatDuration;
   readonly shortId = shortId;
@@ -163,6 +236,7 @@ export class LlmCallStatsPage implements OnInit {
   });
 
   private readonly detailPanel = viewChild<ElementRef<HTMLElement>>('detail');
+  private summarySubscription: Subscription | null = null;
   private offset = 0;
   private requestedCall: string | null = null;
   private loadSubscription: Subscription | null = null;
@@ -171,6 +245,9 @@ export class LlmCallStatsPage implements OnInit {
     this.route.queryParams.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
       this.requestedCall = params['call'] || null;
       this.filterValues.set(this.readFilters(params));
+      const text: TextFilters = { search: params['search'] || '', from: params['from'] || '', to: params['to'] || '' };
+      this.textFilters.set(text);
+      this.form = { ...text };
       this.reload();
     });
     this.userService.userDetails.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((user) => {
@@ -181,7 +258,10 @@ export class LlmCallStatsPage implements OnInit {
         this.reload();
       }
     });
-    this.destroyRef.onDestroy(() => this.loadSubscription?.unsubscribe());
+    this.destroyRef.onDestroy(() => {
+      this.loadSubscription?.unsubscribe();
+      this.summarySubscription?.unsubscribe();
+    });
   }
 
   /** The query parameters that keep the other filters and drop this one. */
@@ -195,6 +275,44 @@ export class LlmCallStatsPage implements OnInit {
     this.selectedId.set(null);
     this.hasMore.set(false);
     this.loadStats();
+    this.loadSummary();
+  }
+
+  /** Put the toolbar's search and time window into the query, which reloads the page. */
+  applyText(): void {
+    const { search, from, to } = this.form;
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { search: search.trim() || null, from: from || null, to: to || null, call: null },
+      queryParamsHandling: 'merge',
+    });
+  }
+
+  clearText(): void {
+    this.form = { search: '', from: '', to: '' };
+    this.applyText();
+  }
+
+  loadSummary(): void {
+    const projectId = this.projectId();
+    if (!projectId) return;
+    this.summarySubscription?.unsubscribe();
+    this.summaryLoading.set(true);
+    this.summaryError.set(null);
+    const values = this.filterValues();
+    this.summarySubscription = this.agentService
+      .getLLMCallSummary(projectId, values.call_type, this.requestFilters())
+      .subscribe({
+        next: (summary) => {
+          this.summary.set(summary);
+          this.summaryLoading.set(false);
+        },
+        error: (err) => {
+          this.summary.set(null);
+          this.summaryError.set(errorMessage(err, 'Could not load the token usage.'));
+          this.summaryLoading.set(false);
+        },
+      });
   }
 
   loadStats(): void {
@@ -207,11 +325,7 @@ export class LlmCallStatsPage implements OnInit {
     this.error.set(null);
     const values = this.filterValues();
     this.loadSubscription = this.agentService
-      .getLLMCallStats(projectId, values.call_type, this.limit, this.offset, {
-        agentId: values.agent_id,
-        sessionId: values.session_id,
-        runId: values.run_id,
-      })
+      .getLLMCallStats(projectId, values.call_type, this.limit, this.offset, this.requestFilters())
       .subscribe({
         next: (data) => {
           this.stats.update((stats) => [...stats, ...data]);
@@ -254,6 +368,21 @@ export class LlmCallStatsPage implements OnInit {
   status(call: LLMCallStat): string {
     if (call.response_code === null || call.response_code === undefined) return 'unknown';
     return call.response_code >= 200 && call.response_code < 300 ? 'ok' : 'error';
+  }
+
+  /** The id filters, the search and the time window, as the API takes them; unset ones are left out. */
+  private requestFilters(): LLMCallStatFilters {
+    const values = this.filterValues();
+    const text = this.textFilters();
+    const filters: LLMCallStatFilters = {
+      agentId: values.agent_id,
+      sessionId: values.session_id,
+      runId: values.run_id,
+      search: text.search || undefined,
+      start: isoOf(text.from),
+      end: isoOf(text.to),
+    };
+    return Object.fromEntries(Object.entries(filters).filter(([, v]) => v !== undefined));
   }
 
   private readFilters(params: Params): Partial<Record<FilterParam, string>> {

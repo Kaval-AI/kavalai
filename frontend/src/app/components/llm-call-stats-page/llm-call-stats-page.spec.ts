@@ -15,14 +15,35 @@ limitations under the License.
 */
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { HttpErrorResponse } from '@angular/common/http';
-import { ActivatedRoute, Params, provideRouter } from '@angular/router';
+import { ActivatedRoute, Params, Router, provideRouter } from '@angular/router';
 import { BehaviorSubject, NEVER, of, throwError } from 'rxjs';
-import { LlmCallStatsPage } from './llm-call-stats-page';
+import { LlmCallStatsPage, tokenDays } from './llm-call-stats-page';
 import { AgentService } from '../../services/agent-service';
 import { UserService } from '../../services/user-service';
-import { LLMCallStat } from '../../models/llm-call-stat';
+import { LLMCallStat, LLMCallSummary } from '../../models/llm-call-stat';
 import { UserDetails } from '../../models/user-details';
 import { makeModelCall, makeUser, settle } from '../../../testing';
+
+const SUMMARY: LLMCallSummary = {
+  totals: {
+    calls: 3,
+    errors: 1,
+    prompt_tokens: 3729,
+    completion_tokens: 394,
+    cached_prompt_tokens: 120,
+    reasoning_tokens: 31,
+    total_tokens: 4130,
+    average_seconds: 2.1,
+  },
+  by_model: [
+    { model: 'scaleway/glm-5.3', call_type: 'llm', calls: 2, prompt_tokens: 3729, completion_tokens: 394, cached_prompt_tokens: 120, reasoning_tokens: 31, total_tokens: 4123, errors: 1, average_seconds: 2.5 },
+    { model: 'fastembed/bge', call_type: 'embedding', calls: 1, prompt_tokens: 7, completion_tokens: 0, cached_prompt_tokens: 0, reasoning_tokens: 0, total_tokens: 7, errors: 0, average_seconds: 0.4 },
+  ],
+  by_day: [
+    { date: '2026-11-22', calls: 1, prompt_tokens: 1000, completion_tokens: 100, embedding_tokens: 0 },
+    { date: '2026-11-24', calls: 2, prompt_tokens: 2729, completion_tokens: 294, embedding_tokens: 7 },
+  ],
+};
 
 describe('LlmCallStatsPage', () => {
   let fixture: ComponentFixture<LlmCallStatsPage>;
@@ -97,8 +118,9 @@ describe('LlmCallStatsPage', () => {
   }
 
   beforeEach(async () => {
-    agentService = jasmine.createSpyObj<AgentService>('AgentService', ['getLLMCallStats']);
+    agentService = jasmine.createSpyObj<AgentService>('AgentService', ['getLLMCallStats', 'getLLMCallSummary']);
     agentService.getLLMCallStats.and.returnValue(of([chatCall, embeddingCall]));
+    agentService.getLLMCallSummary.and.returnValue(of(SUMMARY));
     user = new BehaviorSubject<UserDetails | null>(makeUser({ active_project_id: 'p1' }));
     params = new BehaviorSubject<Params>({});
 
@@ -155,9 +177,6 @@ describe('LlmCallStatsPage', () => {
   it('lists the calls with when, model, type, status, duration and tokens', async () => {
     await render();
     expect(agentService.getLLMCallStats).toHaveBeenCalledOnceWith('p1', undefined, 20, 0, {
-      agentId: undefined,
-      sessionId: undefined,
-      runId: undefined,
     });
     const rows = all('call-row');
     expect(rows.length).toBe(2);
@@ -209,8 +228,6 @@ describe('LlmCallStatsPage', () => {
     params.next({ run_id: 'r2' });
     await settle(fixture);
     expect(agentService.getLLMCallStats).toHaveBeenCalledWith('p1', undefined, 20, 0, {
-      agentId: undefined,
-      sessionId: undefined,
       runId: 'r2',
     });
     expect(query('call-detail')).toBeNull();
@@ -376,5 +393,111 @@ describe('LlmCallStatsPage', () => {
       expect(query('more-error')).toBeNull();
       expect(all('call-row').length).toBe(23);
     });
+  });
+
+  describe('token usage', () => {
+    it('adds up every matching call: figures, tokens per day and models', async () => {
+      await render();
+      const totals = query('usage-totals')!.textContent!;
+      expect(totals).toContain('3,729');
+      expect(totals).toContain('120 cached');
+      expect(totals).toContain('31 reasoning');
+      expect(totals).toContain('1 failed');
+      expect(totals).toContain('2.1 s');
+      // Embedding tokens come from the embedding models.
+      expect(totals).toContain('Embedding tokens');
+      expect(fixture.componentInstance.embeddingTokens()).toBe(7);
+      const models = all('usage-model').map((r) => r.textContent!);
+      expect(models[0]).toContain('scaleway/glm-5.3');
+      expect(models[1]).toContain('fastembed/bge');
+      // A week ending on the last day with calls, quiet days drawn as gaps.
+      expect(fixture.componentInstance.tokenBars().map((b) => b.day)).toEqual([
+        '2026-11-18',
+        '2026-11-19',
+        '2026-11-20',
+        '2026-11-21',
+        '2026-11-22',
+        '2026-11-23',
+        '2026-11-24',
+      ]);
+      expect(query('usage')!.querySelector('[data-testid="chart-unit"]')!.textContent).toBe('tokens');
+    });
+
+    it('says when no call matches', async () => {
+      agentService.getLLMCallSummary.and.returnValue(
+        of({ totals: { ...SUMMARY.totals, calls: 0, average_seconds: null }, by_model: [], by_day: [] })
+      );
+      await render();
+      expect(query('usage-empty')).not.toBeNull();
+      expect(query('usage-totals')).toBeNull();
+    });
+
+    it('shows a loading state, then the server refusal with Retry', async () => {
+      agentService.getLLMCallSummary.and.returnValue(NEVER);
+      await render();
+      expect(query('usage')!.querySelector('ui-loading')).not.toBeNull();
+
+      agentService.getLLMCallSummary.and.returnValue(throwError(() => httpError('Summary failed')));
+      fixture.componentInstance.loadSummary();
+      await settle(fixture);
+      expect(query('usage-error')!.textContent).toContain('Summary failed');
+
+      agentService.getLLMCallSummary.and.returnValue(of(SUMMARY));
+      query<HTMLButtonElement>('usage-retry')!.click();
+      await settle(fixture);
+      expect(query('usage-totals')).not.toBeNull();
+    });
+  });
+
+  describe('search and time window', () => {
+    it('narrows the list and the summary by the query', async () => {
+      params.next({ search: 'claims', from: '2026-11-23T00:00', to: '2026-11-24T23:59', run_id: 'r1' });
+      await render();
+      const expected = jasmine.objectContaining({
+        runId: 'r1',
+        search: 'claims',
+        start: new Date('2026-11-23T00:00').toISOString(),
+        end: new Date('2026-11-24T23:59').toISOString(),
+      });
+      expect(agentService.getLLMCallStats.calls.mostRecent().args[4]).toEqual(expected);
+      expect(agentService.getLLMCallSummary.calls.mostRecent().args[2]).toEqual(expected);
+      expect(query<HTMLInputElement>('search')!.value).toBe('claims');
+      expect(query('clear-search')).not.toBeNull();
+    });
+
+    it('ignores a time it cannot read', async () => {
+      params.next({ from: 'not a time' });
+      await render();
+      expect(agentService.getLLMCallStats.calls.mostRecent().args[4]).toEqual({});
+    });
+
+    it('puts the typed search into the query, and clears it', async () => {
+      await render();
+      const navigate = spyOn(TestBed.inject(Router), 'navigate').and.resolveTo(true);
+      expect(query('clear-search')).toBeNull();
+      fixture.componentInstance.form = { search: '  claims ', from: '2026-11-23T00:00', to: '' };
+      query<HTMLButtonElement>('apply-search')!.click();
+      expect(navigate.calls.mostRecent().args[1]!.queryParams).toEqual({
+        search: 'claims',
+        from: '2026-11-23T00:00',
+        to: null,
+        call: null,
+      });
+
+      fixture.componentInstance.clearText();
+      expect(navigate.calls.mostRecent().args[1]!.queryParams).toEqual({ search: null, from: null, to: null, call: null });
+    });
+  });
+
+  it('draws a long span between days without filling it', () => {
+    const bars = tokenDays({
+      ...SUMMARY,
+      by_day: [
+        { date: '2026-01-01', calls: 1, prompt_tokens: 1, completion_tokens: 0, embedding_tokens: 0 },
+        { date: '2026-11-24', calls: 1, prompt_tokens: 2, completion_tokens: 0, embedding_tokens: 0 },
+      ],
+    });
+    expect(bars.length).toBe(2);
+    expect(tokenDays({ ...SUMMARY, by_day: [] })).toEqual([]);
   });
 });

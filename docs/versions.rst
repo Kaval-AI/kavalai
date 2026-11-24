@@ -48,6 +48,14 @@ Added
   creates a user and ``set-password`` replaces a password; both prompt for it
   or read it from standard input.
 
+* **Searching and adding up model calls.** ``AgentService.get_model_call_stats``
+  takes ``search`` (the model name and the request and response text, matched
+  case-insensitively, wildcards taken literally) and ``start`` / ``end``, and
+  ``AgentService.summarise_model_calls`` adds up every call the same filters
+  select: totals, per model and per day, in tokens.
+  ``GET /projects/{id}/llm-call-stats`` takes ``search``, ``start_date`` and
+  ``end_date``, and ``GET /projects/{id}/llm-call-stats/summary`` answers the
+  summary; the Model calls page shows both.
 * **A profile for every backoffice user.** ``GET /user/me`` returns the
   signed-in user's own record, ``PATCH /user/me`` changes its ``name`` and
   ``picture`` and refuses any other field, and ``POST /user/me/password``

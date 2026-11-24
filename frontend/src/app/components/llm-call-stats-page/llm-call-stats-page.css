@@ -221,3 +221,46 @@
   font-size: var(--text-sm);
   line-height: 1.55;
 }
+
+/* The search and time window: labelled fields in one wrapping row. */
+.text-filters {
+  align-items: flex-end;
+  margin-bottom: var(--space-5);
+}
+
+.text-filter {
+  flex: 1 1 190px;
+  margin-bottom: 0;
+}
+
+.text-filter-search {
+  flex: 2 1 260px;
+}
+
+.text-filter-button {
+  min-height: 40px;
+}
+
+/* The chart and the per-model table side by side, stacked on a narrow screen. */
+.usage-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-6);
+  margin-top: var(--space-5);
+}
+
+@media (max-width: 1100px) {
+  .usage-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.usage-title {
+  margin: 0 0 var(--space-2);
+  font-family: var(--font-family-accent);
+  font-size: var(--text-xs);
+  font-weight: 400;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--color-slate-500);
+}

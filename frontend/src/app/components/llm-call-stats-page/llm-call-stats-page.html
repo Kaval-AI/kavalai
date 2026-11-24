@@ -25,6 +25,109 @@
   </div>
 }
 
+@if (projectId()) {
+  <ui-toolbar class="text-filters" data-testid="text-filters" aria-label="Search model calls">
+    <ui-field label="Search" for="calls-search" class="text-filter text-filter-search">
+      <input
+        id="calls-search"
+        name="search"
+        type="search"
+        placeholder="Model, prompt or response text"
+        [(ngModel)]="form.search"
+        (keyup.enter)="applyText()"
+        data-testid="search"
+      />
+    </ui-field>
+    <ui-field label="From" for="calls-from" class="text-filter">
+      <input id="calls-from" name="from" type="datetime-local" [(ngModel)]="form.from" data-testid="from" />
+    </ui-field>
+    <ui-field label="To" for="calls-to" class="text-filter">
+      <input id="calls-to" name="to" type="datetime-local" [(ngModel)]="form.to" data-testid="to" />
+    </ui-field>
+    <button type="button" uiButton class="text-filter-button" (click)="applyText()" data-testid="apply-search">
+      <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i> Search
+    </button>
+    @if (textFiltered()) {
+      <button type="button" uiButton="ghost" class="text-filter-button" (click)="clearText()" data-testid="clear-search">
+        Clear
+      </button>
+    }
+  </ui-toolbar>
+
+  <ui-card title="Token usage" icon="fa-coins" data-testid="usage">
+    @if (summaryError()) {
+      <ui-alert data-testid="usage-error">
+        {{ summaryError() }}
+        <button alert-actions type="button" uiButton="ghost" size="sm" (click)="loadSummary()" data-testid="usage-retry">
+          Retry
+        </button>
+      </ui-alert>
+    } @else if (summaryLoading() && !summary()) {
+      <ui-loading label="Adding up the tokens" />
+    } @else if (summary(); as s) {
+      @if (s.totals.calls === 0) {
+        <p class="text-muted" data-testid="usage-empty">No model calls match, so there is nothing to add up.</p>
+      } @else {
+        <ui-stats inset data-testid="usage-totals">
+          <ui-stat label="Calls" [hint]="s.totals.errors ? s.totals.errors + ' failed' : ''">{{
+            s.totals.calls | number
+          }}</ui-stat>
+          <ui-stat label="Input tokens" [hint]="s.totals.cached_prompt_tokens ? (s.totals.cached_prompt_tokens | number) + ' cached' : ''">{{
+            s.totals.prompt_tokens | number
+          }}</ui-stat>
+          <ui-stat label="Output tokens" [hint]="s.totals.reasoning_tokens ? (s.totals.reasoning_tokens | number) + ' reasoning' : ''">{{
+            s.totals.completion_tokens | number
+          }}</ui-stat>
+          <ui-stat label="Embedding tokens">{{ embeddingTokens() | number }}</ui-stat>
+          <ui-stat label="Average call">{{ formatDuration(s.totals.average_seconds) }}</ui-stat>
+        </ui-stats>
+
+        <div class="usage-grid">
+          <section>
+            <h3 class="usage-title">Tokens per day</h3>
+            <app-bar-chart
+              [bars]="tokenBars()"
+              [series]="tokenSeries"
+              unit="tokens"
+              label="Input, output and embedding tokens per day"
+              empty="No tokens were recorded for these calls."
+            />
+          </section>
+          <section>
+            <h3 class="usage-title">By model</h3>
+            <ui-table dense>
+              <table data-testid="usage-models">
+                <thead>
+                  <tr>
+                    <th>Model</th>
+                    <th>Type</th>
+                    <th class="text-right">Calls</th>
+                    <th class="text-right">In</th>
+                    <th class="text-right">Out</th>
+                    <th class="text-right">Average</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (m of s.by_model; track m.model + m.call_type) {
+                    <tr data-testid="usage-model">
+                      <td class="mono">{{ m.model }}</td>
+                      <td><ui-badge tone="muted">{{ m.call_type }}</ui-badge></td>
+                      <td class="text-right mono">{{ m.calls | number }}</td>
+                      <td class="text-right mono">{{ m.prompt_tokens | number }}</td>
+                      <td class="text-right mono">{{ m.completion_tokens | number }}</td>
+                      <td class="text-right mono whitespace-nowrap">{{ formatDuration(m.average_seconds) }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </ui-table>
+          </section>
+        </div>
+      }
+    }
+  </ui-card>
+}
+
 <ui-card title="Calls" icon="fa-microchip">
   @if (error() && stats().length === 0) {
     <ui-alert data-testid="calls-error">
