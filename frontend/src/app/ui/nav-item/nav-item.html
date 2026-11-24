@@ -1,0 +1,7 @@
+<a [routerLink]="link()" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: exact() }">
+  @if (icon()) {
+    <i class="fa-solid" [class]="'fa-solid ' + icon()" aria-hidden="true"></i>
+  }
+  <span>{{ label() }}</span>
+  <ng-content />
+</a>

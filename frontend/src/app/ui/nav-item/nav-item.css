@@ -1,0 +1,67 @@
+/* Navigation item: a sidebar destination with an icon, and the active indicator.
+
+   Unencapsulated: .ui-nav-badge is put on content a sidebar projects into the
+   item, which emulated encapsulation would not reach. */
+ui-nav-item {
+  display: block;
+}
+
+ui-nav-item a {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 40px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-family-header);
+  font-weight: 500;
+  font-size: 0.95rem;
+  color: var(--color-base-content);
+  transition:
+    background-color var(--motion-fast),
+    color var(--motion-fast);
+}
+
+ui-nav-item a > i {
+  width: 18px;
+  text-align: center;
+  color: var(--color-slate-500);
+  font-size: 0.9rem;
+}
+
+ui-nav-item a:hover {
+  background: var(--color-lime-50);
+  color: var(--color-base-content);
+}
+
+ui-nav-item a:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+ui-nav-item a.active {
+  background: var(--color-surface);
+  color: var(--color-base-content);
+  border-radius: 0;
+  box-shadow: inset 3px 0 0 var(--color-primary);
+  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%);
+}
+
+ui-nav-item a.active > i {
+  color: var(--color-lime-700);
+}
+
+ui-nav-item[compact] a {
+  min-height: 34px;
+  padding: 6px 10px;
+  font-size: 0.88rem;
+}
+
+ui-nav-item[compact] a > i {
+  width: 16px;
+  font-size: 0.8rem;
+}
+
+.ui-nav-badge {
+  margin-left: auto;
+}

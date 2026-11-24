@@ -1,0 +1,22 @@
+:host {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(39, 62, 71, 0.25);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: ui-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+:host(.ui-spinner-lg) {
+  width: 28px;
+  height: 28px;
+  border-width: 3px;
+}
+
+@keyframes ui-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

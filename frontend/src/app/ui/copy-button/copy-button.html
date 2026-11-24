@@ -1,0 +1,10 @@
+<button type="button" uiButton size="sm" (click)="copy()" [attr.aria-label]="copyLabel()">
+  <i class="fa-solid" [class.fa-copy]="!copied()" [class.fa-check]="copied()" aria-hidden="true"></i>
+
+    @if (copied()) {
+      Copied
+    } @else {
+      Copy
+    }
+
+</button>

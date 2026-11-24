@@ -1,0 +1,52 @@
+/* A small chamfered mono label, coloured by tone. The tone is a class on the
+   host, so every rule here is a :host selector. */
+:host {
+  display: inline-block;
+  padding: 3px 10px;
+  border: 1px solid rgba(39, 62, 71, 0.3);
+  background: rgba(255, 255, 255, 0.6);
+  color: var(--color-base-content);
+  font-family: var(--font-family-accent);
+  font-size: var(--text-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  line-height: 1.4;
+  white-space: nowrap;
+  vertical-align: middle;
+  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+}
+
+:host(.ui-badge-success) {
+  border-color: var(--color-lime-700);
+  color: var(--color-lime-800);
+  background: var(--color-lime-100);
+}
+
+:host(.ui-badge-warning) {
+  border-color: var(--color-warning);
+  color: #9b5608;
+  background: #fdf1e3;
+}
+
+:host(.ui-badge-error) {
+  border-color: var(--color-error);
+  color: var(--color-error);
+  background: #f7e6ee;
+}
+
+:host(.ui-badge-info) {
+  border-color: var(--color-accent);
+  color: #136b62;
+  background: #e3f3f1;
+}
+
+:host(.ui-badge-muted) {
+  border-color: var(--color-neutral);
+  opacity: 0.75;
+}
+
+:host(.ui-badge-primary) {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-primary-content);
+}

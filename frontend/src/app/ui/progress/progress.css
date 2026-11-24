@@ -1,0 +1,16 @@
+:host {
+  display: block;
+  height: 8px;
+  background: var(--color-base-200);
+  overflow: hidden;
+}
+
+.ui-progress-bar {
+  height: 100%;
+  background: var(--color-primary);
+  transition: width var(--motion-base) ease;
+}
+
+:host([tone='warning']) .ui-progress-bar {
+  background: var(--color-warning);
+}

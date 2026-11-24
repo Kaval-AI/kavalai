@@ -1,0 +1,17 @@
+<div class="ui-card-body">
+  @if (title()) {
+    <h2 class="ui-card-title">
+      @if (icon()) {
+        <i class="fa-solid" [class]="'fa-solid ' + icon()" aria-hidden="true"></i>
+      }
+      @if (titleLink()) {
+        <a class="ui-card-title-text ui-card-title-link" [routerLink]="titleLink()">{{ title() }}</a>
+      } @else {
+        <span class="ui-card-title-text">{{ title() }}</span>
+      }
+      <span class="ui-card-actions"><ng-content select="[card-actions]" /></span>
+    </h2>
+  }
+  <ng-content />
+  <div class="ui-card-footer"><ng-content select="[card-footer]" /></div>
+</div>

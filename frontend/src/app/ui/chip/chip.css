@@ -1,0 +1,45 @@
+/* An inline context marker (which chatbot a page is about); an anchor when it
+   links, a span otherwise, so the class carries the look rather than :host. */
+.ui-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 4px 12px 4px 5px;
+  border: 1px solid var(--color-base-300);
+  background: var(--color-surface);
+  color: var(--color-base-content);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+}
+
+.ui-chip > i {
+  color: var(--color-lime-700);
+  margin-left: 6px;
+}
+
+.ui-chip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-chip-detail {
+  color: var(--color-slate-500);
+  font-family: var(--font-family-accent);
+  font-size: var(--text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+a.ui-chip:hover {
+  border-color: var(--color-primary);
+  color: var(--color-base-content);
+}
+
+a.ui-chip:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}

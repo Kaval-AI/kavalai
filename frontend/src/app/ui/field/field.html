@@ -1,0 +1,10 @@
+@if (label()) {
+  <label [attr.for]="for() || null">{{ label() }}</label>
+}
+<ng-content />
+@if (hint()) {
+  <p class="ui-field-hint">{{ hint() }}</p>
+}
+@if (error()) {
+  <p class="ui-field-error" role="alert">{{ error() }}</p>
+}

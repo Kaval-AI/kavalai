@@ -1,0 +1,8 @@
+<div class="ui-empty">
+  @if (icon()) {
+    <i class="fa-solid" [class]="'fa-solid ' + icon()" aria-hidden="true"></i>
+  }
+  <h2>{{ title() }}</h2>
+  <p><ng-content /></p>
+  <div class="ui-empty-actions"><ng-content select="[empty-actions]" /></div>
+</div>

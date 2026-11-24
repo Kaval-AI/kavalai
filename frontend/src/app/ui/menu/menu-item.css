@@ -1,0 +1,40 @@
+/* The entries of a ui-menu: a[uiMenuItem], button[uiMenuItem].
+
+   Global, imported by ui.css, for the same reason as button.css: UiMenuItem
+   is a directive on the native element. */
+.ui-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-base-content);
+  font-family: var(--font-family-body);
+  font-weight: 500;
+  font-size: var(--text-base);
+  text-align: left;
+  justify-content: flex-start;
+  cursor: pointer;
+}
+
+.ui-menu-item:hover,
+.ui-menu-item:focus-visible {
+  outline: none;
+  background: var(--color-lime-50);
+  color: var(--color-base-content);
+}
+
+.ui-menu-item > i {
+  width: 16px;
+  text-align: center;
+  color: var(--color-lime-700);
+}
+
+.ui-menu-item-danger,
+.ui-menu-item-danger > i {
+  color: var(--color-error);
+}

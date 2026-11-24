@@ -1,0 +1,17 @@
+/* Kaval.AI console component library (console/src/app/ui).
+
+   Every component keeps its own template and stylesheet next to it. This file,
+   imported by styles.css, carries only what no component can own:
+
+   - button.css and menu-item.css style directives (button[uiButton],
+     a[uiMenuItem]); an Angular directive cannot carry a stylesheet, and these
+     stay directives so the native button and anchor keep their semantics.
+   - rhythm.css spaces one component against the next, which belongs to
+     neither of them.
+
+   Every selector is scoped to a ui- element, a ui- class or a ui attribute,
+   and every value comes from the tokens in styles.css. */
+
+@import './button/button.css';
+@import './menu/menu-item.css';
+@import './rhythm.css';

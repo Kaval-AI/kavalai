@@ -1,0 +1,27 @@
+:host {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  margin-bottom: 8px;
+}
+
+.ui-info-label {
+  flex-shrink: 0;
+  min-width: 140px;
+  font-family: var(--font-family-accent);
+  font-size: var(--text-xs);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--color-slate-500);
+}
+
+.ui-info-value {
+  min-width: 0;
+  font-weight: 500;
+  word-break: break-word;
+}
+
+:host([mono]) .ui-info-value {
+  font-family: var(--font-family-accent);
+  font-size: 0.9rem;
+}

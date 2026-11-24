@@ -1,0 +1,58 @@
+:host {
+  display: block;
+  min-width: 0;
+}
+
+.ui-stat-body {
+  position: relative;
+  display: block;
+  height: 100%;
+  padding: 12px 14px;
+  background: var(--ui-stat-ground, var(--color-surface));
+  box-shadow: inset 3px 0 0 var(--color-primary);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: inherit;
+  text-align: left;
+}
+
+/* A linked tile: the anchor covers it, so the whole tile is the target. */
+.ui-stat-link {
+  position: absolute;
+  inset: 0;
+}
+
+:host(.ui-stat-linked) .ui-stat-body:hover {
+  background: var(--color-lime-50);
+}
+
+.ui-stat-link:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.ui-stat-label {
+  font-family: var(--font-family-accent);
+  font-size: 0.65rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-slate-500);
+}
+
+.ui-stat-value {
+  font-family: var(--font-family-header);
+  font-weight: 600;
+  font-size: var(--ui-stat-value-size, 1.35rem);
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ui-stat-hint {
+  font-size: var(--text-xs);
+  color: var(--color-slate-500);
+}
+
+.ui-stat-hint:empty {
+  display: none;
+}

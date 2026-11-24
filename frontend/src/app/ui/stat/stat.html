@@ -1,0 +1,8 @@
+<div class="ui-stat-body">
+  @if (link()) {
+    <a class="ui-stat-link" [routerLink]="link()" [queryParams]="queryParams()" [attr.aria-label]="label()"></a>
+  }
+  <div class="ui-stat-label">{{ label() }}</div>
+  <div class="ui-stat-value"><ng-content /></div>
+  <div class="ui-stat-hint">{{ hint() }}</div>
+</div>

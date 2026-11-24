@@ -1,0 +1,24 @@
+/* The space one of the library's surfaces leaves before the next. It belongs
+   to neither component, so it is global and lives here rather than in either
+   stylesheet. */
+ui-card + ui-card,
+ui-card + ui-stats,
+ui-card + ui-empty-state,
+ui-card + .grid-2,
+ui-stats + ui-card,
+.grid-2 + ui-card,
+.grid-2 + .grid-2,
+ui-empty-state + ui-card,
+ui-alert + ui-card,
+ui-toolbar + ui-card,
+ui-card + ui-toolbar {
+  margin-top: var(--space-5);
+}
+
+/* Inside a grid the gap spaces the surfaces; no stacked-card margin. A card
+   that fills its cell is always one of a grid's. */
+.grid-2 > ui-card,
+.grid-3 > ui-card,
+ui-card[fill] {
+  margin-top: 0;
+}

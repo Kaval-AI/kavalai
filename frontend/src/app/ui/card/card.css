@@ -1,0 +1,125 @@
+/* Card: a white surface with the brand's chamfered corners. The host carries
+   the shadow as a filter because clip-path on the body would clip a box-shadow.
+
+   Unencapsulated: the dark tone recolours the headings and links a page
+   projects into the card, which emulated encapsulation would not reach. */
+ui-card {
+  display: block;
+  filter: var(--elevation-1);
+}
+
+.ui-card-body {
+  background: var(--color-surface);
+  padding: var(--space-6);
+  clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+}
+
+ui-card[tone='danger'] .ui-card-body {
+  box-shadow: inset 3px 0 0 var(--color-error);
+}
+
+ui-card[selected] .ui-card-body {
+  box-shadow: inset 3px 0 0 var(--color-primary);
+}
+
+ui-card[tone='dark'] .ui-card-body {
+  background: var(--color-base-content);
+  color: var(--color-base-100);
+  box-shadow: inset 0 0 0 1px rgba(172, 193, 47, 0.35);
+}
+
+ui-card[tone='dark'] h1,
+ui-card[tone='dark'] h2,
+ui-card[tone='dark'] h3,
+ui-card[tone='dark'] label {
+  color: var(--color-base-100);
+}
+
+ui-card[tone='dark'] a {
+  color: var(--color-primary);
+}
+
+ui-card[tone='dark'] .section-tag,
+ui-card[tone='dark'] .ui-card-title > i {
+  color: var(--color-primary);
+}
+
+/* Filling its grid cell, a card is as tall as the tallest of its row and its
+   footer sits at the bottom, so cards side by side end their actions on one line. */
+ui-card[fill] {
+  display: flex;
+  flex-direction: column;
+}
+
+ui-card[fill] > .ui-card-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+ui-card[fill] .ui-card-footer {
+  margin-top: auto;
+}
+
+.ui-card-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 0 var(--space-4);
+  padding-bottom: 10px;
+  border-bottom: 2px solid var(--color-primary);
+  font-size: var(--text-md);
+}
+
+.ui-card-title > i {
+  color: var(--color-lime-700);
+  font-size: 0.9em;
+}
+
+/* A heading that leads to the thing's own page keeps the heading's colour
+   until it is hovered, so the card does not read as a wall of links. */
+.ui-card-title-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.ui-card-title-link:hover,
+.ui-card-title-link:focus-visible {
+  color: var(--color-lime-700);
+  text-decoration: underline;
+}
+
+ui-card[tone='danger'] .ui-card-title {
+  border-bottom-color: var(--color-error);
+}
+
+ui-card[tone='danger'] .ui-card-title > i {
+  color: var(--color-error);
+}
+
+.ui-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  font-family: var(--font-family-body);
+  font-weight: 500;
+  font-size: var(--text-sm);
+}
+
+.ui-card-actions:empty {
+  display: none;
+}
+
+.ui-card-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-top: var(--space-4);
+}
+
+.ui-card-footer:empty {
+  display: none;
+}
