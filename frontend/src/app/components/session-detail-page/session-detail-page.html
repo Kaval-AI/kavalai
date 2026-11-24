@@ -117,14 +117,6 @@
         <a
           uiButton="ghost"
           size="sm"
-          [routerLink]="['/conversations', block.run.session_id, 'runs', block.run.id, 'tasks']"
-          data-testid="open-tasks"
-        >
-          <i class="fa-solid fa-list-check" aria-hidden="true"></i> Open run
-        </a>
-        <a
-          uiButton="ghost"
-          size="sm"
           routerLink="/llm-call-stats"
           [queryParams]="{ session_id: block.run.session_id, run_id: block.run.id }"
           data-testid="run-model-calls"

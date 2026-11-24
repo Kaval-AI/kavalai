@@ -175,9 +175,8 @@ describe('SessionDetailPage', () => {
     agentService.getSessionDetails.and.returnValue(of(details));
     await render();
     const first = all('run')[0];
-    expect(query<HTMLAnchorElement>('open-tasks', first)!.getAttribute('href')).toBe(
-      '/conversations/s1/runs/r1-0000000000/tasks'
-    );
+    // The run's steps and calls are in its card, so it has no link to the run page.
+    expect(query('open-tasks', first)).toBeNull();
     expect(query<HTMLAnchorElement>('run-model-calls', first)!.getAttribute('href')).toBe(
       '/llm-call-stats?session_id=s1&run_id=r1-0000000000'
     );
