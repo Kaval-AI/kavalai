@@ -141,3 +141,40 @@ async def test_daily_run_durations_sum_the_recorded_duration(agents_db: AsyncSes
     today = [e for e in daily["runs"]["TimedBot"] if e["count"] == 2]
     assert len(today) == 1
     assert today[0]["duration_seconds"] == pytest.approx(2.5 + 30, abs=1)
+
+
+@pytest.mark.asyncio
+async def test_daily_stats_count_the_days_on_sqlite(tmp_path):
+    """SQLite returns ``date(created_at)`` as a string; the series are keyed
+    by ``date``, so without normalising every day read as zero there."""
+    from kavalai.db import Run, Session, db_manager
+
+    db_path = tmp_path / "agents.db"
+    await db_manager.init_sqlite(db_path=str(db_path))
+    async with db_manager.get_sessionmaker(uri=f"sqlite:///{db_path}")() as db:
+        agent = await insert(db, Agent, {"name": "LiteBot"})
+        session = await insert(db, Session, {"agent_id": agent.id})
+        await insert(db, Run, {"session_id": session.id, "duration_seconds": 2.5})
+        await insert(
+            db,
+            ModelCallStat,
+            {
+                "agent_id": agent.id,
+                "call_type": "llm",
+                "model": "gpt-4",
+                "prompt_tokens": 100,
+                "completion_tokens": 50,
+            },
+        )
+
+        daily = await get_daily_stats(db, days=7)
+
+    today = datetime.now(timezone.utc).date().isoformat()
+    assert daily["sessions"][-1] == {"date": today, "count": 1}
+    assert daily["runs"]["LiteBot"][-1] == {
+        "date": today,
+        "count": 1,
+        "duration_seconds": 2.5,
+    }
+    assert daily["llm"]["gpt-4"][-1]["date"] == today
+    assert daily["llm"]["gpt-4"][-1]["prompt_tokens"] == 100

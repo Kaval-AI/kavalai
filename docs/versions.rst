@@ -135,6 +135,10 @@ Fixed
 * Adding a user, or changing a user's address, to an address another user
   already has answered ``503 Backoffice database is not connected``. It now
   answers ``409 A user with this email address already exists.``
+* The backoffice's per-day charts were empty for a SQLite project. SQLite
+  returns ``date(created_at)`` as a string, which never matched the dates the
+  series are keyed by, so ``get_daily_stats`` counted every day as zero; the
+  dates are now read as dates on both backends.
 * **A picture URL could call the backoffice from its viewers' browsers.**
   Every member who sees a user loads that user's picture, with their session
   cookie when it points at the backoffice, so a picture of ``/api/logout``
