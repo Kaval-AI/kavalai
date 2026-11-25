@@ -21,6 +21,7 @@ import os
 import pickle
 from contextlib import asynccontextmanager
 from datetime import datetime
+from urllib.parse import urlsplit
 from uuid import UUID
 
 import numpy as np
@@ -51,6 +52,7 @@ from kavalai.backoffice.embedding_projector import train_pca
 from kavalai.backoffice.users import (
     hash_password,
     validate_password,
+    validate_picture_url,
     verify_password,
 )
 from kavalai.backoffice.project_service import (
@@ -213,19 +215,54 @@ def public_user(user: db.User) -> dict:
     }
 
 
-def user_fields(data: dict) -> dict:
+def backoffice_hosts(request: Request) -> list[str]:
+    """The host names the backoffice is reached under, as far as a request shows.
+
+    The host the request was addressed to (the nginx in front forwards
+    ``Host``), the page that sent it (``Origin``) and the frontend URL that
+    Google sign-in configures.
+    """
+    urls = [str(request.base_url), request.headers.get("origin", "")]
+    if GOOGLE_OAUTH:
+        urls.append(GOOGLE_OAUTH["frontend_url"])
+    hosts = []
+    for url in urls:
+        try:
+            host = urlsplit(url).hostname
+        except ValueError:
+            continue
+        if host:
+            hosts.append(host)
+    return hosts
+
+
+def checked_picture(value: object, request: Request) -> str | None:
+    """A picture from a request body as it may be stored (see
+    :func:`~kavalai.backoffice.users.validate_picture_url`); 400 otherwise."""
+    if value is not None and not isinstance(value, str):
+        raise HTTPException(status_code=400, detail="The picture must be a URL.")
+    try:
+        return validate_picture_url(value, backoffice_hosts(request))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+def user_fields(data: dict, request: Request) -> dict:
     """The columns a create/update body may set on a user.
 
     ``password`` is hashed into ``password_hash`` (an empty one is left out,
     so an edit form that does not touch the password keeps it); a
     ``password_hash`` sent by the client is dropped, as is ``has_password``,
-    which :func:`public_user` adds and a form may send back.
+    which :func:`public_user` adds and a form may send back. ``picture`` is
+    checked by :func:`checked_picture`.
     """
     fields = {
         key: value
         for key, value in data.items()
         if key not in ("password", "password_hash", "has_password")
     }
+    if "picture" in data:
+        fields["picture"] = checked_picture(data["picture"], request)
     password = data.get("password")
     if password:
         try:
@@ -360,8 +397,13 @@ async def login(request: Request):
     return await oauth.google.authorize_redirect(request, redirect_uri)
 
 
-@app.get("/logout")
+@app.post("/logout")
 async def logout(request: Request):
+    """End the session.
+
+    A POST, because a GET would be sent by any image or link pointing at it,
+    with the session cookie, and log the viewer out.
+    """
     request.session.pop("user_info", None)
     return JSONResponse({"logged_in": is_logged_in(request)})
 
@@ -439,12 +481,12 @@ async def signed_in_user(session: db.AsyncSession, request: Request) -> db.User:
     return user
 
 
-def profile_fields(data: dict) -> dict:
+def profile_fields(data: dict, request: Request) -> dict:
     """The name and picture from a profile body, checked.
 
     Any other key is refused rather than ignored, so a client that tries to
     change its address or its administrator flag here learns that it cannot.
-    An empty picture clears it.
+    An empty picture clears it; any other goes through :func:`checked_picture`.
     """
     unknown = sorted(set(data) - set(PROFILE_FIELDS))
     if unknown:
@@ -460,10 +502,7 @@ def profile_fields(data: dict) -> dict:
             raise HTTPException(status_code=400, detail="The name is required.")
         fields["name"] = name.strip()
     if "picture" in data:
-        picture = data["picture"]
-        if picture is not None and not isinstance(picture, str):
-            raise HTTPException(status_code=400, detail="The picture must be a URL.")
-        fields["picture"] = picture.strip() if picture and picture.strip() else None
+        fields["picture"] = checked_picture(data["picture"], request)
     return fields
 
 
@@ -483,7 +522,7 @@ async def user_me_update(request: Request, data: dict = Body(...)):
     """
     async with get_backoffice_session() as session:
         user = await signed_in_user(session, request)
-        fields = profile_fields(data)
+        fields = profile_fields(data, request)
         if fields:
             user = await update(session, db.User, user.id, fields)
     user_info = request.session["user_info"]
@@ -607,7 +646,9 @@ async def users_create(request: Request, data: dict = Body(...)):
     assert_is_admin(request)
     async with get_backoffice_session() as session:
         try:
-            return public_user(await insert(session, db.User, user_fields(data)))
+            return public_user(
+                await insert(session, db.User, user_fields(data, request))
+            )
         except IntegrityError:
             # Caught here, inside the session block: get_backoffice_session
             # would otherwise report it as an unreachable database.
@@ -620,7 +661,9 @@ async def users_update(user_id: UUID, request: Request, data: dict = Body(...)):
     assert_is_admin(request)
     async with get_backoffice_session() as session:
         try:
-            updated = await update(session, db.User, user_id, user_fields(data))
+            updated = await update(
+                session, db.User, user_id, user_fields(data, request)
+            )
         except IntegrityError:
             raise HTTPException(status_code=409, detail=DUPLICATE_EMAIL)
         if not updated:
@@ -1069,10 +1112,20 @@ async def projects_rag_collections(project_id: UUID, request: Request):
         return await rag_service.list_collections()
 
 
-@app.get("/projects/{project_id}/rag/train-pca")
-async def projects_train_pca(project_id: UUID, collection_name: str, request: Request):
-    """Trigger PCA training for a specific project and collection."""
+@app.post("/projects/{project_id}/rag/train-pca")
+async def projects_train_pca(
+    project_id: UUID, request: Request, data: dict = Body(...)
+):
+    """Train the PCA projection of a collection, streaming progress as SSE.
+
+    The body is ``{"collection_name": ...}``. A POST, because training is
+    expensive and writes to the backoffice database, and a GET would be
+    started by any image pointing at it.
+    """
     assert_logged_in(request)
+    collection_name = data.get("collection_name")
+    if not isinstance(collection_name, str) or not collection_name:
+        raise HTTPException(status_code=400, detail="A collection name is required.")
     project = await get_project_and_assert_access(request, project_id)
 
     streamer = Streamer(stream_delta=True)

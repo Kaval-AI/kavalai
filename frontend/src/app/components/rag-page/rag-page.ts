@@ -222,14 +222,16 @@ export class RagPage {
     this.trainingPca.set(true);
     this.pcaMessages.set([]);
     this.showPca.set(true);
+    const lost = () =>
+      this.ngZone.run(() => {
+        if (!this.trainingPca()) return;
+        this.log('Error: the connection to the server was lost.');
+        this.trainingPca.set(false);
+      });
     this.pcaSubscription = this.ragService.trainPca(projectId, collectionName).subscribe({
       next: (data) => this.ngZone.run(() => this.onPcaMessage(data)),
-      error: () =>
-        this.ngZone.run(() => {
-          if (!this.trainingPca()) return;
-          this.log('Error: the connection to the server was lost.');
-          this.trainingPca.set(false);
-        }),
+      error: lost,
+      complete: lost,
     });
   }
 

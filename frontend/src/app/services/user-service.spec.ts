@@ -56,7 +56,7 @@ describe('UserService', () => {
   it('should handle logout', () => {
     service.logout();
     const req = httpMock.expectOne('/api/logout');
-    expect(req.request.method).toBe('GET');
+    expect(req.request.method).toBe('POST');
     req.flush({});
 
     expect(service.getIsLoggedIn()).toBeFalse();

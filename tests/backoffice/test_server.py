@@ -114,10 +114,14 @@ async def test_password_login_opens_a_session(client, backoffice_db):
     assert details.status_code == 200
     assert details.json()["email"] == "pw@example.com"
 
-    assert (await client.get("/logout")).json() == {"logged_in": False}
+    # A GET, which any image or link would send, does not log out.
+    assert (await client.get("/logout")).status_code == 405
+    assert (await client.get("/user/get_details")).status_code == 200
+
+    assert (await client.post("/logout")).json() == {"logged_in": False}
     assert (await client.get("/user/get_details")).status_code == 401
     # Logging out twice is not an error.
-    assert (await client.get("/logout")).status_code == 200
+    assert (await client.post("/logout")).status_code == 200
 
 
 @pytest.mark.asyncio
@@ -1121,6 +1125,92 @@ async def test_a_profile_edit_changes_only_name_and_picture(
     backoffice_db.expire_all()
     row = await backoffice_db.get(db.User, user_id)
     assert (row.name, row.email, row.is_admin) == ("Ada", email, False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "picture, headers, detail",
+    [
+        ("/api/logout", {}, "absolute https:// URL"),
+        ("http://cdn.example.org/a.png", {}, "absolute https:// URL"),
+        ("https://test/api/logout", {}, "backoffice's own host"),
+        ("https://test:8443/a.png", {}, "backoffice's own host"),
+        (
+            "https://bo.example.com/api/logout",
+            {"Origin": "https://bo.example.com"},
+            "backoffice's own host",
+        ),
+        pytest.param(
+            "https://cdn.example.org/" + "a" * 2048, {}, "at most 2048", id="too-long"
+        ),
+    ],
+)
+async def test_a_profile_picture_must_be_https_on_another_host(
+    client, backoffice_db, picture, headers, detail
+):
+    """Members load each other's pictures with their session cookie, so a
+    picture on the backoffice's host would call the API from their browsers."""
+    user = await _password_user(client, backoffice_db)
+    user_id = user.id
+
+    response = await client.patch(
+        "/user/me", json={"picture": picture}, headers=headers
+    )
+
+    assert response.status_code == 400
+    assert detail in response.json()["detail"]
+    backoffice_db.expire_all()
+    assert (await backoffice_db.get(db.User, user_id)).picture is None
+
+
+@pytest.mark.asyncio
+async def test_the_frontend_url_counts_as_the_backoffice_host(
+    client, backoffice_db, monkeypatch
+):
+    from kavalai.backoffice import server
+
+    monkeypatch.setattr(
+        server, "GOOGLE_OAUTH", {"frontend_url": "https://bo.example.com/"}
+    )
+    await _password_user(client, backoffice_db)
+
+    response = await client.patch(
+        "/user/me", json={"picture": "https://bo.example.com/api/logout"}
+    )
+
+    assert response.status_code == 400
+    assert "backoffice's own host" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_an_administrator_cannot_set_a_same_host_picture_either(
+    client, backoffice_db
+):
+    target = db.User(id=uuid.uuid4(), email="pic@test.com", name="Pic")
+    backoffice_db.add(target)
+    await backoffice_db.commit()
+
+    admin, session = _signed_in(target, is_admin=True)
+    with admin, session, patch("kavalai.backoffice.server.assert_is_admin"):
+        created = await client.post(
+            "/users/create",
+            json={"email": "new-pic@test.com", "name": "N", "picture": "/api/logout"},
+        )
+        updated = await client.put(
+            f"/users/update/{target.id}", json={"picture": "https://test/a.png"}
+        )
+        cleared = await client.put(f"/users/update/{target.id}", json={"picture": ""})
+        kept = await client.put(
+            f"/users/update/{target.id}",
+            json={"picture": "https://cdn.example.org/a.png"},
+        )
+
+    assert created.status_code == 400
+    assert "absolute https:// URL" in created.json()["detail"]
+    assert updated.status_code == 400
+    assert "backoffice's own host" in updated.json()["detail"]
+    assert cleared.json()["picture"] is None
+    assert kept.json()["picture"] == "https://cdn.example.org/a.png"
 
 
 @pytest.mark.asyncio

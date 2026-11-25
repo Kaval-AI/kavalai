@@ -6,12 +6,15 @@ from sqlalchemy import select
 
 from kavalai.backoffice import db, users
 from kavalai.backoffice.users import (
+    MAX_PICTURE_URL_LENGTH,
     add_user,
     hash_password,
     main,
+    normalise_host,
     read_password,
     set_password,
     validate_password,
+    validate_picture_url,
     verify_password,
 )
 
@@ -63,6 +66,94 @@ def test_a_short_password_is_refused():
     with pytest.raises(ValueError, match="at least 8 characters"):
         validate_password("short")
     validate_password("longenough")
+
+
+OWN_HOSTS = ["backoffice.example.com", "127.0.0.1", "::1"]
+
+
+@pytest.mark.parametrize(
+    "value, stored",
+    [
+        (None, None),
+        ("", None),
+        ("   ", None),
+        (" https://cdn.example.org/a.png ", "https://cdn.example.org/a.png"),
+        ("HTTPS://CDN.example.org/a.png", "HTTPS://CDN.example.org/a.png"),
+        (
+            "https://lh3.googleusercontent.com/a/x=s96-c",
+            "https://lh3.googleusercontent.com/a/x=s96-c",
+        ),
+        ("https://203.0.113.7:8443/a.png", "https://203.0.113.7:8443/a.png"),
+        ("https://[2001:db8::1]/a.png", "https://[2001:db8::1]/a.png"),
+        ("https://other.example.com./a.png", "https://other.example.com./a.png"),
+    ],
+)
+def test_a_picture_url_is_stored_trimmed_and_an_empty_one_clears(value, stored):
+    assert validate_picture_url(value, OWN_HOSTS) == stored
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "/api/logout",
+        "api/logout",
+        "//evil.example.com/a.png",
+        "http://cdn.example.org/a.png",
+        "javascript:alert(1)",
+        "data:image/png;base64,AAAA",
+        "https://",
+        "https:///a.png",
+        "https:\\\\backoffice.example.com\\api\\logout",
+        "https://evil.example.com\\@backoffice.example.com/",
+        "https://backoffice.example.com\\@evil.example.com/",
+        "https://user@evil.example.com/a.png",
+        "https://back office.example.com/",
+        "https://backoffice.example.com/a\tb",
+        "https://%62ackoffice.example.com/",
+        "https://ｂackoffice.example.com/",
+        "https://2130706433/",
+        "https://0x7f.0.0.1/",
+        "https://127.000.000.001/",
+        "https://[::1%25lo]/",
+        "https://[not:an:address]/",
+        "https://evil.example.com:99999/",
+        "https://under_score.example.com/",
+        "https://./",
+    ],
+)
+def test_a_picture_url_a_browser_could_read_otherwise_is_refused(url):
+    with pytest.raises(ValueError, match="absolute https:// URL"):
+        validate_picture_url(url, OWN_HOSTS)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://backoffice.example.com/api/logout",
+        "https://BACKOFFICE.example.com/a.png",
+        "https://backoffice.example.com.:8443/a.png",
+        "https://127.0.0.1/a.png",
+        "https://[0:0::1]/a.png",
+    ],
+)
+def test_a_picture_on_the_backoffice_host_is_refused_whatever_the_port(url):
+    """A cookie is not scoped to a port, so any port of the host is refused."""
+    with pytest.raises(ValueError, match="backoffice's own host"):
+        validate_picture_url(url, OWN_HOSTS)
+
+
+def test_a_picture_url_longer_than_the_cookie_can_carry_is_refused():
+    url = "https://cdn.example.org/" + "a" * MAX_PICTURE_URL_LENGTH
+    with pytest.raises(ValueError, match=f"at most {MAX_PICTURE_URL_LENGTH}"):
+        validate_picture_url(url, OWN_HOSTS)
+    fits = url[:MAX_PICTURE_URL_LENGTH]
+    assert validate_picture_url(fits, OWN_HOSTS) == fits
+
+
+def test_hosts_are_compared_as_a_browser_compares_them():
+    assert normalise_host("Example.COM.") == "example.com"
+    assert normalise_host("0:0::1") == "::1"
+    assert normalise_host("127.0.0.1") == "127.0.0.1"
 
 
 @pytest.mark.asyncio

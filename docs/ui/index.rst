@@ -545,6 +545,11 @@ is refused) and ``POST /user/me/password`` (``current_password``,
 ``new_password``). A wrong or missing current password is refused with one
 message, whichever it was.
 
+A picture URL, here and on the **Users** page, must be an absolute
+``https://`` URL on another host than the backoffice. Every member who sees
+the user loads the picture, and a request to the backoffice's own host would
+carry their session cookie — a picture there would act in each viewer's name.
+
 Membership is granted per project, in one of two roles. A **viewer** may read
 everything the project exposes; an **owner** may in addition edit the project,
 manage its members and delete it. The last owner of a project can be neither

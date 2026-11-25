@@ -16,7 +16,8 @@ limitations under the License.
 
 import { TestBed } from '@angular/core/testing';
 import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
-import { RagService } from './rag-service';
+import { HttpErrorResponse, HttpEventType } from '@angular/common/http';
+import { RagService, splitSseEvents } from './rag-service';
 import { RagCollection, RagResult, RagStats, RagQueryResponse } from '../models/rag';
 
 describe('RagService', () => {
@@ -34,6 +35,63 @@ describe('RagService', () => {
 
   afterEach(() => {
     httpMock.verify();
+  });
+
+  describe('trainPca', () => {
+    const url = '/api/projects/p1/rag/train-pca';
+
+    it('posts the collection and emits each event as it arrives', () => {
+      const received: string[] = [];
+      let completed = false;
+      service.trainPca('p1', 'songs').subscribe({
+        next: (data) => received.push(data),
+        complete: () => (completed = true),
+      });
+
+      const req = httpMock.expectOne(url);
+      expect(req.request.method).toBe('POST');
+      expect(req.request.body).toEqual({ collection_name: 'songs' });
+      expect(req.request.responseType).toBe('text');
+      expect(req.request.reportProgress).toBeTrue();
+
+      const first = 'data: {"value":"one"}\r\n\r\n: ping\r\n\r\ndata: {"val';
+      req.event({ type: HttpEventType.DownloadProgress, loaded: 1, partialText: first });
+      expect(received).toEqual(['{"value":"one"}']);
+
+      const all = `${first}ue":"two"}\r\n\r\ndata:three\r\ndata: lines`;
+      req.event({ type: HttpEventType.DownloadProgress, loaded: 2, partialText: all });
+      expect(received).toEqual(['{"value":"one"}', '{"value":"two"}']);
+      expect(completed).toBeFalse();
+
+      req.flush(all);
+      expect(received).toEqual(['{"value":"one"}', '{"value":"two"}', 'three\nlines']);
+      expect(completed).toBeTrue();
+    });
+
+    it('reports a refused request as an error', () => {
+      let failed: unknown;
+      service.trainPca('p1', 'songs').subscribe({ error: (err) => (failed = err) });
+
+      httpMock
+        .expectOne(url)
+        .flush({ detail: 'Forbidden' }, { status: 403, statusText: 'Forbidden' });
+      expect((failed as HttpErrorResponse).status).toBe(403);
+    });
+
+    it('aborts the request when unsubscribed', () => {
+      const subscription = service.trainPca('p1', 'songs').subscribe();
+      const req = httpMock.expectOne(url);
+      subscription.unsubscribe();
+      expect(req.cancelled).toBeTrue();
+    });
+  });
+
+  it('splits a server-sent event stream into complete events and the rest', () => {
+    expect(splitSseEvents('data: a\n\nevent: x\n\n: ping\n\ndata: b')).toEqual({
+      events: ['a'],
+      rest: 'data: b',
+    });
+    expect(splitSseEvents('')).toEqual({ events: [], rest: '' });
   });
 
   it('should be created', () => {

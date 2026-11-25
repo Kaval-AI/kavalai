@@ -58,7 +58,7 @@ export class UserService {
   }
 
   logout(): void {
-    this.http.get('/api/logout').subscribe({
+    this.http.post('/api/logout', {}).subscribe({
       next: () => {
         this.loggedIn = false;
         this.userDetails$.next(null);

@@ -31,6 +31,11 @@ The module is also the script that creates accounts::
 The password is prompted for, or read from standard input with
 ``--password-stdin``; it is never a command-line argument, which would leave
 it in the shell history and the process list.
+
+A user's picture is a URL that every member who sees the user loads, so
+:func:`validate_picture_url` decides which URLs may be stored.
+``MAX_PICTURE_URL_LENGTH`` keeps the session cookie, which carries the
+picture, well under the 4 KB a browser stores for one cookie.
 """
 
 import argparse
@@ -39,8 +44,12 @@ import base64
 import getpass
 import hashlib
 import hmac
+import ipaddress
 import secrets
+import string
 import sys
+from collections.abc import Iterable
+from urllib.parse import urlsplit
 
 from sqlalchemy import select
 
@@ -52,6 +61,10 @@ SCRYPT_P = 5
 SALT_BYTES = 16
 HASH_BYTES = 32
 MIN_PASSWORD_LENGTH = 8
+MAX_PICTURE_URL_LENGTH = 2048
+PICTURE_URL_REQUIRED = "The picture must be an absolute https:// URL."
+PICTURE_ON_OWN_HOST = "The picture cannot be on the backoffice's own host."
+_HOST_CHARACTERS = frozenset(string.ascii_lowercase + string.digits + ".-")
 
 
 def validate_password(password: str) -> None:
@@ -60,6 +73,82 @@ def validate_password(password: str) -> None:
         raise ValueError(
             f"The password must be at least {MIN_PASSWORD_LENGTH} characters long."
         )
+
+
+def normalise_host(host: str) -> str:
+    """A host name as a browser compares it: lower case, without a trailing
+    dot, and an IP address in its canonical form."""
+    host = host.lower().rstrip(".")
+    try:
+        return str(ipaddress.ip_address(host))
+    except ValueError:
+        return host
+
+
+def _is_plain_host(host: str) -> bool:
+    """Whether a browser reads the host exactly as ``urlsplit`` does.
+
+    A browser decodes ``%74`` in a host, maps full-width letters and reads
+    ``2130706433`` or ``0x7f.1`` as an IPv4 address, so a host written so
+    would compare as foreign here and load as the backoffice there. Only
+    letters, digits, dots and hyphens are accepted, a host whose last label
+    is numeric must be a dotted quad, and an IPv6 literal must parse.
+    """
+    if ":" in host:
+        try:
+            ipaddress.IPv6Address(host)
+        except ValueError:
+            return False
+        return "%" not in host
+    name = host.rstrip(".")
+    if not name or not set(name) <= _HOST_CHARACTERS:
+        return False
+    last = name.rsplit(".", 1)[-1]
+    if last.isdigit() or last.startswith("0x"):
+        try:
+            ipaddress.IPv4Address(name)
+        except ValueError:
+            return False
+    return True
+
+
+def validate_picture_url(value: str | None, own_hosts: Iterable[str]) -> str | None:
+    """The picture URL to store — ``None`` for an empty one — or ``ValueError``.
+
+    The picture is loaded by every member who sees its owner, and a request
+    to the backoffice's own host carries the viewer's session cookie: a
+    relative or same-host URL would let its owner call the backoffice API
+    (log viewers out, start a job) from each viewer's browser. So the URL must
+    be absolute ``https://`` on a host other than ``own_hosts``. Host names
+    are compared rather than origins because a cookie is not scoped to a
+    port. A URL a browser would read differently from ``urlsplit`` —
+    whitespace, a backslash, user information, an encoded host — is refused
+    rather than interpreted.
+    """
+    if value is None:
+        return None
+    url = value.strip()
+    if not url:
+        return None
+    if len(url) > MAX_PICTURE_URL_LENGTH:
+        raise ValueError(
+            f"The picture URL may be at most {MAX_PICTURE_URL_LENGTH} characters long."
+        )
+    if not url.isascii() or not url.isprintable() or " " in url or "\\" in url:
+        raise ValueError(PICTURE_URL_REQUIRED)
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname
+        parts.port  # noqa: B018 — reading it raises for a malformed port
+    except ValueError:
+        raise ValueError(PICTURE_URL_REQUIRED) from None
+    if parts.scheme.lower() != "https" or not host or "@" in parts.netloc:
+        raise ValueError(PICTURE_URL_REQUIRED)
+    if not _is_plain_host(host):
+        raise ValueError(PICTURE_URL_REQUIRED)
+    if normalise_host(host) in {normalise_host(own) for own in own_hosts}:
+        raise ValueError(PICTURE_ON_OWN_HOST)
+    return url
 
 
 def _scrypt(password: str, salt: bytes, n: int, r: int, p: int, length: int) -> bytes:

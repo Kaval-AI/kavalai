@@ -323,6 +323,15 @@ describe('RagPage', () => {
       expect(query('pca-close')!.textContent).toContain('Close');
     });
 
+    it('says when the stream ends before training completes', async () => {
+      await train();
+      events.next(JSON.stringify({ value: 'Sampling 1000 entries' }));
+      events.complete();
+      await settle(fixture);
+      expect(query('pca-log')!.textContent).toContain('the connection to the server was lost');
+      expect(query<HTMLButtonElement>('rag-train-pca')!.disabled).toBeFalse();
+    });
+
     it('ignores a connection error after training has finished', async () => {
       await train();
       events.next(JSON.stringify({ type: 'error' }));

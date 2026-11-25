@@ -135,6 +135,17 @@ Fixed
 * Adding a user, or changing a user's address, to an address another user
   already has answered ``503 Backoffice database is not connected``. It now
   answers ``409 A user with this email address already exists.``
+* **A picture URL could call the backoffice from its viewers' browsers.**
+  Every member who sees a user loads that user's picture, with their session
+  cookie when it points at the backoffice, so a picture of ``/api/logout``
+  logged each viewer out and one of ``/api/projects/{id}/rag/train-pca``
+  started a PCA training per page view. A picture is now refused unless it is
+  an absolute ``https://`` URL on another host than the backoffice (any port
+  of it), at most 2048 characters long — the session cookie carries it — and
+  written as a browser reads it (no whitespace, backslash, user information or
+  encoded host). ``/logout`` and ``train-pca`` are POSTs, so no image can
+  trigger them; ``train-pca`` takes ``{"collection_name": …}`` as its body,
+  and the RAG explorer reads its progress stream over the POST.
 
 Upgrading
 ^^^^^^^^^
@@ -154,6 +165,11 @@ Upgrading
 * A script that read ``db_password`` from ``GET /projects/all`` or ``GET
   /projects/get/{id}`` asks ``POST /projects/{id}/reveal-password`` as an
   administrator instead.
+* A client that logged out with ``GET /logout`` or trained a PCA with ``GET
+  …/rag/train-pca?collection_name=…`` sends a POST instead; the GETs answer
+  ``405``. Stored pictures are not re-checked: one that is not an ``https://``
+  URL on another host is found with ``SELECT email, picture FROM users WHERE
+  picture NOT LIKE 'https://%'`` plus a look at the hosts, and cleared.
 * Delete any type-checker override for ``kavalai`` (``ignore_missing_imports``
   or ``follow_untyped_imports``). Calls into the package are then checked, so
   a project may see errors that the override had hidden.
