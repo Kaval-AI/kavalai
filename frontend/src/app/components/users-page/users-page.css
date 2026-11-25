@@ -14,5 +14,34 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-/* Users page is now mostly styled with Tailwind and DaisyUI.
-   Custom styles are kept to a minimum. */
+/* The avatar, the name and the "(you)" marker on one line. */
+.user-name {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  white-space: nowrap;
+}
+
+.badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+/* The administrator switch: the box beside its sentence, not above it. */
+.switch {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-4);
+  font-family: var(--font-family-body);
+  font-size: var(--text-base);
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--color-base-content);
+  cursor: pointer;
+}
+
+.switch input {
+  flex: none;
+}

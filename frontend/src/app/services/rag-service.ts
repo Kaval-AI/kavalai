@@ -15,7 +15,7 @@ limitations under the License.
 */
 
 import { Injectable } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpDownloadProgressEvent, HttpEventType } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { RagCollection, RagStats, RagQueryResponse } from '../models/rag';
 
@@ -49,22 +49,59 @@ export class RagService {
     return this.http.get<RagCollection[]>(`/api/projects/${projectId}/rag/collections`);
   }
 
+  /**
+   * Trains the PCA projection of a collection and emits the `data` of each
+   * server-sent event as it arrives; completes when the response ends.
+   *
+   * A POST read as a stream rather than an `EventSource`, which can only
+   * GET: training writes to the database, and a GET would be started by any
+   * image pointing at it. Unsubscribing aborts the request.
+   */
   trainPca(projectId: string, collectionName: string): Observable<string> {
     return new Observable<string>(observer => {
-      const eventSource = new EventSource(`/api/projects/${projectId}/rag/train-pca?collection_name=${encodeURIComponent(collectionName)}`);
-
-      eventSource.onmessage = (event) => {
-        observer.next(event.data);
+      let consumed = 0;
+      const read = (text: string) => {
+        const normalised = text.replace(/\r\n?/g, '\n');
+        const { events, rest } = splitSseEvents(normalised.slice(consumed));
+        consumed = normalised.length - rest.length;
+        events.forEach(data => observer.next(data));
       };
-
-      eventSource.onerror = (error) => {
-        observer.error(error);
-        eventSource.close();
-      };
-
-      return () => {
-        eventSource.close();
-      };
+      const subscription = this.http
+        .post(
+          `/api/projects/${projectId}/rag/train-pca`,
+          { collection_name: collectionName },
+          { observe: 'events', reportProgress: true, responseType: 'text' },
+        )
+        .subscribe({
+          next: event => {
+            if (event.type === HttpEventType.DownloadProgress) {
+              read((event as HttpDownloadProgressEvent).partialText ?? '');
+            } else if (event.type === HttpEventType.Response) {
+              read(`${event.body ?? ''}\n\n`);
+              observer.complete();
+            }
+          },
+          error: err => observer.error(err),
+        });
+      return () => subscription.unsubscribe();
     });
   }
+}
+
+/**
+ * The `data` of each complete event in a server-sent event stream whose line
+ * ends are `\n`, and the unfinished remainder. Comments (`: ping`) and
+ * events without data yield nothing.
+ */
+export function splitSseEvents(text: string): { events: string[]; rest: string } {
+  const frames = text.split('\n\n');
+  const rest = frames.pop() ?? '';
+  const events = frames.flatMap(frame => {
+    const data = frame
+      .split('\n')
+      .filter(line => line.startsWith('data:'))
+      .map(line => line.slice(5).replace(/^ /, ''));
+    return data.length ? [data.join('\n')] : [];
+  });
+  return { events, rest };
 }

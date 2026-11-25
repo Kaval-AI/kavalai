@@ -196,6 +196,118 @@ class TestAgentService:
         stats = await service.get_model_call_stats(limit=5, offset=5)
         assert len(stats) == 5
 
+    async def test_model_calls_are_searched_bounded_and_summarised(self, session_maker):
+        """Search reads the model name and the payloads as text, the window
+        bounds the recording time, and the summary adds up every matching
+        call rather than one page. A fresh agent id keeps other tests' rows
+        out of the sums on the shared Postgres leg."""
+        service = AgentService(session_maker)
+        agent = uuid4()
+        day1 = datetime(2026, 11, 23, 10, 0, tzinfo=timezone.utc)
+        day2 = datetime(2026, 11, 24, 9, 0, tzinfo=timezone.utc)
+        rows = [
+            ModelCallStat(
+                call_type="llm",
+                model="gpt-a",
+                agent_id=agent,
+                response_code=200,
+                prompt_tokens=100,
+                completion_tokens=10,
+                total_tokens=110,
+                cached_prompt_tokens=20,
+                reasoning_tokens=3,
+                duration_seconds=1.0,
+                request_data={"messages": [{"content": "How many claims?"}]},
+                response_data={"text": "307 claims"},
+                created_at=day1,
+            ),
+            ModelCallStat(
+                call_type="llm",
+                model="gpt-a",
+                agent_id=agent,
+                response_code=500,
+                prompt_tokens=50,
+                completion_tokens=5,
+                total_tokens=55,
+                duration_seconds=3.0,
+                request_data={"messages": [{"content": "Hello 50%"}]},
+                created_at=day2,
+            ),
+            ModelCallStat(
+                call_type="embedding",
+                model="emb",
+                agent_id=agent,
+                response_code=None,
+                prompt_tokens=7,
+                total_tokens=7,
+                duration_seconds=0.5,
+                request_data={"input": "claims"},
+                created_at=day2,
+            ),
+        ]
+        async with session_maker() as session:
+            for row in rows:
+                session.add(row)
+            await session.commit()
+
+        async def listed(**filters):
+            calls = await service.get_model_call_stats(
+                agent_id=agent, limit=100, **filters
+            )
+            return sorted((c.model, c.response_code or 0) for c in calls)
+
+        assert await listed(search="CLAIMS") == [("emb", 0), ("gpt-a", 200)]
+        assert await listed(search="gpt-a") == [("gpt-a", 200), ("gpt-a", 500)]
+        assert await listed(search="50%") == [("gpt-a", 500)]
+        # A wildcard in the text is a character, not a pattern.
+        assert await listed(search="_") == []
+        assert await listed(start=day2) == [("emb", 0), ("gpt-a", 500)]
+        assert await listed(end=day1) == [("gpt-a", 200)]
+
+        summary = await service.summarise_model_calls(agent_id=agent)
+        assert summary.totals.model_dump() == {
+            "calls": 3,
+            "errors": 1,
+            "prompt_tokens": 157,
+            "completion_tokens": 15,
+            "cached_prompt_tokens": 20,
+            "reasoning_tokens": 3,
+            "total_tokens": 172,
+            "average_seconds": pytest.approx(1.5),
+        }
+        assert [
+            (m.model, m.call_type, m.calls, m.total_tokens) for m in summary.by_model
+        ] == [
+            ("gpt-a", "llm", 2, 165),
+            ("emb", "embedding", 1, 7),
+        ]
+        assert [d.model_dump() for d in summary.by_day] == [
+            {
+                "date": "2026-11-23",
+                "calls": 1,
+                "prompt_tokens": 100,
+                "completion_tokens": 10,
+                "embedding_tokens": 0,
+            },
+            {
+                "date": "2026-11-24",
+                "calls": 2,
+                "prompt_tokens": 50,
+                "completion_tokens": 5,
+                "embedding_tokens": 7,
+            },
+        ]
+
+        embedding = await service.summarise_model_calls("embedding", agent_id=agent)
+        assert (embedding.totals.calls, embedding.totals.errors) == (1, 0)
+
+        nothing = await service.summarise_model_calls(
+            agent_id=agent, search="no such text"
+        )
+        assert nothing.totals.calls == 0
+        assert nothing.totals.average_seconds is None
+        assert (nothing.by_model, nothing.by_day) == ([], [])
+
     async def test_get_history_value(self, session_maker):
         service = AgentService(session_maker)
         agent = await service.get_or_create_agent(name="HistoryTest")

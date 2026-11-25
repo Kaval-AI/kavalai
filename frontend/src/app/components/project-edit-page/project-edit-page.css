@@ -1,174 +1,159 @@
-div.centered {
+/* Fields space themselves (ui-field's bottom margin); a row only needs the gap between columns. */
+.field-row {
   display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: stretch;
-  text-align: left;
-  gap: 10px;
-  padding: 2rem;
-  max-width: 800px;
-  margin: 0 auto;
+  flex-wrap: wrap;
+  column-gap: var(--space-4);
 }
 
-.form-container {
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-  width: 100%;
+.grow {
+  flex: 1 1 220px;
+  min-width: 0;
 }
 
-.form-row {
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
+.port {
+  flex: 0 1 120px;
 }
 
-fieldset {
-  border: 1px solid #ddd;
-  padding: 1.5rem;
-  border-radius: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
+/* The password hint belongs to the row above it, not to a field of its own. */
+.field-note {
+  margin: -8px 0 18px;
 }
 
-legend {
-  padding: 0 0.5rem;
-  font-weight: bold;
+.inline-hint {
+  margin: 0;
 }
 
-.form-field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  align-items: stretch;
-  width: 100%;
-}
-
-.form-field label {
-  font-weight: bold;
-  font-size: 0.9rem;
-  color: #333;
-}
-
-.form-field input,
-.form-field textarea {
-  width: 100%;
-  padding: 0.75rem;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  font-family: inherit;
-  font-size: inherit;
-}
-
-.test-connection-row {
-  display: flex;
+/* The read-only switch: a checkbox drawn as a track with a knob. */
+.switch {
+  display: inline-flex;
   align-items: center;
-  gap: 1rem;
-  margin-top: 1rem;
-}
-
-.status-msg {
-  font-size: 0.9rem;
-  font-weight: 500;
-}
-
-.status-msg.success {
-  color: #28a745;
-}
-
-.status-msg.error {
-  color: #dc3545;
-}
-
-.button-row {
-  display: flex;
-  gap: 1rem;
-  justify-content: flex-start;
-}
-
-.button-row button {
-  padding: 0.75rem 1.5rem;
+  gap: var(--space-3);
+  margin: 0;
   cursor: pointer;
 }
 
-.role-dropdown-container {
-  position: relative;
-  display: inline-block;
-}
-
-.role-button {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.4rem 0.8rem;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  background: white;
-  cursor: pointer;
-  font-size: 0.9rem;
-  min-width: 100px;
-  justify-content: space-between;
-}
-
-.role-button:hover {
-  background: #f8f9fa;
-}
-
-.role-button .arrow {
-  font-size: 0.7rem;
-  color: #666;
-}
-
-.role-dropdown-menu {
+.switch input {
   position: absolute;
-  top: 100%;
-  left: 0;
-  z-index: 1000;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+
+.switch-track {
+  position: relative;
+  flex: none;
+  width: 40px;
+  height: 22px;
+  border-radius: 11px;
+  background-color: var(--color-base-300);
+  transition: background-color var(--motion-fast);
+}
+
+.switch-track::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background-color: var(--color-surface);
+  box-shadow: var(--elevation-2);
+  transition: transform var(--motion-fast);
+}
+
+.switch input:checked + .switch-track {
+  background-color: var(--color-lime-700);
+}
+
+.switch input:checked + .switch-track::after {
+  transform: translateX(18px);
+}
+
+.switch input:focus-visible + .switch-track {
+  box-shadow: var(--focus-ring);
+}
+
+.switch input:disabled + .switch-track {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.switch-label {
+  font-family: var(--font-family-body);
+  font-size: var(--text-base);
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--color-base-content);
+}
+
+.create-bar {
   display: flex;
   flex-direction: column;
-  background: white;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-  margin-top: 2px;
-  min-width: 100px;
+  gap: var(--space-4);
+  margin-top: var(--space-5);
 }
 
-.role-dropdown-menu button {
-  padding: 0.5rem 1rem;
-  border: none;
-  background: none;
-  text-align: left;
-  cursor: pointer;
-  font-size: 0.9rem;
+.create-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
 }
 
-.role-dropdown-menu button:hover {
-  background: #f0f0f0;
-}
-
-.btn-danger {
-  background-color: #dc3545;
-  color: white;
-  border: none;
-  padding: 0.4rem 0.8rem;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.btn-danger:hover {
-  background-color: #c82333;
-}
-
-.form-field label.checkbox-label {
+/* A member: the avatar beside the name, the address under it. */
+.person {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  font-weight: normal;
+  gap: 10px;
 }
 
-.form-field label.checkbox-label input {
+.person-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.person-name {
+  font-weight: 600;
+}
+
+.person-email {
+  font-size: var(--text-sm);
+  color: var(--color-slate-500);
+  word-break: break-all;
+}
+
+.role-select {
   width: auto;
-  padding: 0;
+  min-height: 32px;
+  padding: 4px 8px;
+}
+
+.actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.confirm {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.add-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+}
+
+.add-form ui-field {
+  margin-bottom: 0;
+}
+
+.access-hint {
+  margin-top: var(--space-3);
 }

@@ -1,0 +1,15 @@
+:host {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--space-2);
+}
+
+/* Tiles inside a card: narrower columns, so a row of three fits beside each
+   other rather than wrapping, on a quieter ground. The tile's own look is
+   stat.css; custom properties are what crosses the encapsulation boundary,
+   because a selector reaching into ui-stat would be scoped away. */
+:host([inset]) {
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+  --ui-stat-ground: var(--color-base-100);
+  --ui-stat-value-size: 1.15rem;
+}

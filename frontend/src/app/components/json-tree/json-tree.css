@@ -1,129 +1,93 @@
 :host {
   display: block;
+  min-width: 0;
   font-family: var(--font-family-accent);
-  font-size: 13px;
+  font-size: 0.8rem;
+  line-height: 1.55;
   color: var(--color-base-content);
 }
 
-.json-node {
-  /* user-select: none; removed to allow copying content */
+.json-nested {
+  padding-left: var(--space-4);
+}
+
+.json-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-bottom: var(--space-1);
 }
 
 .json-line {
   display: flex;
-  align-items: flex-start;
-  padding: 2px 4px;
-  cursor: default;
-  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-sm);
+}
+
+.json-line.expandable {
+  cursor: pointer;
 }
 
 .json-line.expandable:hover {
-  background-color: var(--color-base-200);
-  cursor: pointer;
+  background-color: var(--color-lime-50);
 }
 
-.toggle-icon {
-  display: inline-block;
-  width: 16px;
+.json-line:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.json-toggle {
+  flex-shrink: 0;
+  width: 12px;
+  font-size: 0.65rem;
+  color: var(--color-lime-700);
   text-align: center;
-  font-size: 10px;
-  margin-right: 4px;
-  margin-top: 4px;
-  color: var(--color-info);
-  flex-shrink: 0;
 }
 
-.spacer {
-  display: inline-block;
-  width: 20px;
+.json-spacer {
   flex-shrink: 0;
+  width: 12px;
 }
 
 .json-key {
-  color: var(--color-secondary);
-  margin-right: 4px;
   flex-shrink: 0;
+  color: var(--color-slate-700);
+  font-weight: 700;
 }
 
 .json-value {
-  color: var(--color-success);
-  word-break: break-word;
+  min-width: 0;
   white-space: pre-wrap;
-}
-
-.tree-controls {
-  margin-left: auto;
-  display: flex;
-  gap: 8px;
-  padding: 0 8px;
-  flex-shrink: 0;
-}
-
-.control-btn {
-  background: var(--color-base-200);
-  border: none;
-  color: var(--color-base-content);
-  border-radius: 4px;
-  padding: 2px 6px;
-  font-size: 11px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  transition: all 0.2s;
-}
-
-.control-btn:focus {
-  outline: none;
-}
-
-.control-btn:hover {
-  background: var(--color-base-300);
-  color: var(--color-base-content);
-}
-
-.control-btn.btn-secondary {
-  background-color: var(--color-secondary);
-  border-color: var(--color-secondary);
-  color: var(--color-secondary-content);
-}
-
-.control-btn.btn-secondary:hover {
-  filter: brightness(0.9);
-}
-
-.control-btn i {
-  font-size: 10px;
-}
-
-.control-btn.success {
-  background-color: var(--color-success);
-  border-color: var(--color-success);
-  color: var(--color-success-content);
+  overflow-wrap: anywhere;
 }
 
 .json-value.type-string {
-  color: var(--color-success);
+  color: var(--color-lime-800);
 }
 
-.json-value.type-number {
-  color: var(--color-warning);
+.json-value.type-number,
+.json-value.type-bigint {
+  color: var(--color-verdigris);
 }
 
 .json-value.type-boolean {
-  color: var(--color-accent);
+  color: var(--color-amethyst);
 }
 
-.json-value.type-null {
-  color: var(--color-error);
+.json-value.type-null,
+.json-value.type-undefined {
+  color: var(--color-slate-400);
   font-style: italic;
 }
 
 .json-value.type-object {
-  color: var(--color-base-content);
+  color: var(--color-slate-500);
 }
 
 .json-children {
+  margin-left: 9px;
   border-left: 1px solid var(--color-base-300);
-  margin-left: 7px;
 }

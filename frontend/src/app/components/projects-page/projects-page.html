@@ -1,577 +1,152 @@
-@if (dbConnectionError && projects.length === 0) {
-  <div class="flex items-center justify-center min-h-[50vh]">
-    <div class="alert alert-error max-w-md">
-      <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-      <span>{{ dbConnectionError }}</span>
-    </div>
-  </div>
-} @else if (projects.length > 0) {
-<div class="p-6 max-w-6xl mx-auto space-y-6">
-  <!-- Project Selector Section -->
-  <div class="card bg-base-100 shadow-xl border border-base-200">
-    <div class="card-body">
-      <div class="flex flex-col sm:flex-row items-center justify-between gap-4">
-        <div class="flex items-center gap-4 w-full sm:flex-1">
-          <label class="font-bold text-lg whitespace-nowrap">Active Project:</label>
-          <select class="select select-bordered w-full max-w-md"
-                  (change)="onProjectSelect($event)"
-                  [value]="selectedProject?.id || ''">
-            <option value="" disabled>-- Choose a Project --</option>
-            @for (p of projects; track p.id) {
-              <option [value]="p.id" [selected]="p.id === (selectedProject?.id || '')">{{ p.name }}</option>
-            }
-          </select>
-        </div>
-        <button class="btn btn-primary w-full sm:w-auto" (click)="startNewProject()">
-          <i class="fas fa-plus"></i> New Project
-        </button>
-      </div>
-    </div>
-  </div>
-
-  @if (selectedProject) {
-    <!-- Project Header Dashboard -->
-    <div class="card bg-base-100 shadow-xl border border-base-200">
-      <div class="card-body">
-        <div class="flex flex-col md:flex-row justify-between items-start gap-4">
-          <div class="flex-1 w-full space-y-2">
-            @if (isEditing) {
-              <div class="form-control w-full">
-                <input type="text" [(ngModel)]="editableProject.name" class="input input-bordered input-lg w-full font-bold" placeholder="Project Name">
-              </div>
-              <div class="form-control w-full mt-2">
-                <textarea [(ngModel)]="editableProject.description" class="textarea textarea-bordered w-full h-24" placeholder="Project Description"></textarea>
-              </div>
-            } @else {
-              <div class="flex flex-wrap items-center gap-3">
-                <h1 class="text-3xl font-bold font-header">{{ selectedProject.name }}</h1>
-                <div class="badge" [ngClass]="{ 'badge-primary': selectedProject.role === 'owner' }">
-                  {{ selectedProject.role }}
-                </div>
-              </div>
-              <p class="text-base-content/70 text-lg whitespace-pre-wrap">
-                {{ selectedProject.description || 'No description provided.' }}
-              </p>
-            }
-          </div>
-
-          <div class="flex gap-2 w-full md:w-auto justify-end">
-            @if (isEditing) {
-              <button class="btn btn-sm btn-success" (click)="saveProject()" title="Save">
-                <i class="fas fa-save"></i>Save
-              </button>
-              <button class="btn btn-sm btn-ghost" (click)="cancelEdit()" title="Cancel">
-                <i class="fas fa-times"></i>Cancel
-              </button>
-            } @else {
-              <button class="btn btn-sm btn-primary" (click)="editProject()" title="Edit">
-                <i class="fas fa-edit"></i>Edit
-              </button>
-              @if (selectedProject.role === 'owner') {
-                <button class="btn btn-sm btn-outline btn-error" (click)="confirmDeleteProject()" title="Delete">
-                  <i class="fas fa-trash"></i>Delete
-                </button>
-              }
-            }
-          </div>
-        </div>
-
-        <div class="divider"></div>
-
-        <!-- Database Access Section -->
-        <div class="space-y-6">
-          <div class="space-y-4">
-            <h2 class="text-xl font-bold flex items-center gap-2">
-              <i class="fas fa-database text-primary"></i>
-              Database
-            </h2>
-
-            <div class="space-y-4">
-                <div class="flex items-center justify-between cursor-pointer group" (click)="accessDetailsCollapsed = !accessDetailsCollapsed">
-                  <h3 class="text-sm font-bold uppercase opacity-50 flex items-center gap-2">
-                    <i class="fas fa-info-circle"></i>
-                    Access details
-                  </h3>
-                  <i class="fas opacity-50 group-hover:opacity-100 transition-opacity" [ngClass]="accessDetailsCollapsed ? 'fa-chevron-down' : 'fa-chevron-up'"></i>
-                </div>
-
-                @if (!accessDetailsCollapsed) {
-                  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    <div class="form-control w-full">
-                      <label class="label pb-1"><span class="label-text opacity-70 font-bold text-xs uppercase">Database Type</span></label>
-                      @if (isEditing) {
-                        <select [(ngModel)]="editableProject.db_type" class="select select-bordered w-full">
-                          <option value="postgresql">PostgreSQL</option>
-                          <option value="sqlite">SQLite (local file)</option>
-                        </select>
-                      } @else {
-                        <div class="bg-base-200 p-3 rounded-box font-mono text-sm">{{ selectedProject.db_type || 'postgresql' }}</div>
-                      }
-                    </div>
-                    @if ((isEditing ? editableProject.db_type : selectedProject.db_type) === 'sqlite') {
-                      <div class="form-control w-full lg:col-span-2">
-                        <label class="label pb-1"><span class="label-text opacity-70 font-bold text-xs uppercase">Database File</span></label>
-                        @if (isEditing) {
-                          <input type="text" [(ngModel)]="editableProject.db_name" class="input input-bordered w-full" placeholder="/path/to/agents.db">
-                        } @else {
-                          <div class="bg-base-200 p-3 rounded-box font-mono text-sm truncate">{{ selectedProject.db_name || '-' }}</div>
-                        }
-                      </div>
-                    } @else {
-                    <div class="form-control w-full">
-                      <label class="label pb-1"><span class="label-text opacity-70 font-bold text-xs uppercase">Host</span></label>
-                      @if (isEditing) {
-                        <input type="text" [(ngModel)]="editableProject.db_host" class="input input-bordered w-full">
-                      } @else {
-                        <div class="bg-base-200 p-3 rounded-box font-mono text-sm truncate">{{ selectedProject.db_host || '-' }}</div>
-                      }
-                    </div>
-                    <div class="form-control w-full">
-                      <label class="label pb-1"><span class="label-text opacity-70 font-bold text-xs uppercase">Port</span></label>
-                      @if (isEditing) {
-                        <input type="number" [(ngModel)]="editableProject.db_port" class="input input-bordered w-full">
-                      } @else {
-                        <div class="bg-base-200 p-3 rounded-box font-mono text-sm">{{ selectedProject.db_port || '-' }}</div>
-                      }
-                    </div>
-                    <div class="form-control w-full">
-                      <label class="label pb-1"><span class="label-text opacity-70 font-bold text-xs uppercase">Database Name</span></label>
-                      @if (isEditing) {
-                        <input type="text" [(ngModel)]="editableProject.db_name" class="input input-bordered w-full">
-                      } @else {
-                        <div class="bg-base-200 p-3 rounded-box font-mono text-sm">{{ selectedProject.db_name || '-' }}</div>
-                      }
-                    </div>
-                    <div class="form-control w-full">
-                      <label class="label pb-1"><span class="label-text opacity-70 font-bold text-xs uppercase">User</span></label>
-                      @if (isEditing) {
-                        <input type="text" [(ngModel)]="editableProject.db_user" class="input input-bordered w-full">
-                      } @else {
-                        <div class="bg-base-200 p-3 rounded-box font-mono text-sm">{{ selectedProject.db_user || '-' }}</div>
-                      }
-                    </div>
-                    <div class="form-control w-full">
-                      <label class="label pb-1"><span class="label-text opacity-70 font-bold text-xs uppercase">Password</span></label>
-                      @if (isEditing) {
-                        <div class="relative">
-                          <input [type]="showPassword ? 'text' : 'password'" [(ngModel)]="editableProject.db_password" class="input input-bordered w-full pr-10">
-                          <button class="absolute inset-y-0 right-0 pr-3 flex items-center opacity-50 hover:opacity-100" (click)="showPassword = !showPassword" type="button">
-                            <i class="fas" [ngClass]="showPassword ? 'fa-eye-slash' : 'fa-eye'"></i>
-                          </button>
-                        </div>
-                      } @else {
-                        <div class="bg-base-200 p-3 rounded-box font-mono text-sm">••••••••</div>
-                      }
-                    </div>
-                    <div class="form-control w-full">
-                      <label class="label pb-1"><span class="label-text opacity-70 font-bold text-xs uppercase">Schema</span></label>
-                      @if (isEditing) {
-                        <input type="text" [(ngModel)]="editableProject.db_schema" class="input input-bordered w-full">
-                      } @else {
-                        <div class="bg-base-200 p-3 rounded-box font-mono text-sm">{{ selectedProject.db_schema || '-' }}</div>
-                      }
-                    </div>
-                    <div class="form-control w-full">
-                      <label class="label pb-1"><span class="label-text opacity-70 font-bold text-xs uppercase">RAG Schema</span></label>
-                      @if (isEditing) {
-                        <input type="text" [(ngModel)]="editableProject.rag_schema" class="input input-bordered w-full" placeholder="same as schema">
-                      } @else {
-                        <div class="bg-base-200 p-3 rounded-box font-mono text-sm">{{ selectedProject.rag_schema || selectedProject.db_schema || '-' }}</div>
-                      }
-                    </div>
-                    }
-                    <div class="form-control w-full">
-                      <label class="label pb-1"><span class="label-text opacity-70 font-bold text-xs uppercase">Access</span></label>
-                      @if (isEditing) {
-                        <label class="label cursor-pointer justify-start gap-3 bg-base-200 p-3 rounded-box">
-                          <input type="checkbox" class="toggle toggle-primary" [(ngModel)]="editableProject.read_only">
-                          <span class="label-text">Read-only</span>
-                        </label>
-                      } @else {
-                        <div class="bg-base-200 p-3 rounded-box font-mono text-sm">
-                          @if (selectedProject.read_only !== false) {
-                            <i class="fas fa-lock opacity-70"></i> read-only
-                          } @else {
-                            <i class="fas fa-pen opacity-70"></i> read-write
-                          }
-                        </div>
-                      }
-                    </div>
-                  </div>
-                }
-              </div>
-          </div>
-
-          @if (!isEditing) {
-            <div class="space-y-4">
-              <div class="flex items-center justify-between cursor-pointer group" (click)="connectionStringsCollapsed = !connectionStringsCollapsed">
-                <h3 class="text-sm font-bold uppercase opacity-50 flex items-center gap-2">
-                  <i class="fas fa-link"></i>
-                  Connection Strings
-                </h3>
-                <div class="flex items-center gap-4">
-                  @if (!connectionStringsCollapsed) {
-                    <button class="btn btn-xs btn-ghost opacity-70 hover:opacity-100" (click)="$event.stopPropagation(); showConnectionPassword = !showConnectionPassword" [title]="showConnectionPassword ? 'Hide Passwords' : 'Show Passwords'">
-                      <i class="fas" [ngClass]="showConnectionPassword ? 'fa-eye-slash' : 'fa-eye'"></i>
-                      {{ showConnectionPassword ? 'Hide' : 'Show' }}
-                    </button>
-                  }
-                  <i class="fas opacity-50 group-hover:opacity-100 transition-opacity" [ngClass]="connectionStringsCollapsed ? 'fa-chevron-down' : 'fa-chevron-up'"></i>
-                </div>
-              </div>
-
-              @if (!connectionStringsCollapsed) {
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  <div class="form-control">
-                    <label class="label pb-1"><span class="label-text opacity-70 font-bold text-xs uppercase">SQLAlchemy / PostgreSQL</span></label>
-                    <div class="join w-full">
-                      <div class="bg-base-200 p-3 rounded-l-box font-mono text-xs truncate flex-1 border border-base-300 border-r-0 join-item">{{ getDbUri('postgresql', !showConnectionPassword) }}</div>
-                      <button class="btn btn-square btn-ghost border border-base-300 join-item" (click)="copyToClipboard(getDbUri('postgresql', !showConnectionPassword), $event)" title="Copy">
-                        <i class="fas fa-copy"></i>
-                      </button>
-                    </div>
-                  </div>
-                  <div class="form-control">
-                    <label class="label pb-1"><span class="label-text opacity-70 font-bold text-xs uppercase">AsyncPG (Python)</span></label>
-                    <div class="join w-full">
-                      <div class="bg-base-200 p-3 rounded-l-box font-mono text-xs truncate flex-1 border border-base-300 border-r-0 join-item">{{ getDbUri('asyncpg', !showConnectionPassword) }}</div>
-                      <button class="btn btn-square btn-ghost border border-base-300 join-item" (click)="copyToClipboard(getDbUri('asyncpg', !showConnectionPassword), $event)" title="Copy">
-                        <i class="fas fa-copy"></i>
-                      </button>
-                    </div>
-                  </div>
-                  <div class="form-control">
-                    <label class="label pb-1"><span class="label-text opacity-70 font-bold text-xs uppercase">JDBC</span></label>
-                    <div class="join w-full">
-                      <div class="bg-base-200 p-3 rounded-l-box font-mono text-xs truncate flex-1 border border-base-300 border-r-0 join-item">{{ getDbUri('jdbc', !showConnectionPassword) }}</div>
-                      <button class="btn btn-square btn-ghost border border-base-300 join-item" (click)="copyToClipboard(getDbUri('jdbc', !showConnectionPassword), $event)" title="Copy">
-                        <i class="fas fa-copy"></i>
-                      </button>
-                    </div>
-                  </div>
-                  <div class="form-control">
-                    <label class="label pb-1"><span class="label-text opacity-70 font-bold text-xs uppercase">Environment Variable</span></label>
-                    <div class="join w-full">
-                      <div class="bg-base-200 p-3 rounded-l-box font-mono text-xs truncate flex-1 border border-base-300 border-r-0 join-item">{{ getDbUri('env', !showConnectionPassword) }}</div>
-                      <button class="btn btn-square btn-ghost border border-base-300 join-item" (click)="copyToClipboard(getDbUri('env', !showConnectionPassword), $event)" title="Copy">
-                        <i class="fas fa-copy"></i>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              }
-            </div>
-          }
-        </div>
-
-        <div class="divider"></div>
-
-        <!-- Stats Section -->
-        <div class="space-y-6">
-          <div class="flex items-center justify-between cursor-pointer group" (click)="statsCollapsed = !statsCollapsed">
-            <h2 class="text-xl font-bold flex items-center gap-2">
-              <i class="fas fa-chart-line text-secondary"></i>
-              Statistics (Last 7 Days)
-            </h2>
-            <i class="fas opacity-50 group-hover:opacity-100 transition-opacity" [ngClass]="statsCollapsed ? 'fa-chevron-down' : 'fa-chevron-up'"></i>
-          </div>
-
-          @if (!statsCollapsed) {
-            @if (dbConnectionError) {
-              <div class="alert alert-warning text-sm max-w-md">
-                <i class="fas fa-exclamation-triangle"></i>
-                <span>{{ dbConnectionError }}</span>
-              </div>
-            } @else if (summaryStats) {
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <!-- Activity Chart -->
-                <div class="card bg-base-100 border border-base-200 shadow-sm h-full min-h-[350px]">
-                  <div class="card-body p-4">
-                    <h3 class="text-sm font-bold opacity-70 mb-2 uppercase">Activity</h3>
-                    @if (dailyStats) {
-                      <div class="flex-1 min-h-0">
-                        <canvas baseChart
-                          [data]="activityChartData"
-                          [options]="chartOptions"
-                          [type]="'line'">
-                        </canvas>
-                      </div>
-                    } @else {
-                      <div class="flex items-center justify-center h-full">
-                        <span class="loading loading-spinner loading-md"></span>
-                      </div>
-                    }
-                  </div>
-                </div>
-
-                <!-- Tokens Chart -->
-                <div class="card bg-base-100 border border-base-200 shadow-sm h-full min-h-[350px]">
-                  <div class="card-body p-4">
-                    <h3 class="text-sm font-bold opacity-70 mb-2 uppercase">Tokens</h3>
-                    @if (dailyStats) {
-                      <div class="flex-1 min-h-0">
-                        <canvas baseChart
-                          [data]="tokensChartData"
-                          [options]="chartOptions"
-                          [type]="'line'">
-                        </canvas>
-                      </div>
-                    } @else {
-                      <div class="flex items-center justify-center h-full">
-                        <span class="loading loading-spinner loading-md"></span>
-                      </div>
-                    }
-                  </div>
-                </div>
-
-                <!-- Average Durations Chart -->
-                <div class="card bg-base-100 border border-base-200 shadow-sm h-full min-h-[350px]">
-                  <div class="card-body p-4">
-                    <h3 class="text-sm font-bold opacity-70 mb-2 uppercase">Average Durations (seconds)</h3>
-                    @if (dailyStats) {
-                      <div class="flex-1 min-h-0">
-                        <canvas baseChart
-                          [data]="durationsChartData"
-                          [options]="chartOptions"
-                          [type]="'line'">
-                        </canvas>
-                      </div>
-                    } @else {
-                      <div class="flex items-center justify-center h-full">
-                        <span class="loading loading-spinner loading-md"></span>
-                      </div>
-                    }
-                  </div>
-                </div>
-
-                <!-- Workflow Runtimes Chart -->
-                <div class="card bg-base-100 border border-base-200 shadow-sm h-full min-h-[350px]">
-                  <div class="card-body p-4">
-                    <h3 class="text-sm font-bold opacity-70 mb-2 uppercase">Workflow Runtimes (seconds)</h3>
-                    @if (dailyStats) {
-                      <div class="flex-1 min-h-0">
-                        <canvas baseChart
-                          [data]="runtimesChartData"
-                          [options]="chartOptions"
-                          [type]="'line'">
-                        </canvas>
-                      </div>
-                    } @else {
-                      <div class="flex items-center justify-center h-full">
-                        <span class="loading loading-spinner loading-md"></span>
-                      </div>
-                    }
-                  </div>
-                </div>
-              </div>
-
-              <!-- Summary Stats Row -->
-              <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 mt-4">
-                <div class="stat bg-base-100 border border-base-200 rounded-box shadow-sm p-3">
-                  <div class="stat-title text-[10px] font-bold uppercase">Total Sessions</div>
-                  <div class="stat-value text-primary text-lg">{{ summaryStats.total_sessions }}</div>
-                </div>
-                <div class="stat bg-base-100 border border-base-200 rounded-box shadow-sm p-3">
-                  <div class="stat-title text-[10px] font-bold uppercase">Chat Messages</div>
-                  <div class="stat-value text-accent text-lg">{{ summaryStats.total_messages }}</div>
-                </div>
-                <div class="stat bg-base-100 border border-base-200 rounded-box shadow-sm p-3">
-                  <div class="stat-title text-[10px] font-bold uppercase">Total Tasks</div>
-                  <div class="stat-value text-secondary text-lg">{{ summaryStats.total_tasks }}</div>
-                </div>
-                <div class="stat bg-base-100 border border-base-200 rounded-box shadow-sm p-3">
-                  <div class="stat-title text-[10px] font-bold uppercase">Workflow Runs</div>
-                  <div class="stat-value text-info text-lg">{{ summaryStats.total_runs || 0 }}</div>
-                </div>
-                <div class="stat bg-base-100 border border-base-200 rounded-box shadow-sm p-3">
-                  <div class="stat-title text-[10px] font-bold uppercase">Input Tokens</div>
-                  <div class="stat-value text-warning text-lg">{{ summaryStats.total_prompt_tokens | number }}</div>
-                </div>
-                <div class="stat bg-base-100 border border-base-200 rounded-box shadow-sm p-3">
-                  <div class="stat-title text-[10px] font-bold uppercase">Output Tokens</div>
-                  <div class="stat-value text-error text-lg">{{ summaryStats.total_completion_tokens | number }}</div>
-                </div>
-                <div class="stat bg-base-100 border border-base-200 rounded-box shadow-sm p-3">
-                  <div class="stat-title text-[10px] font-bold uppercase">Embedding Tokens</div>
-                  <div class="stat-value text-neutral text-lg">{{ summaryStats.total_embedding_tokens | number }}</div>
-                </div>
-              </div>
-            } @else {
-              <div class="flex justify-center p-8">
-                <span class="loading loading-spinner loading-lg"></span>
-              </div>
-            }
-          }
-        </div>
-      </div>
-    </div>
-
-    <!-- User Management Section -->
-    <div class="card bg-base-100 shadow-xl border border-base-200">
-        <div class="card-body">
-          <div class="flex justify-between items-center mb-4">
-            <h2 class="card-title">
-              <i class="fas fa-users text-accent"></i>
-              Project Users
-            </h2>
-            @if (selectedProject.role === 'owner') {
-              <button class="btn btn-sm btn-outline btn-accent" (click)="openAddUserModal()">
-                <i class="fas fa-user-plus"></i> Add User
-              </button>
-            }
-          </div>
-
-          <div class="overflow-x-auto overflow-y-visible">
-            <table class="table table-zebra w-full">
-              <thead>
-                <tr>
-                  <th>User</th>
-                  <th>Role</th>
-                  @if (selectedProject.role === 'owner') { <th>Actions</th> }
-                </tr>
-              </thead>
-              <tbody>
-                @for (member of projectMembers; track member.id) {
-                  <tr>
-                    <td>
-                      <div class="flex items-center gap-3">
-                        <div class="avatar placeholder">
-                          <div class="bg-neutral text-neutral-content rounded-full w-8">
-                            @if (member.picture) {
-                              <img [src]="member.picture" [alt]="member.name" />
-                            } @else {
-                              <span>{{ member.name?.charAt(0) || member.email?.charAt(0) }}</span>
-                            }
-                          </div>
-                        </div>
-                        <div>
-                          <div class="font-bold">{{ member.name }}</div>
-                          <div class="text-xs opacity-50">{{ member.email }}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td>
-                      @if (selectedProject.role === 'owner') {
-                        <div class="dropdown dropdown-top dropdown-end">
-                          <div tabindex="0" role="button" class="badge m-1 capitalize cursor-pointer hover:bg-base-200" [ngClass]="{ 'badge-primary': member.role === 'owner' }">
-                            {{ member.role }}
-                            <i class="fas fa-chevron-down ml-1 text-[10px]"></i>
-                          </div>
-                          <ul tabindex="0" class="dropdown-content z-[9999] menu p-2 shadow bg-base-100 rounded-box w-32 mb-2">
-                            <li><a (click)="updateMemberRole(member.id, 'owner', $event)" [class.active]="member.role === 'owner'">Owner</a></li>
-                            <li><a (click)="updateMemberRole(member.id, 'viewer', $event)" [class.active]="member.role === 'viewer'">Viewer</a></li>
-                          </ul>
-                        </div>
-                      } @else {
-                        <span class="badge badge-sm badge-ghost">{{ member.role }}</span>
-                      }
-                    </td>
-                    @if (selectedProject.role === 'owner') {
-                      <td>
-                        <button class="btn btn-ghost btn-xs text-error flex items-center gap-1" (click)="confirmRemoveMember(member)" title="Remove user">
-                          <i class="fas fa-user-minus"></i>
-                          <span class="hidden sm:inline">Remove from project</span>
-                        </button>
-                      </td>
-                    }
-                  </tr>
-                }
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-  }
-</div>
-
-<!-- Delete Project Modal -->
-@if (showDeleteModal) {
-  <div class="modal modal-open">
-    <div class="modal-box w-full max-w-lg md:max-w-xl">
-      <h3 class="font-bold text-lg text-error flex items-center gap-2">
-        <i class="fas fa-exclamation-triangle"></i>
-        Delete Project
-      </h3>
-      <p class="py-4">
-        This action cannot be undone. All project data will be permanently removed.
-        To confirm, please type the project name: <span class="font-bold">"{{ selectedProject?.name }}"</span>
-      </p>
-      <input type="text" [(ngModel)]="deleteConfirmationName" class="input input-bordered w-full" [placeholder]="selectedProject?.name">
-      <div class="modal-action">
-        <button class="btn" (click)="closeDeleteModal()">Cancel</button>
-        <button class="btn btn-error" [disabled]="deleteConfirmationName !== selectedProject?.name || isDeleting" (click)="deleteProject()">
-          @if (isDeleting) { <span class="loading loading-spinner loading-xs"></span> }
-          Delete Project
-        </button>
-      </div>
-    </div>
-  </div>
-}
-
-<!-- Add User Modal -->
-@if (showAddUserModal) {
-  <div class="modal modal-open">
-    <div class="modal-box w-full max-w-lg md:max-w-xl">
-      <h3 class="font-bold text-lg">Add User to Project</h3>
-      <div class="py-4 space-y-4">
-        <div class="form-control">
-          <label class="label"><span class="label-text">Select User</span></label>
-          <select [(ngModel)]="newMemberUserId" class="select select-bordered w-full">
-            <option value="" disabled>Select a user...</option>
-            @for (user of allUsers; track user.id) {
-              <option [value]="user.id">{{ user.name }} ({{ user.email }})</option>
-            }
-          </select>
-        </div>
-        <div class="form-control">
-          <label class="label"><span class="label-text">Role</span></label>
-          <select [(ngModel)]="newMemberRole" class="select select-bordered w-full">
-            <option value="viewer">Viewer</option>
-            <option value="owner">Owner</option>
-          </select>
-        </div>
-      </div>
-      <div class="modal-action">
-        <button class="btn" (click)="closeAddUserModal()">Cancel</button>
-        <button class="btn btn-primary" [disabled]="!newMemberUserId" (click)="addMember()">Add User</button>
-      </div>
-    </div>
-  </div>
-}
-
-<!-- Remove User Modal -->
-@if (showRemoveMemberModal) {
-  <div class="modal modal-open">
-    <div class="modal-box w-full max-w-lg md:max-w-xl">
-      <h3 class="font-bold text-lg text-error flex items-center gap-2">
-        <i class="fas fa-user-minus"></i>
-        Remove User from Project
-      </h3>
-      <p class="py-4">
-        Are you sure you want to remove <span class="font-bold">{{ memberToRemove?.name || memberToRemove?.email }}</span> from this project?
-        They will no longer have access to this project.
-      </p>
-      <div class="modal-action">
-        <button class="btn" (click)="closeRemoveMemberModal()">Cancel</button>
-        <button class="btn btn-error" (click)="removeMember()">Remove from project</button>
-      </div>
-    </div>
-  </div>
-}
-
-} @else if (projects.length == 0) {
-  <div class="flex flex-col items-center justify-center min-h-[50vh] space-y-4 text-center">
-    <div class="text-6xl text-base-content/20 mb-4">
-      <i class="fas fa-folder-open"></i>
-    </div>
-    <h2 class="text-2xl font-bold">No Projects Found</h2>
-    @if (getIsAdmin()) {
-      <p>Start by creating your first project to manage AI agents.</p>
-      <button class="btn btn-primary" (click)="startNewProject()">
-        <i class="fas fa-plus mr-2"></i> Add New Project
-      </button>
-    } @else {
-      <p>You don't have admin rights to create projects.<br>Ask your administrator to grant you access.</p>
+@if (loading()) {
+  <ui-loading label="Loading the project" data-testid="loading" />
+} @else if (loadError()) {
+  <ui-page-header tag="Project" title="Overview" />
+  <ui-alert data-testid="load-error">
+    {{ loadError() }}
+    <button alert-actions type="button" uiButton="ghost" size="sm" (click)="load()" data-testid="retry">
+      Retry
+    </button>
+  </ui-alert>
+} @else if (project(); as p) {
+  <ui-page-header tag="Project" [title]="p.name">
+    <ng-container page-title>
+      <ui-badge [tone]="p.role === 'owner' ? 'primary' : 'muted'" data-testid="role-badge">{{ p.role }}</ui-badge>
+      <ui-badge [tone]="p.read_only === false ? 'warning' : 'neutral'" data-testid="access-badge">
+        {{ p.read_only === false ? 'read-write' : 'read-only' }}
+      </ui-badge>
+    </ng-container>
+    @if (p.description) {
+      <p data-testid="description">{{ p.description }}</p>
     }
-  </div>
+    <p class="mono database" data-testid="database">{{ database() }}</p>
+    <a page-actions uiButton routerLink="/settings" data-testid="settings-link">
+      <i class="fa-solid fa-gear" aria-hidden="true"></i> Settings
+    </a>
+  </ui-page-header>
+
+  @if (statsLoading()) {
+    <ui-card title="Activity" icon="fa-chart-column">
+      <ui-loading label="Reading the project's database" data-testid="stats-loading" />
+    </ui-card>
+  } @else if (statsError()) {
+    <ui-card title="Activity" icon="fa-chart-column">
+      <ui-alert data-testid="stats-error">
+        {{ statsError() }}
+        <button alert-actions type="button" uiButton="ghost" size="sm" (click)="loadStats()" data-testid="stats-retry">
+          Retry
+        </button>
+      </ui-alert>
+    </ui-card>
+  } @else if (summary(); as s) {
+    <ui-stats data-testid="summary">
+      <ui-stat label="Conversations" link="/conversations" data-testid="stat-sessions">{{ s.total_sessions | number }}</ui-stat>
+      <ui-stat label="Runs" link="/conversations" data-testid="stat-runs">{{ s.total_runs ?? 0 | number }}</ui-stat>
+      <ui-stat label="Messages" data-testid="stat-messages">{{ s.total_messages | number }}</ui-stat>
+      <ui-stat label="Tasks" data-testid="stat-tasks">{{ s.total_tasks | number }}</ui-stat>
+      <ui-stat label="Input tokens" link="/llm-call-stats" data-testid="stat-input">{{ s.total_prompt_tokens ?? 0 | number }}</ui-stat>
+      <ui-stat label="Output tokens" link="/llm-call-stats" data-testid="stat-output">{{ s.total_completion_tokens ?? 0 | number }}</ui-stat>
+      <ui-stat label="Embedding tokens" data-testid="stat-embedding">{{ s.total_embedding_tokens ?? 0 | number }}</ui-stat>
+    </ui-stats>
+
+    <div class="charts">
+      <ui-card title="Activity per day" icon="fa-chart-column" fill data-testid="activity-chart">
+        <app-bar-chart
+          [bars]="activity()"
+          [series]="activitySeries"
+          unit="count"
+          label="Conversations, runs and messages per day"
+          empty="No conversations in the last 7 days."
+        />
+      </ui-card>
+      <ui-card title="Tokens per day" icon="fa-coins" fill data-testid="token-chart">
+        <app-bar-chart
+          [bars]="tokens()"
+          [series]="tokenSeries"
+          unit="tokens"
+          label="Input, output and embedding tokens per day"
+          empty="No model calls in the last 7 days."
+        />
+      </ui-card>
+      @if (callDurations(); as data) {
+        <ui-card title="Average model call" icon="fa-stopwatch" fill data-testid="call-duration-chart">
+          <div class="line-chart">
+            <canvas baseChart type="line" [data]="data" [options]="lineOptions" aria-label="Average model and embedding call per day, in seconds" role="img"></canvas>
+          </div>
+        </ui-card>
+      }
+      @if (runDurations(); as data) {
+        <ui-card title="Average run per agent" icon="fa-stopwatch" fill data-testid="run-duration-chart">
+          @if (data.datasets.length) {
+            <div class="line-chart">
+              <canvas baseChart type="line" [data]="data" [options]="lineOptions" aria-label="Average run of each agent per day, in seconds" role="img"></canvas>
+            </div>
+          } @else {
+            <p class="text-muted" data-testid="no-runs">No runs in the last 7 days.</p>
+          }
+        </ui-card>
+      }
+    </div>
+  }
+
+  <ui-card title="Connection strings" icon="fa-plug" data-testid="connection-card">
+    @if (canRevealPassword()) {
+      <button
+        card-actions
+        type="button"
+        uiButton="ghost"
+        size="sm"
+        [disabled]="revealing()"
+        (click)="togglePassword()"
+        data-testid="toggle-password"
+      >
+        @if (revealing()) {
+          <ui-spinner />
+        }
+        <i class="fa-solid" [class.fa-eye]="!showPassword()" [class.fa-eye-slash]="showPassword()" aria-hidden="true"></i>
+        {{ showPassword() ? 'Hide password' : 'Show password' }}
+      </button>
+    }
+    <p class="form-hint">
+      The agent database this project reads. An agent server takes it as
+      <span class="mono">KAVALAI_DB_URI</span>.
+      @if (p.db_type !== 'sqlite') {
+        The password is masked{{ isAdmin() ? '' : '; an administrator can show it' }}.
+      }
+    </p>
+    @if (revealError()) {
+      <ui-alert data-testid="reveal-error">{{ revealError() }}</ui-alert>
+    }
+    <dl class="strings">
+      @for (s of strings(); track s.key) {
+        <div class="string" [attr.data-testid]="'string-' + s.key">
+          <dt>{{ s.label }}</dt>
+          <dd>
+            <code class="mono" data-testid="string-value">{{ s.value }}</code>
+            <ui-copy-button [text]="s.value" [label]="s.label" />
+          </dd>
+        </div>
+      }
+    </dl>
+  </ui-card>
+} @else {
+  <ui-page-header tag="Project" title="Overview" />
+  <ui-empty-state
+    icon="fa-folder-open"
+    [title]="hasProjects() ? 'No active project' : 'No project yet'"
+    data-testid="no-project"
+  >
+    @if (hasProjects()) {
+      Choose a project in the sidebar to see its overview.
+    } @else if (isAdmin()) {
+      A project points the backoffice at an agent database. Create one to see its conversations and runs.
+    } @else {
+      You are not a member of any project. Ask an administrator to add you to one.
+    }
+    @if (isAdmin()) {
+      <a empty-actions uiButton="primary" routerLink="/projects/new" data-testid="new-project">
+        <i class="fa-solid fa-plus" aria-hidden="true"></i> New project
+      </a>
+    }
+  </ui-empty-state>
 }

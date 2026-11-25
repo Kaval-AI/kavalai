@@ -1,10 +1,12 @@
 import uuid
+from datetime import datetime, timezone
 from unittest.mock import patch, MagicMock, AsyncMock
 
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 
+from kavalai.agent_service import ModelCallSummary, ModelCallTotals
 from kavalai.backoffice import db
 from kavalai.backoffice.server import app
 
@@ -112,10 +114,14 @@ async def test_password_login_opens_a_session(client, backoffice_db):
     assert details.status_code == 200
     assert details.json()["email"] == "pw@example.com"
 
-    assert (await client.get("/logout")).json() == {"logged_in": False}
+    # A GET, which any image or link would send, does not log out.
+    assert (await client.get("/logout")).status_code == 405
+    assert (await client.get("/user/get_details")).status_code == 200
+
+    assert (await client.post("/logout")).json() == {"logged_in": False}
     assert (await client.get("/user/get_details")).status_code == 401
     # Logging out twice is not an error.
-    assert (await client.get("/logout")).status_code == 200
+    assert (await client.post("/logout")).status_code == 200
 
 
 @pytest.mark.asyncio
@@ -268,7 +274,11 @@ async def test_projects_test_connection_reaches_the_database(
         "db_port": int(postgres_container.get_exposed_port(5432)),
         "db_name": postgres_container.dbname,
     }
-    with patch("kavalai.backoffice.server.assert_logged_in"):
+    admin = {"user_info": {"id": str(uuid.uuid4()), "is_admin": True}}
+    with (
+        patch("kavalai.backoffice.server.assert_logged_in"),
+        patch("starlette.requests.Request.session", admin),
+    ):
         response = await client.post("/projects/test-connection/new", json=data)
         assert response.status_code == 200
         assert response.json()["status"] == "success"
@@ -404,6 +414,9 @@ async def test_projects_get_llm_call_stats(client, backoffice_db):
                     "agent_id": str(agent_id),
                     "session_id": str(session_id),
                     "run_id": str(run_id),
+                    "search": "claims",
+                    "start_date": "2026-11-23T00:00:00Z",
+                    "end_date": "2026-11-24T23:59:59Z",
                 },
             )
 
@@ -416,7 +429,42 @@ async def test_projects_get_llm_call_stats(client, backoffice_db):
                 agent_id=agent_id,
                 session_id=session_id,
                 run_id=run_id,
+                search="claims",
+                start=datetime(2026, 11, 23, tzinfo=timezone.utc),
+                end=datetime(2026, 11, 24, 23, 59, 59, tzinfo=timezone.utc),
             )
+
+        with patch(
+            "kavalai.agent_service.AgentService.summarise_model_calls",
+            return_value=ModelCallSummary(
+                totals=ModelCallTotals(calls=2), by_model=[], by_day=[]
+            ),
+        ) as mock_summary:
+            response = await client.get(
+                f"/projects/{project_id}/llm-call-stats/summary",
+                params={"agent_id": str(agent_id), "search": "claims"},
+            )
+            assert response.status_code == 200
+            assert response.json()["totals"]["calls"] == 2
+            mock_summary.assert_called_once_with(
+                call_type=None,
+                agent_id=agent_id,
+                session_id=None,
+                run_id=None,
+                search="claims",
+                start=None,
+                end=None,
+            )
+
+        with patch(
+            "kavalai.agent_service.AgentService.summarise_model_calls",
+            side_effect=OSError("connection refused"),
+        ):
+            response = await client.get(
+                f"/projects/{project_id}/llm-call-stats/summary"
+            )
+            assert response.status_code == 503
+            assert "not connected" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -815,3 +863,447 @@ async def test_a_sqlite_project_is_browsed_from_its_file(
         response = await client.post(f"/projects/test-connection/{project.id}")
         assert response.status_code == 200
         assert response.json()["status"] == "success"
+
+
+async def _member_of_new_project(backoffice_db, role, **project_fields):
+    """A user, a project with a stored password, and the user's membership."""
+    user = db.User(id=uuid.uuid4(), email=f"{uuid.uuid4()}@test", name="m")
+    project = db.Project(id=uuid.uuid4(), name="P", **project_fields)
+    backoffice_db.add_all([user, project])
+    await backoffice_db.commit()
+    backoffice_db.add(
+        db.ProjectMembership(user_id=user.id, project_id=project.id, role=role)
+    )
+    await backoffice_db.commit()
+    return user, project
+
+
+def _signed_in(user, is_admin=False):
+    session = {"user_info": {"id": str(user.id), "email": user.email}}
+    session["user_info"]["is_admin"] = is_admin
+    return (
+        patch("kavalai.backoffice.server.assert_logged_in"),
+        patch("starlette.requests.Request.session", session),
+    )
+
+
+@pytest.mark.asyncio
+async def test_project_listings_never_carry_the_database_password(
+    client, backoffice_db
+):
+    """A viewer receives the project, so the password would let them connect
+    to the agent database around their role and the read-only setting."""
+    viewer, project = await _member_of_new_project(
+        backoffice_db,
+        db.ProjectRole.viewer,
+        db_host="h",
+        db_user="u",
+        db_password="top-secret",
+        db_name="d",
+    )
+    login, session = _signed_in(viewer)
+    with login, session:
+        listed = await client.get("/projects/all")
+        single = await client.get(f"/projects/get/{project.id}")
+
+    for response in (listed, single):
+        assert response.status_code == 200
+        assert "top-secret" not in response.text
+        assert "db_password" not in response.text
+    assert listed.json()[0]["has_password"] is True
+    assert listed.json()[0]["role"] == "viewer"
+    assert single.json()["has_password"] is True
+
+
+@pytest.mark.asyncio
+async def test_only_an_administrator_can_reveal_the_password(client, backoffice_db):
+    owner, project = await _member_of_new_project(
+        backoffice_db, db.ProjectRole.owner, db_password="top-secret"
+    )
+    login, session = _signed_in(owner)
+    with login, session:
+        refused = await client.post(f"/projects/{project.id}/reveal-password")
+    login, session = _signed_in(owner, is_admin=True)
+    with login, session:
+        revealed = await client.post(f"/projects/{project.id}/reveal-password")
+
+    assert refused.status_code == 403
+    assert "top-secret" not in refused.text
+    assert revealed.status_code == 200
+    assert revealed.json() == {"db_password": "top-secret"}
+
+
+@pytest.mark.asyncio
+async def test_saving_without_the_password_keeps_it(client, backoffice_db):
+    owner, project = await _member_of_new_project(
+        backoffice_db,
+        db.ProjectRole.owner,
+        db_host="h",
+        db_user="u",
+        db_password="top-secret",
+        db_name="d",
+    )
+    login, session = _signed_in(owner)
+    with login, session:
+        listed = (await client.get("/projects/all")).json()[0]
+        saved = await client.put(
+            f"/projects/update/{project.id}", json={**listed, "description": "d2"}
+        )
+        moved = await client.put(
+            f"/projects/update/{project.id}", json={**listed, "db_host": "evil"}
+        )
+
+    assert saved.status_code == 200
+    assert "top-secret" not in saved.text
+    assert saved.json()["description"] == "d2"
+    assert moved.status_code == 400
+    assert "password again" in moved.json()["detail"]
+    await backoffice_db.refresh(project)
+    assert project.db_password == "top-secret"
+    assert project.db_host == "h"
+
+
+@pytest.mark.asyncio
+async def test_a_connection_test_checks_unsaved_changes_with_the_stored_password(
+    client, backoffice_db, postgres_container
+):
+    """The owner tests a form before saving it; the stored password is used,
+    but never for another server, and a viewer may test only what is saved."""
+    reachable = dict(
+        db_host=postgres_container.get_container_host_ip(),
+        db_port=int(postgres_container.get_exposed_port(5432)),
+        db_user=postgres_container.username,
+        db_password=postgres_container.password,
+        db_name=postgres_container.dbname,
+        db_schema="public",
+    )
+    owner, project = await _member_of_new_project(
+        backoffice_db, db.ProjectRole.owner, **reachable
+    )
+    form = {key: value for key, value in reachable.items() if key != "db_password"}
+
+    login, session = _signed_in(owner)
+    with login, session:
+        unsaved = await client.post(
+            f"/projects/test-connection/{project.id}",
+            json={**form, "db_schema": "elsewhere"},
+        )
+        moved = await client.post(
+            f"/projects/test-connection/{project.id}",
+            json={**form, "db_host": "203.0.113.1"},
+        )
+    assert unsaved.status_code == 200
+    assert moved.status_code == 400
+    assert "password again" in moved.json()["detail"]
+
+    viewer = db.User(id=uuid.uuid4(), email=f"{uuid.uuid4()}@test", name="v")
+    backoffice_db.add(viewer)
+    await backoffice_db.commit()
+    backoffice_db.add(
+        db.ProjectMembership(
+            user_id=viewer.id, project_id=project.id, role=db.ProjectRole.viewer
+        )
+    )
+    await backoffice_db.commit()
+    login, session = _signed_in(viewer)
+    with login, session:
+        saved = await client.post(f"/projects/test-connection/{project.id}")
+        edited = await client.post(f"/projects/test-connection/{project.id}", json=form)
+        new = await client.post("/projects/test-connection/new", json=reachable)
+    assert saved.status_code == 200
+    assert edited.status_code == 403
+    assert new.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_creating_a_project_answers_without_the_password(client, backoffice_db):
+    admin = db.User(id=uuid.uuid4(), email=f"{uuid.uuid4()}@test", name="a")
+    backoffice_db.add(admin)
+    await backoffice_db.commit()
+    body = {"name": "New", "db_host": "h", "db_user": "u", "db_password": "pw-123"}
+
+    login, session = _signed_in(admin)
+    with login, session:
+        refused = await client.post("/projects/create", json=body)
+    login, session = _signed_in(admin, is_admin=True)
+    with login, session:
+        created = await client.post("/projects/create", json=body)
+
+    assert refused.status_code == 403
+    assert created.status_code == 200
+    assert "pw-123" not in created.text
+    assert created.json()["has_password"] is True
+    assert created.json()["role"] == "owner"
+
+
+async def _password_user(client, backoffice_db, **fields):
+    """A user with a password, signed in through ``/auth/login``."""
+    from kavalai.backoffice.users import hash_password
+
+    user = db.User(
+        id=uuid.uuid4(),
+        email=f"{uuid.uuid4()}@test",
+        name="Ada",
+        password_hash=hash_password("correct horse"),
+        **fields,
+    )
+    backoffice_db.add(user)
+    await backoffice_db.commit()
+    response = await client.post(
+        "/auth/login", json={"email": user.email, "password": "correct horse"}
+    )
+    assert response.status_code == 200
+    return user
+
+
+@pytest.mark.asyncio
+async def test_the_profile_endpoints_need_a_signed_in_user(client, backoffice_db):
+    assert (await client.get("/user/me")).status_code == 401
+    assert (await client.patch("/user/me", json={"name": "X"})).status_code == 401
+    response = await client.post(
+        "/user/me/password", json={"new_password": "battery staple"}
+    )
+    assert response.status_code == 401
+
+    # A session whose user has since been deleted is refused too.
+    gone = db.User(id=uuid.uuid4(), email="gone@test", name="Gone")
+    _, session = _signed_in(gone)
+    with session:
+        assert (await client.get("/user/me")).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_a_user_reads_and_edits_their_own_profile(client, backoffice_db):
+    user = await _password_user(client, backoffice_db, is_admin=False)
+
+    me = await client.get("/user/me")
+    assert me.status_code == 200
+    assert me.json()["id"] == str(user.id)
+    assert me.json()["has_password"] is True
+    assert "password_hash" not in me.json()
+
+    saved = await client.patch(
+        "/user/me", json={"name": "  Ada Lovelace ", "picture": "https://x/a.png"}
+    )
+    assert saved.status_code == 200
+    assert saved.json()["name"] == "Ada Lovelace"
+    assert saved.json()["picture"] == "https://x/a.png"
+    assert "password_hash" not in saved.json()
+    # The session the shell reads carries the new name.
+    details = (await client.get("/user/get_details")).json()
+    assert details["name"] == "Ada Lovelace"
+    assert details["picture"] == "https://x/a.png"
+
+    cleared = await client.patch("/user/me", json={"picture": "  "})
+    assert cleared.json()["picture"] is None
+    assert cleared.json()["name"] == "Ada Lovelace"
+    assert (await client.patch("/user/me", json={})).json()["name"] == "Ada Lovelace"
+    assert (await client.patch("/user/me", json={"picture": None})).status_code == 200
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "body, detail",
+    [
+        ({"is_admin": True}, "not is_admin"),
+        ({"name": "X", "email": "x@test", "id": "1"}, "not email, id"),
+        ({"name": ""}, "The name is required."),
+        ({"name": 3}, "The name is required."),
+        ({"picture": 5}, "The picture must be a URL."),
+    ],
+)
+async def test_a_profile_edit_changes_only_name_and_picture(
+    client, backoffice_db, body, detail
+):
+    user = await _password_user(client, backoffice_db, is_admin=False)
+    user_id, email = user.id, user.email
+
+    response = await client.patch("/user/me", json=body)
+
+    assert response.status_code == 400
+    assert detail in response.json()["detail"]
+    backoffice_db.expire_all()
+    row = await backoffice_db.get(db.User, user_id)
+    assert (row.name, row.email, row.is_admin) == ("Ada", email, False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "picture, headers, detail",
+    [
+        ("/api/logout", {}, "absolute https:// URL"),
+        ("http://cdn.example.org/a.png", {}, "absolute https:// URL"),
+        ("https://test/api/logout", {}, "backoffice's own host"),
+        ("https://test:8443/a.png", {}, "backoffice's own host"),
+        (
+            "https://bo.example.com/api/logout",
+            {"Origin": "https://bo.example.com"},
+            "backoffice's own host",
+        ),
+        pytest.param(
+            "https://cdn.example.org/" + "a" * 2048, {}, "at most 2048", id="too-long"
+        ),
+    ],
+)
+async def test_a_profile_picture_must_be_https_on_another_host(
+    client, backoffice_db, picture, headers, detail
+):
+    """Members load each other's pictures with their session cookie, so a
+    picture on the backoffice's host would call the API from their browsers."""
+    user = await _password_user(client, backoffice_db)
+    user_id = user.id
+
+    response = await client.patch(
+        "/user/me", json={"picture": picture}, headers=headers
+    )
+
+    assert response.status_code == 400
+    assert detail in response.json()["detail"]
+    backoffice_db.expire_all()
+    assert (await backoffice_db.get(db.User, user_id)).picture is None
+
+
+@pytest.mark.asyncio
+async def test_the_frontend_url_counts_as_the_backoffice_host(
+    client, backoffice_db, monkeypatch
+):
+    from kavalai.backoffice import server
+
+    monkeypatch.setattr(
+        server, "GOOGLE_OAUTH", {"frontend_url": "https://bo.example.com/"}
+    )
+    await _password_user(client, backoffice_db)
+
+    response = await client.patch(
+        "/user/me", json={"picture": "https://bo.example.com/api/logout"}
+    )
+
+    assert response.status_code == 400
+    assert "backoffice's own host" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_an_administrator_cannot_set_a_same_host_picture_either(
+    client, backoffice_db
+):
+    target = db.User(id=uuid.uuid4(), email="pic@test.com", name="Pic")
+    backoffice_db.add(target)
+    await backoffice_db.commit()
+
+    admin, session = _signed_in(target, is_admin=True)
+    with admin, session, patch("kavalai.backoffice.server.assert_is_admin"):
+        created = await client.post(
+            "/users/create",
+            json={"email": "new-pic@test.com", "name": "N", "picture": "/api/logout"},
+        )
+        updated = await client.put(
+            f"/users/update/{target.id}", json={"picture": "https://test/a.png"}
+        )
+        cleared = await client.put(f"/users/update/{target.id}", json={"picture": ""})
+        kept = await client.put(
+            f"/users/update/{target.id}",
+            json={"picture": "https://cdn.example.org/a.png"},
+        )
+
+    assert created.status_code == 400
+    assert "absolute https:// URL" in created.json()["detail"]
+    assert updated.status_code == 400
+    assert "backoffice's own host" in updated.json()["detail"]
+    assert cleared.json()["picture"] is None
+    assert kept.json()["picture"] == "https://cdn.example.org/a.png"
+
+
+@pytest.mark.asyncio
+async def test_changing_a_password_asks_for_the_current_one(client, backoffice_db):
+    from kavalai.backoffice.users import verify_password
+
+    user_id = (await _password_user(client, backoffice_db)).id
+
+    for current in ["wrong horse", None, 12]:
+        body = {"new_password": "battery staple"}
+        if current is not None:
+            body["current_password"] = current
+        refused = await client.post("/user/me/password", json=body)
+        assert refused.status_code == 400
+        assert refused.json() == {"detail": "The current password is not correct."}
+
+    short = await client.post(
+        "/user/me/password",
+        json={"current_password": "correct horse", "new_password": "short"},
+    )
+    assert short.status_code == 400
+    assert "at least 8" in short.json()["detail"]
+    missing = await client.post(
+        "/user/me/password", json={"current_password": "correct horse"}
+    )
+    assert missing.json() == {"detail": "The new password is required."}
+
+    changed = await client.post(
+        "/user/me/password",
+        json={"current_password": "correct horse", "new_password": "battery staple"},
+    )
+    assert changed.status_code == 200
+    assert changed.json()["has_password"] is True
+    assert "password_hash" not in changed.json()
+
+    backoffice_db.expire_all()
+    row = await backoffice_db.get(db.User, user_id)
+    assert verify_password("battery staple", row.password_hash)
+    assert not verify_password("correct horse", row.password_hash)
+
+
+@pytest.mark.asyncio
+async def test_a_google_only_user_sets_a_first_password(client, backoffice_db):
+    from kavalai.backoffice.users import verify_password
+
+    user = db.User(id=uuid.uuid4(), email=f"{uuid.uuid4()}@test", name="G")
+    other = db.User(id=uuid.uuid4(), email=f"{uuid.uuid4()}@test", name="O")
+    user_id, other_id = user.id, other.id
+    backoffice_db.add_all([user, other])
+    await backoffice_db.commit()
+
+    login, session = _signed_in(user)
+    with login, session:
+        assert (await client.get("/user/me")).json()["has_password"] is False
+        response = await client.post(
+            "/user/me/password", json={"new_password": "battery staple"}
+        )
+
+    assert response.status_code == 200
+    assert response.json()["has_password"] is True
+    backoffice_db.expire_all()
+    assert verify_password(
+        "battery staple", (await backoffice_db.get(db.User, user_id)).password_hash
+    )
+    # Only the signed-in user's own record changed.
+    assert (await backoffice_db.get(db.User, other_id)).password_hash is None
+
+
+@pytest.mark.asyncio
+async def test_a_taken_email_address_is_a_conflict_not_an_outage(client, backoffice_db):
+    """The database refuses a second user with the same address. That is the
+    caller's mistake, so it answers 409 and says so, rather than the 503
+    "database is not connected" every other database error becomes."""
+    first = db.User(email=f"{uuid.uuid4()}@test", name="First")
+    second = db.User(email=f"{uuid.uuid4()}@test", name="Second")
+    backoffice_db.add_all([first, second])
+    await backoffice_db.commit()
+
+    admin = {"user_info": {"id": str(uuid.uuid4()), "is_admin": True}}
+    with (
+        patch("kavalai.backoffice.server.assert_logged_in"),
+        patch("starlette.requests.Request.session", admin),
+    ):
+        created = await client.post(
+            "/users/create", json={"email": first.email, "name": "Copy"}
+        )
+        updated = await client.put(
+            f"/users/update/{second.id}", json={"email": first.email}
+        )
+
+    for response in (created, updated):
+        assert response.status_code == 409
+        assert (
+            response.json()["detail"]
+            == "A user with this email address already exists."
+        )

@@ -1,0 +1,55 @@
+<div class="chart-wrap">
+  @if (bars().length === 0 || max() === 0) {
+    <p class="text-muted chart-empty">{{ empty() }}</p>
+  } @else {
+    @if (unit()) {
+      <div class="y-unit" data-testid="chart-unit">{{ unit() }}</div>
+    }
+    <div class="plot">
+      <div class="y-axis" aria-hidden="true">
+        @for (t of ticks(); track t) {
+          <span class="y-tick" [style.bottom.%]="tickHeight(t)">{{ tickLabel(t) }}</span>
+        }
+      </div>
+      <div class="plot-area">
+        <svg
+          class="chart"
+          [attr.viewBox]="'0 0 ' + bars().length * 12 + ' 100'"
+          preserveAspectRatio="none"
+          role="img"
+          [attr.aria-label]="label() + (unit() ? ', in ' + unit() : '')"
+        >
+          @for (t of ticks(); track t) {
+            @if (t > 0) {
+              <line
+                x1="0"
+                [attr.x2]="bars().length * 12"
+                [attr.y1]="100 - tickHeight(t)"
+                [attr.y2]="100 - tickHeight(t)"
+                class="grid"
+              ></line>
+            }
+          }
+          @for (b of bars(); track b.day; let i = $index) {
+            <g [attr.transform]="'translate(' + i * 12 + ',0)'">
+              <title>{{ b.day }}: {{ describe(b) }}</title>
+              @for (seg of stack(b); track $index) {
+                <rect x="1" width="10" [attr.y]="seg.y" [attr.height]="seg.h" [attr.fill]="seg.color"></rect>
+              }
+            </g>
+          }
+          <line x1="0" y1="100" [attr.x2]="bars().length * 12" y2="100" class="axis"></line>
+        </svg>
+        <div class="chart-labels">
+          <span>{{ bars()[0]?.day | date: 'MMM d' }}</span>
+          <span>{{ bars()[bars().length - 1]?.day | date: 'MMM d' }}</span>
+        </div>
+      </div>
+    </div>
+  }
+  <div class="legend">
+    @for (s of series(); track s.label) {
+      <span><i class="swatch" [style.background]="s.color"></i> {{ s.label }}</span>
+    }
+  </div>
+</div>

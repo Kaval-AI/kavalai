@@ -1,208 +1,171 @@
-<div class="p-6 max-w-6xl mx-auto space-y-6">
-  @if (loading) {
-    <div class="flex items-center justify-center min-h-[50vh]">
-      <span class="loading loading-spinner loading-lg text-primary"></span>
-    </div>
-  }
-  @if (error) {
-    <div class="alert alert-error shadow-lg">
-      <i class="fas fa-exclamation-circle"></i>
-      <span>{{ error }}</span>
-    </div>
-  }
+<ui-page-header tag="Project" title="Agents">
+  The workflows registered in this project's database, with what each one has run.
+</ui-page-header>
 
-  @if (!loading && !error) {
-    @if (agents.length === 0) {
-      <div class="flex flex-col items-center justify-center min-h-[50vh] text-center space-y-4">
-        <div class="text-6xl text-base-content/20"><i class="fas fa-robot"></i></div>
-        <h2 class="text-2xl font-bold">No Agents Found</h2>
-        <p class="text-base-content/60">No agents have been created for this project yet.</p>
-      </div>
-    }
-
-    @if (agents.length > 0) {
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <!-- Agents List Card -->
-        <div class="card bg-base-100 shadow-xl border border-base-200 lg:col-span-1">
-          <div class="card-body p-0">
-            <div class="p-4 border-b border-base-200">
-              <h3 class="card-title text-lg">
-                <i class="fas fa-list text-primary"></i>
-                Agents
-              </h3>
-            </div>
-            <div class="overflow-x-auto">
-              <table class="table table-zebra w-full">
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th class="hidden sm:table-cell">Updated</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  @for (agent of agents; track agent.id) {
-                    <tr (click)="selectAgent(agent)"
-                        class="cursor-pointer hover:bg-base-200 transition-colors"
-                        [class.bg-base-300]="selectedAgent?.id === agent.id"
-                        [class.font-bold]="selectedAgent?.id === agent.id">
-                      <td>
-                        <div class="flex flex-col">
-                          <span>{{ agent.name }}</span>
-                          <span class="text-xs opacity-50 truncate max-w-[150px]">{{ agent.description }}</span>
-                        </div>
-                      </td>
-                      <td class="hidden sm:table-cell text-xs opacity-50">
-                        {{ agent.updated_at | date:'dd-MM HH:mm' }}
-                      </td>
-                    </tr>
+@if (!projectId()) {
+  <ui-empty-state icon="fa-folder-open" title="No project selected" data-testid="agents-no-project">
+    Choose a project in the sidebar to see its agents.
+  </ui-empty-state>
+} @else if (loading()) {
+  <ui-loading label="Loading agents" />
+} @else if (error()) {
+  <ui-alert data-testid="agents-error">
+    {{ error() }}
+    <button alert-actions type="button" uiButton="ghost" size="sm" (click)="load()" data-testid="agents-retry">
+      Retry
+    </button>
+  </ui-alert>
+} @else if (agents().length === 0) {
+  <ui-empty-state icon="fa-robot" title="No agents yet" data-testid="agents-empty">
+    An agent appears here once an agent server built on Kaval.AI has recorded a run in this project's database.
+  </ui-empty-state>
+} @else {
+  <div class="agents-layout">
+    <ui-card title="Agents" icon="fa-robot" class="agents-list">
+      <ui-table clickable dense>
+        <table data-testid="agents-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (agent of agents(); track agent.id) {
+              <tr
+                [class.selected]="selected()?.id === agent.id"
+                [attr.aria-selected]="selected()?.id === agent.id"
+                tabindex="0"
+                (click)="select(agent)"
+                (keydown.enter)="select(agent)"
+                data-testid="agent-row"
+              >
+                <td>
+                  <div class="agent-name">{{ agent.name }}</div>
+                  @if (agent.description) {
+                    <div class="agent-description text-muted" [title]="agent.description">{{ agent.description }}</div>
                   }
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-
-        <!-- Agent Details & Workflow Card -->
-        @if (selectedAgent) {
-          <div class="lg:col-span-2 space-y-6">
-            <div class="card bg-base-100 shadow-xl border border-base-200">
-              <div class="card-body">
-                <div class="flex flex-col sm:flex-row justify-between items-start gap-4 mb-4">
-                  <div>
-                    <h2 class="card-title text-2xl font-bold">{{ selectedAgent.name }}</h2>
-                    <p class="text-base-content/70">{{ selectedAgent.description }}</p>
-                  </div>
-                  <div class="flex flex-wrap gap-2">
-                    <button class="btn btn-sm btn-outline btn-primary" (click)="openModal('workflow')">
-                      <i class="fas fa-code"></i> Workflow
-                    </button>
-                    <button class="btn btn-sm btn-outline btn-info" (click)="openModal('input')">
-                      <i class="fas fa-sign-in-alt"></i> Input
-                    </button>
-                    <button class="btn btn-sm btn-outline btn-accent" (click)="openModal('output')">
-                      <i class="fas fa-sign-out-alt"></i> Output
-                    </button>
-                  </div>
-                </div>
-
-                <div class="divider"></div>
-
-                <div class="bg-base-200 rounded-box p-4 overflow-auto">
-                  <app-workflow-graph [workflow]="selectedAgent.workflow"></app-workflow-graph>
-                </div>
-              </div>
-            </div>
-
-            <!-- Stats Overview -->
-            @if (summaryStats) {
-              <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div class="stat bg-base-100 border border-base-200 rounded-box shadow-sm p-4">
-                  <div class="stat-title text-xs font-bold uppercase">Total Sessions</div>
-                  <div class="stat-value text-primary text-2xl">{{ summaryStats.total_sessions }}</div>
-                </div>
-                <div class="stat bg-base-100 border border-base-200 rounded-box shadow-sm p-4">
-                  <div class="stat-title text-xs font-bold uppercase">Total Messages</div>
-                  <div class="stat-value text-accent text-2xl">{{ summaryStats.total_messages }}</div>
-                </div>
-                <div class="stat bg-base-100 border border-base-200 rounded-box shadow-sm p-4">
-                  <div class="stat-title text-xs font-bold uppercase">Total Runs</div>
-                  <div class="stat-value text-info text-2xl">{{ summaryStats.total_runs || 0 }}</div>
-                </div>
-                <div class="stat bg-base-100 border border-base-200 rounded-box shadow-sm p-4">
-                  <div class="stat-title text-xs font-bold uppercase">Total Tasks</div>
-                  <div class="stat-value text-secondary text-2xl">{{ summaryStats.total_tasks }}</div>
-                </div>
-              </div>
-
-              <!-- Charts -->
-              @if (dailyStats) {
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <!-- Activity Chart -->
-                  <div class="card bg-base-100 border border-base-200 shadow-sm h-[350px]">
-                    <div class="card-body p-4">
-                      <h3 class="text-sm font-bold opacity-70 mb-2 uppercase">Activity (Last 7 Days)</h3>
-                      <div class="flex-1 min-h-0">
-                        <canvas baseChart
-                          [data]="activityChartData"
-                          [options]="chartOptions"
-                          [type]="'line'">
-                        </canvas>
-                      </div>
-                    </div>
-                  </div>
-
-                  <!-- Tokens Chart -->
-                  <div class="card bg-base-100 border border-base-200 shadow-sm h-[350px]">
-                    <div class="card-body p-4">
-                      <h3 class="text-sm font-bold opacity-70 mb-2 uppercase">Tokens</h3>
-                      <div class="flex-1 min-h-0">
-                        <canvas baseChart
-                          [data]="tokensChartData"
-                          [options]="chartOptions"
-                          [type]="'line'">
-                        </canvas>
-                      </div>
-                    </div>
-                  </div>
-
-                  <!-- Durations Chart -->
-                  <div class="card bg-base-100 border border-base-200 shadow-sm h-[350px]">
-                    <div class="card-body p-4">
-                      <h3 class="text-sm font-bold opacity-70 mb-2 uppercase">Avg Durations (s)</h3>
-                      <div class="flex-1 min-h-0">
-                        <canvas baseChart
-                          [data]="durationsChartData"
-                          [options]="chartOptions"
-                          [type]="'line'">
-                        </canvas>
-                      </div>
-                    </div>
-                  </div>
-
-                  <!-- Workflow Runtimes Chart -->
-                  <div class="card bg-base-100 border border-base-200 shadow-sm h-[350px]">
-                    <div class="card-body p-4">
-                      <h3 class="text-sm font-bold opacity-70 mb-2 uppercase">Workflow Runtimes (s)</h3>
-                      <div class="flex-1 min-h-0">
-                        <canvas baseChart
-                          [data]="runtimesChartData"
-                          [options]="chartOptions"
-                          [type]="'line'">
-                        </canvas>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              }
-
-              <div class="flex justify-end pt-4">
-                <button class="btn btn-primary" (click)="goToConversations()">
-                  <i class="fas fa-comments"></i> View Conversations
-                </button>
-              </div>
+                  @if (agent.updated_at) {
+                    <div class="agent-updated">Updated {{ agent.updated_at | date: 'short' }}</div>
+                  }
+                </td>
+              </tr>
             }
+          </tbody>
+        </table>
+      </ui-table>
+    </ui-card>
+
+    @if (selected(); as agent) {
+      <div class="agent-detail" data-testid="agent-detail">
+        <ui-card [title]="agent.name" icon="fa-diagram-project">
+          <a
+            card-actions
+            uiButton="ghost"
+            size="sm"
+            routerLink="/conversations"
+            [queryParams]="{ agentId: agent.id }"
+            data-testid="agent-conversations"
+            ><i class="fa-solid fa-comments" aria-hidden="true"></i> View conversations</a
+          >
+          @if (agent.description) {
+            <p class="text-muted" data-testid="agent-description">{{ agent.description }}</p>
+          }
+          <app-workflow-graph [workflow]="agent.workflow" />
+          <div class="card-actions-bar">
+            <button type="button" uiButton size="sm" (click)="open('workflow')" data-testid="open-workflow">
+              <i class="fa-solid fa-code" aria-hidden="true"></i> Workflow
+            </button>
+            <button type="button" uiButton size="sm" (click)="open('input')" data-testid="open-input">
+              <i class="fa-solid fa-right-to-bracket" aria-hidden="true"></i> Input schema
+            </button>
+            <button type="button" uiButton size="sm" (click)="open('output')" data-testid="open-output">
+              <i class="fa-solid fa-right-from-bracket" aria-hidden="true"></i> Output schema
+            </button>
           </div>
+        </ui-card>
+
+        @if (statsLoading()) {
+          <ui-loading label="Loading figures" />
+        } @else if (statsError()) {
+          <ui-alert data-testid="stats-error">
+            {{ statsError() }}
+            <button
+              alert-actions
+              type="button"
+              uiButton="ghost"
+              size="sm"
+              (click)="loadStats()"
+              data-testid="stats-retry"
+            >
+              Retry
+            </button>
+          </ui-alert>
+        } @else {
+          @if (summary(); as s) {
+            <ui-stats class="agent-totals" data-testid="agent-totals">
+              <ui-stat label="Sessions" hint="Last 30 days">{{ s.total_sessions | number }}</ui-stat>
+              <ui-stat label="Runs" hint="Last 30 days">{{ s.total_runs | number }}</ui-stat>
+              <ui-stat label="Messages" hint="Last 30 days">{{ s.total_messages | number }}</ui-stat>
+              <ui-stat label="Tasks" hint="Last 30 days">{{ s.total_tasks | number }}</ui-stat>
+              <ui-stat label="Input tokens" hint="Last 30 days">{{ s.total_prompt_tokens | number }}</ui-stat>
+              <ui-stat label="Output tokens" hint="Last 30 days">{{ s.total_completion_tokens | number }}</ui-stat>
+            </ui-stats>
+          }
+          @if (daily()) {
+            <div class="agent-charts">
+              <ui-card title="Activity per day" icon="fa-chart-column" fill data-testid="activity-chart">
+                <app-bar-chart
+                  [bars]="activity()"
+                  [series]="activitySeries"
+          unit="count"
+                  label="Sessions, runs and messages per day"
+                  [empty]="'No activity in the last ' + chartDays + ' days.'"
+                />
+              </ui-card>
+              <ui-card title="Tokens per day" icon="fa-coins" fill data-testid="token-chart">
+                <app-bar-chart
+                  [bars]="tokens()"
+                  [series]="tokenSeries"
+          unit="tokens"
+                  label="Input, output and embedding tokens per day"
+                  [empty]="'No model calls in the last ' + chartDays + ' days.'"
+                />
+              </ui-card>
+              <ui-card title="Average call duration" icon="fa-stopwatch" fill data-testid="call-duration-chart">
+                @if (active()) {
+                  <div class="line-chart">
+                    <canvas baseChart type="line" [data]="callDurations()!" [options]="durationOptions"></canvas>
+                  </div>
+                } @else {
+                  <p class="text-muted">No sessions in the last {{ chartDays }} days.</p>
+                }
+              </ui-card>
+              <ui-card title="Average run duration" icon="fa-clock" fill data-testid="run-duration-chart">
+                @if (active()) {
+                  <div class="line-chart">
+                    <canvas baseChart type="line" [data]="runDurations()!" [options]="durationOptions"></canvas>
+                  </div>
+                } @else {
+                  <p class="text-muted">No sessions in the last {{ chartDays }} days.</p>
+                }
+              </ui-card>
+            </div>
+          }
         }
       </div>
     }
-  }
+  </div>
+}
 
-  <!-- JSON Modal -->
-  @if (showModal) {
-    <div class="modal modal-open">
-      <div class="modal-box w-full max-w-lg md:max-w-4xl">
-        <div class="flex justify-between items-center mb-4">
-          <h3 class="font-bold text-lg">{{ modalTitle }}</h3>
-          <button class="btn btn-sm btn-circle btn-ghost" (click)="closeModal()">✕</button>
-        </div>
-        <div class="max-h-[60vh] overflow-auto bg-base-200 rounded-box p-4">
-          <app-json-tree [data]="modalData" [isExpanded]="true"></app-json-tree>
-        </div>
-        <div class="modal-action">
-          <button class="btn" (click)="closeModal()">Close</button>
-        </div>
-      </div>
-      <div class="modal-backdrop" (click)="closeModal()"></div>
+<ui-dialog size="xl" [open]="document() !== null" [title]="documentTitle()" (closed)="closeDocument()">
+  @if (document()) {
+    <div class="document-body" data-testid="document-body">
+      @if (documentData()) {
+        <app-json-tree [data]="documentData()" [isExpanded]="true" />
+      } @else {
+        <p class="text-muted">This agent has no {{ documentTitle().toLowerCase() }} recorded.</p>
+      }
     </div>
   }
-</div>
+  <button dialog-actions type="button" uiButton (click)="closeDocument()" data-testid="document-close">Close</button>
+</ui-dialog>

@@ -1,165 +1,140 @@
-.tasks-list-container {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-
-.tasks-header {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  padding: 1rem;
-  border-bottom: 1px solid #ddd;
-  background-color: #f8f9fa;
-  position: sticky;
-  top: 0;
-  z-index: 10;
-}
-
-.tasks-header h4 {
-  margin: 0;
-  color: #333;
-}
-
-.back-button {
-  background: none;
-  border: none;
-  color: #007bff;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.9rem;
-  padding: 0.25rem 0.5rem;
-  border-radius: 4px;
-}
-
-.back-button:hover {
-  background-color: #e9ecef;
-}
-
-.tasks-scroll-area {
-  flex: 1;
-  overflow-y: auto;
-  padding: 1rem;
-  background-color: var(--color-base-100);
-}
-
-.task-item {
-  border: 1px solid var(--color-base-300);
-  border-radius: 8px;
-  margin-bottom: 1.5rem;
-  background-color: var(--color-base-100);
-  overflow: hidden;
-}
-
-.task-item.has-errors {
-  border-left: 4px solid var(--color-error);
-}
-
-.task-item-header {
-  padding: 0.75rem 1rem;
-  background-color: var(--color-base-200);
-  border-bottom: 1px solid var(--color-base-300);
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  font-family: var(--font-family-header);
-}
-
-.task-name {
-  font-weight: 600;
-  color: var(--color-base-content);
-  flex: 1;
-}
-
-.task-time, .task-duration {
-  font-size: 0.8rem;
-  color: var(--color-neutral);
-}
-
-.task-item-body {
-  padding: 1rem;
-}
-
-.task-section {
-  margin-bottom: 1rem;
-}
-
-.task-section:last-child {
-  margin-bottom: 0;
-}
-
-.task-section label {
+:host {
   display: block;
-  font-size: 0.75rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  color: var(--color-neutral);
-  margin-bottom: 0.5rem;
+  min-width: 0;
 }
 
-.prompt-content {
-  background-color: var(--color-base-content);
-  color: var(--color-base-100);
-  padding: 0.75rem;
-  border-radius: 4px;
-  font-family: var(--font-family-accent);
-  font-size: 0.85rem;
-  white-space: pre-wrap;
-  max-height: 300px;
-  overflow-y: auto;
-}
-
-
-.task-section.errors {
-  padding-top: 1rem;
-  border-top: 1px solid var(--color-base-300);
-  margin-top: 1rem;
-}
-
-.error-list {
-  margin: 0;
-  padding-left: 1.25rem;
-  color: var(--color-error);
-  font-size: 0.95rem;
-  font-weight: 500;
-}
-
-.no-errors {
-  color: var(--color-neutral);
-  font-size: 0.9rem;
-  font-style: italic;
-}
-
-.empty-state {
-  padding: 2rem;
-  text-align: center;
-  color: var(--color-neutral);
-}
-
-/* A tool call an agent chose for itself, shown under the node that made it.
-   One level of nesting only: `parent_task_name` is a name, and a name join
-   wants exactly one level. */
-.task-item.tool-call {
-  margin-left: 1.75rem;
-  border-left: 2px solid var(--color-base-300, #d1d5db);
+.tasks-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
 }
 
 .task-seq {
-  font-family: ui-monospace, monospace;
+  width: 2.5rem;
+  color: var(--color-slate-400);
+}
+
+.task-name {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 600;
+}
+
+.task-nested {
+  padding-left: var(--space-5);
+  font-weight: 500;
+}
+
+.task-chevron {
+  width: 10px;
   font-size: 0.65rem;
-  opacity: 0.4;
-  min-width: 1.5rem;
+  color: var(--color-lime-700);
+  transition: transform var(--motion-fast);
 }
 
-/* The routing decision, and the value it was made on. */
+.task-chevron-open {
+  transform: rotate(90deg);
+}
+
+.task-nest-mark {
+  font-size: 0.7rem;
+  color: var(--color-slate-400);
+}
+
+.task-tool {
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-slate-600);
+}
+
+tr.task-failed .task-name {
+  color: var(--color-raspberry);
+}
+
 .branch-summary {
-  padding: 0.25rem 0.75rem 0.5rem;
-  font-size: 0.8rem;
-  opacity: 0.85;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+  padding-left: 18px;
+  font-size: var(--text-sm);
+  color: var(--color-slate-600);
 }
 
-.branch-summary.unmatched {
-  opacity: 1;
+/* The opened step: a quiet ground under its row, not a hover target. */
+tr.task-detail {
+  cursor: default;
+}
+
+tr.task-detail:hover {
+  background: transparent;
+}
+
+tr.task-detail > td {
+  padding: var(--space-3) var(--space-3) var(--space-5);
+  background: var(--color-base-100);
+}
+
+.task-errors {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.task-label {
+  display: block;
+  margin-bottom: var(--space-1);
+  font-family: var(--font-family-accent);
+  font-size: var(--text-xs);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--color-slate-500);
+}
+
+.task-uri {
+  margin: 0 0 var(--space-2);
+}
+
+.task-uri .task-label {
+  display: inline;
+  margin-right: var(--space-2);
+}
+
+.task-section {
+  min-width: 0;
+  margin-bottom: var(--space-3);
+}
+
+.task-prompt {
+  max-height: 320px;
+  overflow-y: auto;
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
+
+.task-io {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: var(--space-4);
+}
+
+.task-io .task-section {
+  padding: var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-base-200);
+  max-height: 480px;
+  overflow: auto;
+}
+
+/* On a phone the table keeps what tells the steps apart; type and tool are in the opened step. */
+@media (max-width: 640px) {
+  .col-wide {
+    display: none;
+  }
 }

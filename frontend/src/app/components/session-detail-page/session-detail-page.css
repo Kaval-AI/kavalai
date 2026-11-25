@@ -1,12 +1,100 @@
-/*
-   Session detail page is now using Tailwind CSS and DaisyUI classes.
-   Custom CSS is kept minimal for specific layout needs.
-*/
+.header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
 
-.chat-bubble {
-  max-width: 85%;
-  font-size: 0.95rem;
-  line-height: 1.5;
+/* A run's metadata: identifiers and start on the left, figures on the right. */
+.run-meta {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: var(--space-4);
+  align-items: start;
+  margin-bottom: var(--space-5);
+}
+@media (max-width: 800px) {
+  .run-meta {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.run-info ui-copy-button {
+  margin-left: var(--space-2);
+}
+
+/* The transcript: the user's turns on the right on lime, the agent's on the
+   left on the page ground, each with its author and time above it. */
+.transcript {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.message {
+  max-width: min(92%, 72ch);
+  align-self: flex-start;
+  min-width: 0;
+}
+.message.from-user {
+  align-self: flex-end;
+}
+.message-meta {
+  margin-bottom: var(--space-1);
+  font-family: var(--font-family-accent);
+  font-size: var(--text-xs);
+  color: var(--color-slate-500);
+}
+.message.from-user .message-meta {
+  text-align: right;
+}
+.message-role {
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.message-text {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-base-100);
+  border-left: 3px solid var(--color-base-300);
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+.message.from-user .message-text {
+  background: var(--color-lime-100);
+  border-left: 0;
+  border-right: 3px solid var(--color-primary);
+}
+.message-json {
+  max-height: 24em;
+  overflow: auto;
+  font-family: var(--font-family-accent);
+  font-size: var(--text-sm);
+}
+.no-messages {
+  margin: 0;
+}
+
+.json-box {
+  max-height: 60vh;
+  overflow: auto;
+  padding: var(--space-3);
+  background: var(--color-base-100);
+}
+
+/* A run's timeline, steps and model calls, each under a small mono heading. */
+.run-section {
+  margin-top: var(--space-5);
+}
+
+.run-section-title {
+  margin: 0 0 var(--space-2);
+  font-family: var(--font-family-accent);
+  font-size: var(--text-xs);
+  font-weight: 400;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--color-slate-500);
+}
+
+.run-toggle {
+  margin-top: var(--space-4);
 }

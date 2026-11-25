@@ -1,0 +1,9 @@
+<dialog #dialog class="ui-dialog" [attr.data-size]="size()" [attr.aria-label]="title() || null" (close)="onClose()" (click)="onClick($event)">
+  <div class="ui-dialog-body">
+    @if (title()) {
+      <h2 class="ui-dialog-title">{{ title() }}</h2>
+    }
+    <div class="ui-dialog-content"><ng-content /></div>
+    <div class="ui-dialog-actions"><ng-content select="[dialog-actions]" /></div>
+  </div>
+</dialog>

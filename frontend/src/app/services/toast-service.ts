@@ -13,16 +13,19 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-
 import { Injectable, signal } from '@angular/core';
 
 export interface Toast {
   message: string;
   type: 'success' | 'error' | 'info' | 'warning';
   id: number;
-  position?: { x: number; y: number };
 }
 
+/**
+ * Short confirmations ("Saved", "Copied"), shown in the bottom-right corner
+ * and gone after `duration` milliseconds (kept when it is 0). A failure the
+ * user must act on belongs in a `ui-alert` on the page, not here.
+ */
 @Injectable({
   providedIn: 'root',
 })
@@ -32,26 +35,23 @@ export class ToastService {
 
   readonly toasts = this.toastsSignal.asReadonly();
 
-  show(message: string, type: Toast['type'] = 'info', duration = 1500, position?: { x: number; y: number }) {
+  show(message: string, type: Toast['type'] = 'info', duration = 2500): void {
     const id = this.nextId++;
-    const toast: Toast = { message, type, id, position };
-
-    this.toastsSignal.update(toasts => [...toasts, toast]);
-
+    this.toastsSignal.update((toasts) => [...toasts, { message, type, id }]);
     if (duration > 0) {
       setTimeout(() => this.remove(id), duration);
     }
   }
 
-  success(message: string, duration = 1500, position?: { x: number; y: number }) {
-    this.show(message, 'success', duration, position);
+  success(message: string, duration = 2500): void {
+    this.show(message, 'success', duration);
   }
 
-  error(message: string, duration = 1500, position?: { x: number; y: number }) {
-    this.show(message, 'error', duration, position);
+  error(message: string, duration = 5000): void {
+    this.show(message, 'error', duration);
   }
 
-  remove(id: number) {
-    this.toastsSignal.update(toasts => toasts.filter(t => t.id !== id));
+  remove(id: number): void {
+    this.toastsSignal.update((toasts) => toasts.filter((t) => t.id !== id));
   }
 }

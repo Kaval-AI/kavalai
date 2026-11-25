@@ -14,4 +14,21 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-/* Most styling is handled by Tailwind and DaisyUI */
+/* The picture as it will look, beside what only an administrator changes. */
+.identity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+
+.identity > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}

@@ -21,11 +21,12 @@ import os
 import pickle
 from contextlib import asynccontextmanager
 from datetime import datetime
+from urllib.parse import urlsplit
 from uuid import UUID
 
 import numpy as np
 from loguru import logger
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 try:
@@ -51,11 +52,15 @@ from kavalai.backoffice.embedding_projector import train_pca
 from kavalai.backoffice.users import (
     hash_password,
     validate_password,
+    validate_picture_url,
     verify_password,
 )
 from kavalai.backoffice.project_service import (
     ProjectService,
+    connection_fields,
+    merged_project,
     project_fields,
+    public_project,
     project_rag_schema,
     project_read_only,
     project_sessionmaker,
@@ -210,19 +215,54 @@ def public_user(user: db.User) -> dict:
     }
 
 
-def user_fields(data: dict) -> dict:
+def backoffice_hosts(request: Request) -> list[str]:
+    """The host names the backoffice is reached under, as far as a request shows.
+
+    The host the request was addressed to (the nginx in front forwards
+    ``Host``), the page that sent it (``Origin``) and the frontend URL that
+    Google sign-in configures.
+    """
+    urls = [str(request.base_url), request.headers.get("origin", "")]
+    if GOOGLE_OAUTH:
+        urls.append(GOOGLE_OAUTH["frontend_url"])
+    hosts = []
+    for url in urls:
+        try:
+            host = urlsplit(url).hostname
+        except ValueError:
+            continue
+        if host:
+            hosts.append(host)
+    return hosts
+
+
+def checked_picture(value: object, request: Request) -> str | None:
+    """A picture from a request body as it may be stored (see
+    :func:`~kavalai.backoffice.users.validate_picture_url`); 400 otherwise."""
+    if value is not None and not isinstance(value, str):
+        raise HTTPException(status_code=400, detail="The picture must be a URL.")
+    try:
+        return validate_picture_url(value, backoffice_hosts(request))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+def user_fields(data: dict, request: Request) -> dict:
     """The columns a create/update body may set on a user.
 
     ``password`` is hashed into ``password_hash`` (an empty one is left out,
     so an edit form that does not touch the password keeps it); a
     ``password_hash`` sent by the client is dropped, as is ``has_password``,
-    which :func:`public_user` adds and a form may send back.
+    which :func:`public_user` adds and a form may send back. ``picture`` is
+    checked by :func:`checked_picture`.
     """
     fields = {
         key: value
         for key, value in data.items()
         if key not in ("password", "password_hash", "has_password")
     }
+    if "picture" in data:
+        fields["picture"] = checked_picture(data["picture"], request)
     password = data.get("password")
     if password:
         try:
@@ -268,12 +308,12 @@ def assert_logged_in(request: Request):
         raise HTTPException(status_code=401, detail="Unauthorized.")
 
 
-def assert_is_admin(request: Request):
+def assert_is_admin(
+    request: Request, detail: str = "Only administrators can do this."
+) -> None:
     user_session = request.session.get("user_info")
     if not user_session.get("is_admin"):
-        raise HTTPException(
-            status_code=403, detail="Only administrators can create new projects."
-        )
+        raise HTTPException(status_code=403, detail=detail)
 
 
 async def assert_is_owner(session: db.AsyncSession, request: Request, project_id: UUID):
@@ -357,8 +397,13 @@ async def login(request: Request):
     return await oauth.google.authorize_redirect(request, redirect_uri)
 
 
-@app.get("/logout")
+@app.post("/logout")
 async def logout(request: Request):
+    """End the session.
+
+    A POST, because a GET would be sent by any image or link pointing at it,
+    with the session cookie, and log the viewer out.
+    """
     request.session.pop("user_info", None)
     return JSONResponse({"logged_in": is_logged_in(request)})
 
@@ -421,19 +466,117 @@ async def set_active_project(project_id: UUID, request: Request):
         return {"status": "ok", "active_project_id": project_id}
 
 
+PROFILE_FIELDS = ("name", "picture")
+"""What a signed-in user may change on their own record through ``PATCH /user/me``."""
+
+WRONG_CURRENT_PASSWORD = "The current password is not correct."
+
+
+async def signed_in_user(session: db.AsyncSession, request: Request) -> db.User:
+    """The signed-in user's own row; a session whose user was deleted is refused."""
+    assert_logged_in(request)
+    user = await get_one(session, db.User, UUID(request.session["user_info"]["id"]))
+    if user is None:
+        raise HTTPException(status_code=401, detail="Unauthorized.")
+    return user
+
+
+def profile_fields(data: dict, request: Request) -> dict:
+    """The name and picture from a profile body, checked.
+
+    Any other key is refused rather than ignored, so a client that tries to
+    change its address or its administrator flag here learns that it cannot.
+    An empty picture clears it; any other goes through :func:`checked_picture`.
+    """
+    unknown = sorted(set(data) - set(PROFILE_FIELDS))
+    if unknown:
+        refused = ", ".join(unknown)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Only the name and the picture can be changed here, not {refused}.",
+        )
+    fields: dict = {}
+    if "name" in data:
+        name = data["name"]
+        if not isinstance(name, str) or not name.strip():
+            raise HTTPException(status_code=400, detail="The name is required.")
+        fields["name"] = name.strip()
+    if "picture" in data:
+        fields["picture"] = checked_picture(data["picture"], request)
+    return fields
+
+
+@app.get("/user/me")
+async def user_me(request: Request):
+    """The signed-in user's own record, including ``has_password``."""
+    async with get_backoffice_session() as session:
+        return public_user(await signed_in_user(session, request))
+
+
+@app.patch("/user/me")
+async def user_me_update(request: Request, data: dict = Body(...)):
+    """Change the signed-in user's own name and picture.
+
+    The session carries the name and picture the shell shows, so it is
+    refreshed with the saved values.
+    """
+    async with get_backoffice_session() as session:
+        user = await signed_in_user(session, request)
+        fields = profile_fields(data, request)
+        if fields:
+            user = await update(session, db.User, user.id, fields)
+    user_info = request.session["user_info"]
+    user_info["name"] = user.name
+    user_info["picture"] = user.picture
+    request.session["user_info"] = user_info
+    return public_user(user)
+
+
+@app.post("/user/me/password")
+async def user_me_password(request: Request, data: dict = Body(...)):
+    """Set or change the signed-in user's own password.
+
+    A user who has a password must give it; a missing and a wrong one get the
+    same answer. A user who signs in through Google only has none to give and
+    may set a first one.
+    """
+    current = data.get("current_password")
+    new = data.get("new_password")
+    if not isinstance(new, str):
+        raise HTTPException(status_code=400, detail="The new password is required.")
+    try:
+        validate_password(new)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    async with get_backoffice_session() as session:
+        user = await signed_in_user(session, request)
+        if user.password_hash is not None:
+            given = current if isinstance(current, str) else ""
+            # scrypt is deliberately slow; keep it off the event loop.
+            if not await asyncio.to_thread(verify_password, given, user.password_hash):
+                logger.warning(f"Failed password change by {user.email}")
+                raise HTTPException(status_code=400, detail=WRONG_CURRENT_PASSWORD)
+        password_hash = await asyncio.to_thread(hash_password, new)
+        user = await update(session, db.User, user.id, {"password_hash": password_hash})
+    logger.info(f"Password changed by {user.email}")
+    return public_user(user)
+
+
 @app.post("/projects/create")
 async def projects_create(request: Request, data: dict = Body(...)):
     assert_logged_in(request)
-    assert_is_admin(request)
+    assert_is_admin(request, "Only administrators can create new projects.")
     user_session = request.session.get("user_info")
     service = ProjectService(db.AsyncBackofficeSession)
-    return await service.create_project(data, UUID(user_session["id"]))
+    project = await service.create_project(data, UUID(user_session["id"]))
+    return public_project(project, db.ProjectRole.owner.value)
 
 
 @app.get("/projects/get/{project_id}")
 async def projects_get_by_id(project_id: UUID, request: Request):
     assert_logged_in(request)
-    return await get_project_and_assert_access(request, project_id)
+    return public_project(await get_project_and_assert_access(request, project_id))
 
 
 @app.get("/projects/all")
@@ -453,7 +596,25 @@ async def projects_update(project_id: UUID, request: Request, data: dict = Body(
     updated = await service.update_project(project_id, data)
     if not updated:
         raise HTTPException(status_code=404, detail="Project not found.")
-    return updated
+    return public_project(updated, db.ProjectRole.owner.value)
+
+
+@app.post("/projects/{project_id}/reveal-password")
+async def projects_reveal_password(project_id: UUID, request: Request):
+    """The project's database password, for an administrator who asks for it.
+
+    Project listings never carry it (:func:`public_project`). An administrator
+    can create projects and so may see their credentials; the request is a POST
+    so nothing caches or prefetches it, and each one is logged.
+    """
+    assert_logged_in(request)
+    assert_is_admin(
+        request, "Only administrators can see a project's database password."
+    )
+    project = await get_project_and_assert_access(request, project_id)
+    user_email = request.session.get("user_info", {}).get("email")
+    logger.info(f"Database password of project {project_id} revealed to {user_email}.")
+    return {"db_password": project.db_password}
 
 
 @app.delete("/projects/delete/{project_id}")
@@ -476,12 +637,22 @@ async def users_get_all(request: Request):
         return [public_user(user) for user in await get_all(session, db.User)]
 
 
+DUPLICATE_EMAIL = "A user with this email address already exists."
+
+
 @app.post("/users/create")
 async def users_create(request: Request, data: dict = Body(...)):
     assert_logged_in(request)
     assert_is_admin(request)
     async with get_backoffice_session() as session:
-        return public_user(await insert(session, db.User, user_fields(data)))
+        try:
+            return public_user(
+                await insert(session, db.User, user_fields(data, request))
+            )
+        except IntegrityError:
+            # Caught here, inside the session block: get_backoffice_session
+            # would otherwise report it as an unreachable database.
+            raise HTTPException(status_code=409, detail=DUPLICATE_EMAIL)
 
 
 @app.put("/users/update/{user_id}")
@@ -489,7 +660,12 @@ async def users_update(user_id: UUID, request: Request, data: dict = Body(...)):
     assert_logged_in(request)
     assert_is_admin(request)
     async with get_backoffice_session() as session:
-        updated = await update(session, db.User, user_id, user_fields(data))
+        try:
+            updated = await update(
+                session, db.User, user_id, user_fields(data, request)
+            )
+        except IntegrityError:
+            raise HTTPException(status_code=409, detail=DUPLICATE_EMAIL)
         if not updated:
             raise HTTPException(status_code=404, detail="User not found.")
         return public_user(updated)
@@ -621,6 +797,24 @@ async def agents_get_session_details(
         return await agent_sessions.get_session_details(session, session_id)
 
 
+async def _query_model_calls(project: db.Project, query):
+    """Run ``query`` on an ``AgentService`` over the project's database.
+
+    AgentService opens its own sessions, so a database that cannot be reached
+    surfaces here, and answers 503 like every other project page.
+    """
+    try:
+        return await query(AgentService(project_sessionmaker(project)))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to connect to project database for {project.name}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Database is not connected for project '{project.name}'. Please check your database settings.",
+        )
+
+
 @app.get("/projects/{project_id}/llm-call-stats")
 async def projects_get_llm_call_stats(
     project_id: UUID,
@@ -631,33 +825,65 @@ async def projects_get_llm_call_stats(
     agent_id: UUID | None = None,
     session_id: UUID | None = None,
     run_id: UUID | None = None,
+    search: str | None = None,
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
 ):
     """Fetch paginated model call stats for a specific project.
 
     ``agent_id``, ``session_id`` and ``run_id`` narrow the list to the calls
     attributed to that agent, conversation or run — the run's own calls are
-    what the task debugger shows beside its tasks.
+    what the task debugger shows beside its tasks. ``search`` matches the
+    model name and the request and response text; ``start_date`` and
+    ``end_date`` bound when the call was recorded.
     """
     assert_logged_in(request)
     project = await get_project_and_assert_access(request, project_id)
-
-    # AgentService opens its own sessions, so connection errors surface here.
-    try:
-        service = AgentService(project_sessionmaker(project))
-        return await service.get_model_call_stats(
+    return await _query_model_calls(
+        project,
+        lambda service: service.get_model_call_stats(
             call_type=call_type,
             limit=limit,
             offset=offset,
             agent_id=agent_id,
             session_id=session_id,
             run_id=run_id,
-        )
-    except Exception as e:
-        logger.error(f"Failed to connect to project database for {project.name}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database is not connected for project '{project.name}'. Please check your database settings.",
-        )
+            search=search,
+            start=start_date,
+            end=end_date,
+        ),
+    )
+
+
+@app.get("/projects/{project_id}/llm-call-stats/summary")
+async def projects_get_llm_call_summary(
+    project_id: UUID,
+    request: Request,
+    call_type: str | None = None,
+    agent_id: UUID | None = None,
+    session_id: UUID | None = None,
+    run_id: UUID | None = None,
+    search: str | None = None,
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+):
+    """The token usage of the calls the list endpoint would return with the
+    same filters — totals, per model and per day — across all of them, not
+    one page."""
+    assert_logged_in(request)
+    project = await get_project_and_assert_access(request, project_id)
+    return await _query_model_calls(
+        project,
+        lambda service: service.summarise_model_calls(
+            call_type=call_type,
+            agent_id=agent_id,
+            session_id=session_id,
+            run_id=run_id,
+            search=search,
+            start=start_date,
+            end=end_date,
+        ),
+    )
 
 
 def _reuse_session(session: AsyncSession):
@@ -886,10 +1112,20 @@ async def projects_rag_collections(project_id: UUID, request: Request):
         return await rag_service.list_collections()
 
 
-@app.get("/projects/{project_id}/rag/train-pca")
-async def projects_train_pca(project_id: UUID, collection_name: str, request: Request):
-    """Trigger PCA training for a specific project and collection."""
+@app.post("/projects/{project_id}/rag/train-pca")
+async def projects_train_pca(
+    project_id: UUID, request: Request, data: dict = Body(...)
+):
+    """Train the PCA projection of a collection, streaming progress as SSE.
+
+    The body is ``{"collection_name": ...}``. A POST, because training is
+    expensive and writes to the backoffice database, and a GET would be
+    started by any image pointing at it.
+    """
     assert_logged_in(request)
+    collection_name = data.get("collection_name")
+    if not isinstance(collection_name, str) or not collection_name:
+        raise HTTPException(status_code=400, detail="A collection name is required.")
     project = await get_project_and_assert_access(request, project_id)
 
     streamer = Streamer(stream_delta=True)
@@ -933,13 +1169,29 @@ async def projects_train_pca(project_id: UUID, collection_name: str, request: Re
 async def projects_test_connection(
     project_id: str, request: Request, data: dict = Body(default={})
 ):
-    """Test connection to the project database."""
+    """Test the connection to a project's database.
+
+    For ``new`` the body describes the database, and only administrators —
+    who can create projects — may have the backoffice connect to an address
+    of their choosing. For an existing project an empty body tests the saved
+    settings, open to any member; a body tests those settings with the body's
+    changes applied, before they are saved, which only an owner — who can save
+    them — may do. The stored password is reused under the rules of
+    :func:`connection_fields`, so a changed host cannot be sent it.
+    """
     assert_logged_in(request)
 
     if project_id == "new":
+        assert_is_admin(
+            request, "Only administrators can test a new project's connection."
+        )
         project = db.Project(**project_fields(data))
     else:
         project = await get_project_and_assert_access(request, UUID(project_id))
+        if project_fields(data):
+            async with get_backoffice_session() as session:
+                await assert_is_owner(session, request, project.id)
+            project = merged_project(project, connection_fields(project, data))
 
     service = ProjectService(db.AsyncBackofficeSession)
     return await service.test_connection(project)
@@ -1003,7 +1255,7 @@ if __name__ == "__main__":
     config = uvicorn.Config(
         "kavalai.backoffice.server:app",
         host=os.environ.get("KAVALAI_BO_HOST", "127.0.0.1"),
-        port=int(os.environ.get("KAVALAI_BO_PORT", "8000")),
+        port=int(os.environ.get("KAVALAI_BO_PORT", "12800")),
         log_level="info",
         reload=True,
         access_log=True,

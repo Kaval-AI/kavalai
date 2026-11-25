@@ -1,92 +1,74 @@
-<div class="p-6 max-w-7xl mx-auto space-y-6">
-  <!-- Header with Back Button and Run Info -->
-  <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-    <button class="btn btn-sm btn-ghost gap-2" (click)="goBack()">
-      <i class="fas fa-arrow-left"></i> Back to Agent Run
-    </button>
-    @if (sessionId && runId) {
-      <div class="flex flex-wrap gap-2">
-        <a [routerLink]="['/conversations', sessionId]" class="badge badge-outline gap-2 p-3 font-mono text-[10px] hover:bg-base-200 cursor-pointer transition-colors no-underline">
-          <span class="opacity-50">Session:</span> {{ sessionId }}
-        </a>
-        <a [routerLink]="['/conversations', sessionId]" class="badge badge-outline badge-accent gap-2 p-3 font-mono text-[10px] hover:bg-accent/10 cursor-pointer transition-colors no-underline">
-          <span class="opacity-50 text-base-content">Run:</span> {{ runId }}
-        </a>
-      </div>
-    }
-  </div>
-
-  <!-- Content Area -->
-  <div class="card bg-base-100 shadow-xl border border-base-200">
-    <div class="card-body p-4 sm:p-6">
-      @if (loading) {
-        <div class="flex flex-col items-center justify-center min-h-[30vh] space-y-4">
-          <span class="loading loading-spinner loading-lg text-primary"></span>
-          <p class="text-base-content/60 font-medium">Loading tasks...</p>
-        </div>
-      } @else if (error) {
-        <div class="alert alert-error shadow-lg">
-          <i class="fas fa-exclamation-circle"></i>
-          <span>{{ error }}</span>
-        </div>
-      } @else if (tasks.length === 0) {
-        <div class="flex flex-col items-center justify-center min-h-[30vh] text-center space-y-4 p-12">
-          <div class="text-6xl text-base-content/10"><i class="fas fa-tasks"></i></div>
-          <h3 class="text-xl font-bold">No Tasks Found</h3>
-          <p class="text-base-content/60">No tasks were executed in this run.</p>
-        </div>
-      } @else {
-        <div class="mb-8">
-          <h2 class="text-lg font-bold mb-4">Task Execution Timeline</h2>
-          <app-task-timeline-chart [tasks]="tasks"></app-task-timeline-chart>
-        </div>
-
-        <app-tasks-list
-          [tasks]="tasks"
-          [runId]="runId || ''"></app-tasks-list>
-      }
-    </div>
-  </div>
-
-  @if (modelCalls.length > 0) {
-    <div class="card bg-base-100 shadow-xl border border-base-200 run-model-calls">
-      <div class="card-body p-4 sm:p-6">
-        <div class="flex flex-wrap justify-between items-center gap-2 mb-2">
-          <h2 class="text-lg font-bold">Model Calls ({{ modelCalls.length }})</h2>
-          <div class="flex flex-wrap items-center gap-4 text-sm">
-            <span class="opacity-70">{{ modelCallTokens }} tokens in total</span>
-            <a class="link link-primary" routerLink="/llm-call-stats" [queryParams]="{ run_id: runId }">Open in Model calls</a>
-          </div>
-        </div>
-        <div class="overflow-x-auto">
-          <table class="table table-zebra table-sm w-full">
-            <thead>
-              <tr class="bg-base-200/50">
-                <th>Time</th>
-                <th>Model</th>
-                <th>Type</th>
-                <th class="text-right">In</th>
-                <th class="text-right">Out</th>
-                <th class="text-right">Total</th>
-                <th class="text-right">Duration</th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (call of modelCalls; track call.id) {
-                <tr>
-                  <td class="whitespace-nowrap text-xs">{{ formatTime(call.created_at) }}</td>
-                  <td class="font-mono text-xs">{{ call.model }}</td>
-                  <td><span class="badge badge-ghost badge-sm">{{ call.call_type }}</span></td>
-                  <td class="text-right">{{ call.prompt_tokens ?? '-' }}</td>
-                  <td class="text-right">{{ call.completion_tokens ?? '-' }}</td>
-                  <td class="text-right font-bold">{{ call.total_tokens ?? '-' }}</td>
-                  <td class="text-right whitespace-nowrap">{{ formatDuration(call.duration_seconds) }}</td>
-                </tr>
-              }
-            </tbody>
-          </table>
-        </div>
-      </div>
+<ui-page-header title="Run" [section]="shortId(runId())" [backLink]="backLink()" backLabel="Conversation">
+  The steps the run took, in the order they ran, and the model calls it made.
+  @if (run(); as r) {
+    <span class="text-muted" data-testid="run-started">Started {{ r.created_at | date: 'medium' }}.</span>
+  }
+  @if (runId(); as id) {
+    <div page-actions class="run-actions">
+      <ui-copy-button [text]="id" label="run id" />
+      <a uiButton routerLink="/llm-call-stats" [queryParams]="{ run_id: id }" data-testid="run-model-calls-link">
+        <i class="fa-solid fa-microchip" aria-hidden="true"></i> Model calls
+      </a>
     </div>
   }
-</div>
+</ui-page-header>
+
+@if (!projectId()) {
+  <ui-empty-state icon="fa-folder-open" title="No project selected" data-testid="no-project">
+    Choose a project in the sidebar to open its runs.
+  </ui-empty-state>
+} @else if (error()) {
+  <ui-alert data-testid="run-error">
+    {{ error() }}
+    <button alert-actions type="button" uiButton="ghost" size="sm" data-testid="run-retry" (click)="loadTasks()">
+      Retry
+    </button>
+  </ui-alert>
+} @else if (loading()) {
+  <ui-loading label="Loading the run" />
+} @else if (tasks().length === 0 && !run()) {
+  <ui-empty-state icon="fa-list-check" title="No such run" data-testid="run-missing">
+    The conversation holds no run with this ID, or the run recorded no steps.
+    <a empty-actions uiButton [routerLink]="backLink()">Open the conversation</a>
+  </ui-empty-state>
+} @else {
+  <ui-stats class="run-stats" data-testid="run-stats">
+    <ui-stat label="Duration" hint="wall-clock time">{{ formatDuration(run()?.duration_seconds) }}</ui-stat>
+    <ui-stat label="Steps" [hint]="failedTasks() ? failedTasks() + ' failed' : ''">{{ tasks().length }}</ui-stat>
+    <ui-stat
+      label="Model calls"
+      [hint]="modelCalls().length >= modelCallsLimit ? 'the first ' + modelCallsLimit : ''"
+      link="/llm-call-stats"
+      [queryParams]="{ run_id: runId() }"
+      >{{ modelCalls().length }}</ui-stat
+    >
+    <ui-stat label="Tokens" [hint]="(promptTokens() | number) + ' in / ' + (completionTokens() | number) + ' out'">{{
+      totalTokens() | number
+    }}</ui-stat>
+  </ui-stats>
+
+  <ui-card title="Timeline" icon="fa-chart-gantt">
+    @if (tasks().length > 0) {
+      <app-task-timeline-chart [tasks]="tasks()" />
+    } @else {
+      <p class="text-muted">No steps to place on the timeline.</p>
+    }
+  </ui-card>
+
+  <ui-card title="Steps" icon="fa-list-check">
+    <app-tasks-list [tasks]="tasks()" [runId]="runId() ?? ''" />
+  </ui-card>
+}
+
+@if (projectId()) {
+<ui-card title="Model calls" icon="fa-microchip" data-testid="run-model-calls">
+  @if (modelCalls().length > 0) {
+    <a card-actions uiButton="ghost" size="sm" routerLink="/llm-call-stats" [queryParams]="{ run_id: runId() }" data-testid="open-model-calls">
+      Open in Model calls <i class="fa-solid fa-arrow-right" aria-hidden="true"></i>
+    </a>
+  }
+  @if (runId(); as rid) {
+    <app-run-model-calls [projectId]="projectId()!" [runId]="rid" (loaded)="modelCalls.set($event)" />
+  }
+</ui-card>
+}

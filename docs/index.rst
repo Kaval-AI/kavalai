@@ -278,8 +278,9 @@ and their agents, whole conversations, a per-node task debugger, model-call
 statistics and a RAG explorer that projects the embedding space.
 
 .. image:: ui/projectinfopage.png
-   :alt: Backoffice project page with the active-project selector, database
-         access details and seven-day activity and token charts
+   :alt: Backoffice overview of a project: the project switcher in the sidebar,
+         the agent database's counters, and its activity and tokens per day
+         over the last seven days
    :width: 100%
 
 Setting the backoffice up, and what each page answers, is covered in

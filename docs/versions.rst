@@ -48,6 +48,21 @@ Added
   creates a user and ``set-password`` replaces a password; both prompt for it
   or read it from standard input.
 
+* **Searching and adding up model calls.** ``AgentService.get_model_call_stats``
+  takes ``search`` (the model name and the request and response text, matched
+  case-insensitively, wildcards taken literally) and ``start`` / ``end``, and
+  ``AgentService.summarise_model_calls`` adds up every call the same filters
+  select: totals, per model and per day, in tokens.
+  ``GET /projects/{id}/llm-call-stats`` takes ``search``, ``start_date`` and
+  ``end_date``, and ``GET /projects/{id}/llm-call-stats/summary`` answers the
+  summary; the Model calls page shows both.
+* **A profile for every backoffice user.** ``GET /user/me`` returns the
+  signed-in user's own record, ``PATCH /user/me`` changes its ``name`` and
+  ``picture`` and refuses any other field, and ``POST /user/me/password``
+  changes the password given the current one, or sets a first one for a user
+  who signs in through Google only. The **Profile** page uses them, and the
+  **Users** page's form now sets a password.
+
 * **``py.typed`` (PEP 561).** mypy no longer reports ``kavalai`` as missing
   library stubs, and calls into the package are checked against its real
   signatures. The public functions that had no annotations have them;
@@ -60,6 +75,20 @@ Added
 Changed
 ^^^^^^^
 
+* **The backoffice front end has a new look and a sidebar.** It takes the
+  design of the kavalapp console: a top bar with the user menu, a sidebar
+  with a project switcher above the pages of the active project, and one
+  component library for every page. A project's **Overview** and **Settings**
+  replace the project page and its two editors; conversations and model calls
+  are lists that open beside themselves, and a model call's prompt can be read
+  as messages. DaisyUI, Angular Material and the unused front-end packages
+  are gone.
+* **Conversations open on a click, and show their runs whole.** A row of the
+  conversation list opens the conversation; the list carries each session's
+  identifier, with a copy button, and its last message, and takes the full
+  width of a wide screen. A conversation shows every run with its timeline,
+  steps and model calls. The Runs page is removed; ``/workflows`` leads to
+  the conversations. The bar charts carry a scale and its unit.
 * **Typed tool arguments.** An agent step is requested with one call model
   per allowed tool: ``name`` is the tool's URI and ``args`` an object held to
   the tool's input schema, where a call used to carry its arguments as JSON
@@ -85,6 +114,43 @@ Changed
   ``GET /auth/methods`` reports which methods are on. The ``/users``
   endpoints return ``has_password`` and accept ``password``.
 
+Fixed
+^^^^^
+
+* **A project's database password reached every member.** ``GET
+  /projects/all`` and ``GET /projects/get/{id}`` returned ``db_password`` in
+  plain text to viewers as well as owners, and with it a way to connect to the
+  agent database around their role and around the read-only setting, which the
+  backoffice applies to its own connections only. The project endpoints now
+  answer without it and report ``has_password``; the Projects page masks it in
+  the connection strings, and an administrator can ask for it with ``POST
+  /projects/{id}/reveal-password``, which is logged. Saving a project without a
+  password keeps the stored one, but only while the type, host, port, user and
+  database stay the same; a change to any of them asks for the password again,
+  so it cannot be sent to another server. ``POST /projects/test-connection``
+  now tests the settings as typed, before they are saved, for an owner; testing
+  a new project's settings is for administrators only.
+* A failed connection test showed ``Http failure response … 400 Bad Request``
+  instead of the database's error message.
+* Adding a user, or changing a user's address, to an address another user
+  already has answered ``503 Backoffice database is not connected``. It now
+  answers ``409 A user with this email address already exists.``
+* The backoffice's per-day charts were empty for a SQLite project. SQLite
+  returns ``date(created_at)`` as a string, which never matched the dates the
+  series are keyed by, so ``get_daily_stats`` counted every day as zero; the
+  dates are now read as dates on both backends.
+* **A picture URL could call the backoffice from its viewers' browsers.**
+  Every member who sees a user loads that user's picture, with their session
+  cookie when it points at the backoffice, so a picture of ``/api/logout``
+  logged each viewer out and one of ``/api/projects/{id}/rag/train-pca``
+  started a PCA training per page view. A picture is now refused unless it is
+  an absolute ``https://`` URL on another host than the backoffice (any port
+  of it), at most 2048 characters long — the session cookie carries it — and
+  written as a browser reads it (no whitespace, backslash, user information or
+  encoded host). ``/logout`` and ``train-pca`` are POSTs, so no image can
+  trigger them; ``train-pca`` takes ``{"collection_name": …}`` as its body,
+  and the RAG explorer reads its progress stream over the POST.
+
 Upgrading
 ^^^^^^^^^
 
@@ -100,6 +166,14 @@ Upgrading
   A reply in the earlier form is still read, so scripted test replies that
   use ``literal_args`` keep passing; ``ToolCall``'s three string fields are
   now optional and default to ``None``, not ``"{}"``.
+* A script that read ``db_password`` from ``GET /projects/all`` or ``GET
+  /projects/get/{id}`` asks ``POST /projects/{id}/reveal-password`` as an
+  administrator instead.
+* A client that logged out with ``GET /logout`` or trained a PCA with ``GET
+  …/rag/train-pca?collection_name=…`` sends a POST instead; the GETs answer
+  ``405``. Stored pictures are not re-checked: one that is not an ``https://``
+  URL on another host is found with ``SELECT email, picture FROM users WHERE
+  picture NOT LIKE 'https://%'`` plus a look at the hosts, and cleared.
 * Delete any type-checker override for ``kavalai`` (``ignore_missing_imports``
   or ``follow_untyped_imports``). Calls into the package are then checked, so
   a project may see errors that the override had hidden.

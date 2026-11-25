@@ -1,0 +1,78 @@
+/* Page header: tag, title, subtitle on the left, actions on the right.
+
+   Unencapsulated: the subtitle's paragraphs come from the page. */
+ui-page-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.ui-page-header-main {
+  min-width: 0;
+}
+
+.ui-page-header-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ui-page-header-actions:empty {
+  display: none;
+}
+
+.ui-page-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: var(--space-3);
+}
+
+.ui-page-title h1 {
+  margin: 0;
+}
+
+.ui-page-section {
+  font-weight: 400;
+  opacity: 0.55;
+  font-size: 0.75em;
+}
+
+.ui-page-section::before {
+  content: '/ ';
+}
+
+.ui-page-subtitle {
+  margin-top: 4px;
+  color: var(--color-slate-600);
+  max-width: 72ch;
+}
+
+.ui-page-subtitle:empty {
+  display: none;
+}
+
+.ui-page-subtitle p {
+  margin: 0;
+}
+
+.ui-back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: var(--space-3);
+  font-family: var(--font-family-accent);
+  font-size: var(--text-xs);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.ui-back-link:hover {
+  opacity: 1;
+}

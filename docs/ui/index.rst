@@ -15,6 +15,14 @@ deliberate: an agent database can be handed to the backoffice read-mostly, and
 several environments — local, staging, production — can be inspected from one
 interface without their runtime data ever meeting.
 
+Every page sits in one frame: a top bar with the user menu (**Profile**,
+**Sign out**), and a sidebar with the **project switcher** above the pages of
+the active project — **Overview**, **Conversations**, **Model calls**,
+**Agents**, **RAG** and **Settings** — and, for administrators,
+**Users**. The switcher names the active project and the database its runs are
+read from; it is the one place the active project changes, and every page
+follows it.
+
 .. contents:: On this page
    :local:
    :depth: 1
@@ -157,8 +165,8 @@ the Angular port:
 
 .. code-block:: bash
 
-   python -m kavalai.backoffice.server      # API, port 8000 unless set
-   cd frontend && npm start                 # UI on http://localhost:4200
+   python -m kavalai.backoffice.server      # API, port 12800 unless set
+   cd frontend && npm start                 # UI on http://localhost:8400
 
 Signing in
 ^^^^^^^^^^
@@ -226,8 +234,23 @@ the database file, which the backoffice must be able to read from its own
 filesystem. A PostgreSQL project may also name a **RAG Schema**, for a
 deployment that keeps its RAG collections in a schema of their own beside the
 runtime tables; left empty, the collections are looked for in the schema above.
-The project page is where the active project is chosen, new ones are created,
-and the connection is verified.
+A project's **Overview** shows what its agent database holds; its
+**Settings** page edits it, one card per concern — General, Database (with
+**Test connection**), Access, Members and the **Danger zone**, where the
+project is deleted by typing its name. Administrators create a project with
+**New project** in the switcher.
+
+The database password is write-only. Every member of a project receives its
+settings, and the password would let a viewer connect to the agent database
+around their role and around the read-only setting below, so no page or
+endpoint that lists a project carries it. A form that leaves the password
+empty keeps the stored one — but only while the database type, host, port,
+user and database stay the same; changing any of them asks for the password
+again, so whoever may edit the host cannot send the stored password to another
+server. An administrator who needs the password, to build a connection string
+of their own, asks for it with **Show password** beside the connection strings;
+the request is logged. **Test connection** checks the settings as they are
+typed, before they are saved.
 
 **Read-only** is on for every project unless switched off. The backoffice only
 reads an agent database, and the database it is pointed at may be production,
@@ -241,15 +264,18 @@ page writes; the switch exists so that a future page that must write cannot
 do so on a project nobody opened for it.
 
 .. image:: projectinfopage.png
-   :alt: Project page with the active-project selector, database access details
-         and seven-day activity and token charts
+   :alt: Project overview with the project switcher in the sidebar, the agent
+         database's counters, and its activity and tokens per day over the last
+         seven days
    :width: 100%
 
-The **Statistics (Last 7 Days)** panels are read from the agent database rather
-than from the backoffice's own: sessions, messages, tasks and workflow runs on
-the left, input, output and embedding tokens on the right. They are the first
-indication that a project's connection is sound and that the runtime is in fact
-writing to the schema the project names.
+The figures and charts of the **Overview** are read from the agent database
+rather than from the backoffice's own: conversations, runs, messages and tasks,
+the tokens of the last seven days per day, and the average model call and run.
+They are the first indication that a project's connection is sound and that
+the runtime is in fact writing to the schema the project names. Beneath them,
+the **Connection strings** card gives the agent database's URI in the forms an
+agent server and a client library take, with the password masked.
 
 The selected project follows the user across pages, and is stored as
 ``active_project_id``. If the project is later deleted, or the membership
@@ -264,29 +290,24 @@ The **Agents** page lists the agents that have written to the active project's
 database. Selecting one renders its workflow as a graph — the same renderer the
 documentation uses, so the picture in the interface and the picture in
 :doc:`../tutorials/workflow` are produced by one code path — alongside the
-declared **Input** and **Output** models and the agent's headline counters.
+declared **Input schema** and **Output schema** and the agent's headline
+counters.
 
 .. image:: agentspage.png
-   :alt: Agents page showing the agent list and the selected agent's workflow
-         graph, with total sessions, messages, runs and tasks beneath it
+   :alt: Agents page with three agents listed and Green Village support
+         selected: its workflow graph from start through a rag_query and an llm
+         node to end, and its sessions, runs, messages, tasks and tokens of the
+         last 30 days beneath it
    :width: 100%
 
 The graph is the workflow as the engine parsed it, not as it was written: node
 names carry their type beneath them — ``rag_query``, ``llm``, ``start``,
 ``end`` — so a definition can be checked against what is actually being served.
 
-The counters below it (total sessions, messages, runs and tasks) and the
-seven-day charts describe one agent rather than the whole project, which makes
+The counters below it — sessions, runs, messages, tasks, and input and output
+tokens over the last 30 days — and the seven-day charts describe one agent
+rather than the whole project, which makes
 this the quickest view for judging how heavily a single agent is used.
-
-
-Workflow monitoring
--------------------
-
-The **Workflows** page is a monitoring timeline: one row per agent, one marker
-per recent run. Completed runs are filled and empty runs are flagged, which
-gives an at-a-glance health view across every agent in the project and a route
-into any individual run.
 
 
 Conversations
@@ -294,21 +315,25 @@ Conversations
 
 A **conversation** is a session: the runs triggered within it, the messages
 exchanged, and the errors raised. The list is filtered by agent, by date range,
-and by external identifier — the last of these is how evaluation runs are found,
-since :doc:`../guides/evaluation` records each case under
-``eval:{tag}:{case}``.
+by external identifier and by the text of its messages — the external
+identifier is how evaluation runs are found, since
+:doc:`../guides/evaluation` records each case under ``eval:{tag}:{case}``.
 
 .. image:: conversationpage.png
-   :alt: Conversations list filtered by agent and date, each session showing its
-         run, task, message and error counts with the first and latest payloads
+   :alt: Conversations table filtered to the bakery assistant's eval:baseline
+         sessions, each row showing its last activity, an EVAL badge, the
+         shortened session identifier, the agent, the first and last message,
+         and its run, message and error counts
    :width: 100%
 
-Each entry shows the counts for that session and, below them, its first and
-latest payloads. Because a Kaval.AI workflow's boundaries are typed, those
-payloads are structured data rather than prose: in the illustration the bakery
-assistant's latest output carries ``status``, ``order_id`` and ``missing``
-beside the human-readable ``subject`` and ``body``, so what the workflow decided
-is legible without reading what it wrote.
+Each row shows the session's identifier, which can be copied, its first and
+last messages and its counts; selecting it opens the conversation. Because a
+Kaval.AI workflow's boundaries are typed, those messages are structured data
+rather than prose: in the illustration each of the bakery assistant's last
+messages opens with the ``status`` the workflow decided — ``stored``,
+``needs_details`` or ``not_an_order`` — ahead of the ``subject`` and ``body``
+it wrote, so what the workflow decided is legible without reading what it
+wrote.
 
 The list is ordered by **last activity** — the time of a session's most recent
 run — and that is the time each entry shows. A conversation resumed today
@@ -319,21 +344,26 @@ by contrast, filters on the time a session was created.
 The task debugger
 -----------------
 
-Opening a conversation descends one further level, to the runs it contains and
-the tasks each run executed. A run names its nodes in execution order, and every
-node can be opened on its own.
+Opening a conversation descends one further level, to every run it contains,
+in the order they started. Each run shows its messages, a timeline of its
+steps, and — open by default for a conversation of up to three runs, for the
+latest run otherwise, since each run's model calls are a request of their
+own — its steps in execution order and the model calls it made. Every step
+can be opened on its own.
 
 .. image:: taskdebugger_detailed_view.png
-   :alt: Run tasks view with the executed node list and a task's structured
-         output opened in an expandable JSON viewer
+   :alt: A conversation's steps with the parse step opened: the prompt it sent,
+         the customer's email as its input, and as its output the intent and
+         the order it extracted, shown as expandable trees
    :width: 100%
 
 Each task records its duration and its status, and exposes the value that
-entered it and the value that left it. The output opens in an expandable
-viewer: here the ``parse`` node's result is the order it extracted from a
-customer's email — two items with product, quantity and unit, a customer name, a
-delivery date and the intent it classified. The **Input**, **Output** and
-**Context** buttons at run level show the same for the run as a whole.
+entered it and the value that left it. Opening a step shows, for a model step,
+the prompt it sent, and its input and output side by side as expandable trees:
+here the ``parse`` node's output is the order it extracted from a customer's
+email — the intent it classified, a customer name, a delivery date and two
+items with product, quantity and unit. The **Input**, **Output** and
+**Context** buttons beneath each run show the same for the run as a whole.
 
 A ``rag_query`` node records its retrieval in the same place. Its inputs name
 the query, the collection, ``top_k``, ``source_ids`` and ``min_similarity``;
@@ -377,8 +407,18 @@ Each call is attributed to the run that made it: a row carries the run's
 ``run_id`` and ``session_id``, the embedding calls of a workflow's
 ``rag_query`` nodes included, whose response payload records no vectors.
 Neither identifier is a foreign key, so the token counts outlive the
-conversation they belong to. A card links to its conversation and to the
-run's tasks, and its run identifier narrows the page to that run's calls. The
+conversation they belong to. Selecting a call opens it beside the list: its
+figures, links to its conversation and to the run's tasks, and the request and
+response — as messages, with **Show as text**, or as JSON. Its run identifier
+narrows the page to that run's calls.
+
+Above the list, **Search** matches the model name and the text of the request
+and response, and **From** and **To** bound when a call was recorded; both are
+kept in the address, so a narrowed view can be shared. The **Token usage** card
+adds up every call the filters select, not only the page shown: the calls and
+how many failed, input tokens with the cached share, output tokens with the
+reasoning share, embedding tokens, the average call, the tokens per day and a
+row per model. It reports tokens only, for the reason given above. The
 same filters are the page's ``run_id`` and ``session_id`` query parameters,
 which is how the **Model calls** button of a conversation and the task
 debugger reach it; **Show all calls** removes them.
@@ -396,14 +436,16 @@ the project's RAG service — :class:`~kavalai.rag.PostgresRagService` or
 server — only a project whose database holds an index.
 
 .. image:: ragexplorerpage.png
-   :alt: RAG explorer with query controls above and a ranked result table below,
-         showing similarity, source ID, content, collection and metadata
+   :alt: RAG page with its collection and entry counters, the query "lost in
+         outer space" against the songs collection, and the ranked results with
+         similarity, source identifier, content and metadata
    :width: 100%
 
 Two counters head the page — the number of collections in the database and the
 total number of indexed entries across them. Beneath them sits the query form,
 whose controls correspond one for one to the arguments of
-:meth:`~kavalai.rag.BaseRagService.query`:
+:meth:`~kavalai.rag.BaseRagService.query`; the last three are under **More
+options**:
 
 .. list-table::
    :header-rows: 1
@@ -411,37 +453,38 @@ whose controls correspond one for one to the arguments of
 
    * - Control
      - Effect
-   * - **Query Text**
-     - The text to embed and search with. Pressing *Enter* submits it.
+   * - **Query text**
+     - The text to embed and search with. Pressing *Enter* submits it, as
+       does **Search**.
    * - **Collection**
      - Which collection to search, listed with its number of entries.
        Collections are the unit of separation within one schema, and each is
        a table of its own, so a query searches exactly one. The ``default``
        collection is selected when there is one, otherwise the first.
-   * - **Embedding Model**
-     - The ``provider/model`` identifier the selected collection was indexed
-       with, as recorded in the collection registry. It is shown rather than
-       chosen: the RAG service embeds every query against an existing
-       collection with that model, since a different model yields a different
-       vector space, and therefore meaningless neighbours.
+   * - **Top**
+     - How many neighbours to return.
    * - **Source IDs**
      - Restricts the search to given source identifiers — the way to ask what a
        specific document contains rather than what the corpus does.
-   * - **Top K**
-     - How many neighbours to return.
-   * - **Keep Best Only**
-     - Collapses the chunks of a single document to its best-scoring chunk, so
-       that a long document cannot occupy every result slot.
    * - **Normalizer YAML**
      - An optional normalisation specification applied to the query text before
        it is embedded. It exists so that a query can be normalised exactly as
        the corpus was at indexing time.
+   * - **Keep only the best match per source**
+     - Collapses the chunks of a single document to its best-scoring chunk, so
+       that a long document cannot occupy every result slot.
+
+The embedding model is shown beneath the form rather than chosen: it is the
+``provider/model`` identifier the selected collection was indexed with, as
+recorded in the collection registry, and the RAG service embeds every query
+against an existing collection with that model, since a different model yields
+a different vector space, and therefore meaningless neighbours.
 
 Results are returned ranked by **similarity**, reported as
 higher-is-better cosine similarity (``1 - distance``) on every backend, so the
 figures are comparable across storage engines. Each row carries its source
-identifier, the retrieved content, its collection, and the metadata it was
-indexed with — the same ``rag_metadata`` a
+identifier, the retrieved content and the metadata it was indexed with — the
+same ``rag_metadata`` a
 :class:`~kavalai.rag.RagServiceResult` exposes to a workflow. Reading a
 retrieval failure off this table is usually immediate: either the intended
 passage is absent from the index, or it is present and ranked below something
@@ -455,7 +498,9 @@ neighbourhood looks like. **Compute PCA** fits a two-dimensional projection of
 the collection so that it can be seen.
 
 .. image:: trainingpca.png
-   :alt: Training PCA dialog streaming its progress as embeddings are downloaded
+   :alt: Training PCA dialog with the log of a finished training: the
+         embeddings downloaded, the model computed, the sample points generated
+         and stored in the cache
    :width: 100%
 
 Training streams its progress over Server-Sent Events and can be stopped from
@@ -468,13 +513,15 @@ A query is projected from an embedding computed with the collection's recorded
 model, the space in which the PCA was fitted.
 
 .. image:: ragpcaprojector.png
-   :alt: Two-dimensional PCA projection with the query in red, its closest
-         matches in blue and the cached training sample in grey
+   :alt: Two-dimensional PCA projection beneath the results, with the query as a
+         large maroon point, its matches in green and the cached sample of the
+         collection in grey
    :width: 100%
 
 The projection then accompanies every query against that collection. The
-cached sample is drawn in grey as the shape of the corpus, the query in red,
-and its nearest neighbours in blue; hovering a point reveals what it is. Two
+cached sample is drawn in grey as the shape of the corpus, the query in
+maroon, and its nearest neighbours in green; hovering a point reveals what it
+is. Two
 components of a many-hundred-dimensional space are a lossy summary and should
 be read as one — but they answer questions a ranked list cannot. Whether the
 retrieved matches form a cluster or are scattered, whether the query falls
@@ -488,11 +535,38 @@ Users and access
 ----------------
 
 The **Users** page is administrator-only. It is where accounts are created
-after the first — an address and a name, with the administrator flag granted or
-withheld — and where they are removed. An account created there has no
-password and signs in through Google; a password is given with
-``python -m kavalai.backoffice.users set-password``. An administrator cannot delete their own
-account, which prevents an installation from being locked out of itself.
+after the first and where they are removed. Its table lists each user with
+their picture or initials, name and address, an ``admin`` badge for an
+administrator, and ``password`` or ``Google only`` according to whether a
+password is stored. **Add user** and each row's **Edit** open the same form:
+address, name, picture URL, the **Administrator** switch and a password. The
+password is optional — an account created without one signs in through Google
+only — and when editing an empty password field keeps the stored one. The
+server hashes the password and refuses one shorter than eight characters;
+such a refusal is shown in the form, which stays open. **Delete** asks for
+confirmation first, and the user's project memberships go with the account. An
+administrator cannot delete their own account — the control is disabled, with
+the reason beneath the table — which prevents an installation from being
+locked out of itself.
+
+The **Profile** page, reached from the user menu at the top right, is open to
+every user and concerns only their own account. Its **Details** card changes
+the name and the picture URL, and shows the address and the access badges,
+which only an administrator changes; the name in the top bar follows a save.
+A Google sign-in replaces the name and the picture with those of the Google
+account at every such sign-in, as noted under *Creating the first user*. The **Password** card asks for the current
+password and the new one twice. A user who signs in through Google only has no
+current password; the card then sets a first one, after which the user can
+also sign in with their address. The endpoints behind the page are
+``GET /user/me``, ``PATCH /user/me`` (``name`` and ``picture``; any other field
+is refused) and ``POST /user/me/password`` (``current_password``,
+``new_password``). A wrong or missing current password is refused with one
+message, whichever it was.
+
+A picture URL, here and on the **Users** page, must be an absolute
+``https://`` URL on another host than the backoffice. Every member who sees
+the user loads the picture, and a request to the backoffice's own host would
+carry their session cookie — a picture there would act in each viewer's name.
 
 Membership is granted per project, in one of two roles. A **viewer** may read
 everything the project exposes; an **owner** may in addition edit the project,

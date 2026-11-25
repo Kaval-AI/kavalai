@@ -1,0 +1,14 @@
+@if (!workflow()) {
+  <p class="text-muted" data-testid="graph-none">This agent has no workflow recorded.</p>
+} @else if (loading()) {
+  <ui-loading label="Drawing the workflow" />
+} @else if (error()) {
+  <ui-alert data-testid="graph-error">
+    {{ error() }}
+    <button alert-actions type="button" uiButton="ghost" size="sm" (click)="render()" data-testid="graph-retry">
+      Retry
+    </button>
+  </ui-alert>
+} @else {
+  <div class="workflow-graph" role="img" aria-label="Workflow graph" data-testid="graph" [innerHTML]="svg()"></div>
+}

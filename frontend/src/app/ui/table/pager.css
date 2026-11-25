@@ -1,0 +1,14 @@
+:host {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-top: var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.ui-pager-buttons {
+  display: flex;
+  gap: 8px;
+}

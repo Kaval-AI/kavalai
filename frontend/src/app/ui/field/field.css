@@ -1,0 +1,23 @@
+:host {
+  display: block;
+  margin-bottom: 18px;
+}
+
+/* The label and hint colours are properties, so a surface the field sits on
+   can retint them; a selector reaching in from outside would be scoped away.
+   The label's other rules are the global ones in styles.css. */
+label {
+  color: var(--ui-field-label-color, var(--color-slate-600));
+}
+
+.ui-field-hint {
+  margin: 6px 0 0;
+  font-size: var(--text-sm);
+  color: var(--ui-field-hint-color, var(--color-slate-600));
+}
+
+.ui-field-error {
+  margin: 6px 0 0;
+  font-size: var(--text-sm);
+  color: var(--color-error);
+}

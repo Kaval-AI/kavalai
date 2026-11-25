@@ -1,5 +1,396 @@
-@import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@300;400;500;600;700&family=Space+Grotesk:wght@300..700&family=Space+Mono:ital,wght@0,400;0,700;1,400;1,700&display=swap');
-@import "tailwindcss";
-@plugin "daisyui";
+/* Global styles of the Kaval.AI backoffice.
 
-@import './styles/theme.css';
+   The design system is the Kaval.AI visual toolkit, as the kavalapp console
+   uses it: Charcoal Blue, Lime Moss and Rosy Granite with the lime shades and
+   the supportive colours; Chakra Petch for titles and controls, Space Grotesk
+   for text, Space Mono for labels and data; chamfered corners as the signature
+   shape; a 4px spacing scale, one type scale, three elevation levels and a
+   visible focus ring. The components are in app/ui (ui.css); this file holds
+   the tokens, the element defaults and a few global primitives.
+
+   Tailwind provides the layout utilities; its utilities layer outranks the
+   element defaults below, which sit in the base layer. */
+
+@import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@300;400;500;600;700&family=Space+Grotesk:wght@300..700&family=Space+Mono:ital,wght@0,400;0,700;1,400;1,700&display=swap');
+@import 'tailwindcss';
+@import './app/ui/ui.css';
+
+/* Local copies, used while the web fonts above load or when they cannot. */
+@font-face {
+  font-family: 'Chakra Petch';
+  src: url('/assets/fonts/Chakra_Petch/ChakraPetch-Medium.ttf') format('truetype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Space Grotesk';
+  src: url('/assets/fonts/Space_Grotesk/static/SpaceGrotesk-Medium.ttf') format('truetype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Space Mono';
+  src: url('/assets/fonts/Space_Mono/SpaceMono-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  /* Primary colours of the toolkit */
+  --color-charcoal: #273e47;
+  --color-lime: #acc12f;
+  --color-granite: #e6e6e9;
+
+  /* Lime shades (light to dark) */
+  --color-lime-50: #f7f9ed;
+  --color-lime-100: #f1f5dc;
+  --color-lime-200: #e3eaba;
+  --color-lime-300: #d5e097;
+  --color-lime-400: #c8d674;
+  --color-lime-500: #bacb52;
+  --color-lime-600: #96ab33;
+  --color-lime-700: #809537;
+  --color-lime-800: #536a3f;
+  --color-lime-900: #3d5443;
+
+  /* Slate shades between granite and charcoal */
+  --color-slate-300: #868a92;
+  --color-slate-400: #737b83;
+  --color-slate-500: #606c74;
+  --color-slate-600: #4d5c65;
+  --color-slate-700: #3a4d56;
+
+  /* Greys */
+  --color-base-100: #f4f4f6;
+  --color-base-200: #e5e5e8;
+  --color-base-300: #d6d6da;
+  --color-base-400: #c7c7cc;
+  --color-base-content: var(--color-charcoal);
+  --color-surface: #ffffff;
+
+  /* Supportive colours, used sparingly for data and states */
+  --color-cayenne: #f35b04;
+  --color-amber: #e67f0d;
+  --color-aqua: #86bbbd;
+  --color-verdigris: #1b998b;
+  --color-amethyst: #b185a7;
+  --color-raspberry: #82204a;
+
+  /* Semantic roles */
+  --color-primary: var(--color-lime);
+  --color-primary-content: var(--color-charcoal);
+  --color-secondary: var(--color-amethyst);
+  --color-accent: var(--color-verdigris);
+  --color-neutral: #a8a8af;
+  --color-info: var(--color-aqua);
+  --color-success: var(--color-lime-700);
+  --color-warning: var(--color-amber);
+  --color-error: var(--color-raspberry);
+
+  /* Spacing scale (4px grid) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+
+  /* Type scale */
+  --text-xs: 0.72rem;
+  --text-sm: 0.85rem;
+  --text-base: 0.95rem;
+  --text-md: 1.1rem;
+  --text-lg: 1.35rem;
+  --text-xl: 1.75rem;
+  --text-2xl: 2.4rem;
+
+  /* Shapes: chamfer size for .panel-cut, radii for fields */
+  --cut: 16px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-box: var(--radius-md);
+  --radius-field: var(--radius-sm);
+
+  /* Elevation: 1 for cards (a filter, so it survives clip-path), 2 for raised
+     controls, 3 for menus and sheets. */
+  --elevation-1: drop-shadow(0 1px 2px rgba(39, 62, 71, 0.1)) drop-shadow(0 8px 20px rgba(39, 62, 71, 0.06));
+  --elevation-2: 0 2px 6px rgba(39, 62, 71, 0.16);
+  --elevation-3: 0 12px 32px rgba(39, 62, 71, 0.22);
+  --shadow-bar: 0 1px 4px rgba(39, 62, 71, 0.25);
+  --focus-ring: 0 0 0 3px rgba(172, 193, 47, 0.5);
+
+  --motion-fast: 120ms;
+  --motion-base: 200ms;
+
+  --font-family-header: 'Chakra Petch', sans-serif;
+  --font-family-body: 'Space Grotesk', sans-serif;
+  --font-family-accent: 'Space Mono', monospace;
+
+  --header-height: 60px;
+  --sidebar-width: 256px;
+  --content-max-width: 1360px;
+}
+
+@layer base {
+  body {
+    background-color: var(--color-base-100);
+    color: var(--color-base-content);
+    font-family: var(--font-family-body);
+    font-weight: 500;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-family-header);
+  }
+
+  .accent-font,
+  code,
+  pre,
+  kbd,
+  samp,
+  .mono {
+    font-family: var(--font-family-accent);
+  }
+
+  a:focus-visible,
+  button:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+
+  h1,
+  h2,
+  h3 {
+    color: var(--color-base-content);
+    font-weight: 600;
+    line-height: 1.25;
+    margin: 0 0 0.5rem;
+  }
+  h1 {
+    font-size: var(--text-xl);
+  }
+  h2 {
+    font-size: var(--text-lg);
+  }
+  h3 {
+    font-size: var(--text-md);
+  }
+
+  p {
+    margin: 0 0 0.75rem;
+    line-height: 1.6;
+  }
+
+  code {
+    font-size: 0.9em;
+  }
+
+  a {
+    color: var(--color-base-content);
+    text-decoration: none;
+    transition:
+      color var(--motion-base),
+      opacity var(--motion-base);
+  }
+  a:hover {
+    color: var(--color-lime-700);
+  }
+
+  button {
+    font-family: var(--font-family-header);
+    font-size: var(--text-base);
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  label {
+    display: block;
+    margin-bottom: 6px;
+    font-family: var(--font-family-accent);
+    font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--color-slate-600);
+  }
+
+  input,
+  select,
+  textarea {
+    width: 100%;
+    min-height: 40px;
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-base-300);
+    color: var(--color-base-content);
+    font-family: var(--font-family-body);
+    font-size: var(--text-base);
+    padding: 8px 12px;
+    border-radius: var(--radius-sm);
+    transition:
+      border-color var(--motion-fast),
+      box-shadow var(--motion-fast);
+  }
+
+  input[type='checkbox'],
+  input[type='radio'] {
+    width: 16px;
+    height: 16px;
+    min-height: 0;
+    padding: 0;
+    accent-color: var(--color-lime-700);
+  }
+
+  input:hover:not(:disabled),
+  select:hover:not(:disabled),
+  textarea:hover:not(:disabled) {
+    border-color: var(--color-slate-300);
+  }
+
+  input:focus,
+  select:focus,
+  textarea:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    box-shadow: var(--focus-ring);
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: rgba(39, 62, 71, 0.4);
+  }
+
+  /* Read-only fields look it: a grey field, dimmed text, no text cursor. */
+  input:disabled,
+  select:disabled,
+  textarea:disabled {
+    background-color: var(--color-base-200);
+    color: var(--color-slate-500);
+    border-color: var(--color-base-300);
+    cursor: not-allowed;
+  }
+
+  textarea {
+    resize: vertical;
+    min-height: 96px;
+    line-height: 1.5;
+  }
+}
+
+.form-hint {
+  font-size: var(--text-sm);
+  color: var(--color-slate-600);
+  margin: 6px 0 0;
+}
+
+.form-hint a {
+  text-decoration: underline;
+  text-decoration-color: var(--color-lime-400);
+  text-underline-offset: 2px;
+}
+
+/* The bar closing a card with the actions behind it: Test connection and
+   Save under a project's database, the pages behind a run. */
+.card-actions-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-base-300);
+}
+
+/* Chamfered top-right / bottom-left corners: the brand's signature. clip-path
+   clips box-shadow, so glows belong on a wrapper via filter: drop-shadow. */
+.panel-cut {
+  border-radius: 0;
+  clip-path: polygon(
+    0 0,
+    calc(100% - var(--cut)) 0,
+    100% var(--cut),
+    100% 100%,
+    var(--cut) 100%,
+    0 calc(100% - var(--cut))
+  );
+}
+
+/* Code and JSON boxes */
+pre.snippet {
+  margin: 0;
+  padding: 14px 16px;
+  background-color: var(--color-base-content);
+  color: var(--color-lime-200);
+  border-left: 3px solid var(--color-primary);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* Section tag: tracked mono label with the lime pulsar wedge */
+.section-tag {
+  position: relative;
+  display: inline-block;
+  padding: 4px 14px 4px 22px;
+  margin: 0 0 14px;
+  border: 1px solid currentColor;
+  font-family: var(--font-family-accent);
+  font-size: var(--text-xs);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  line-height: 1.4;
+  --cut: 10px;
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%);
+}
+
+.section-tag::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 10px;
+  height: 10px;
+  background: var(--color-primary);
+  clip-path: polygon(0 0, 100% 0, 0 100%);
+}
+
+/* Pulsar wedge bullets */
+ul.wedge-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+ul.wedge-list li {
+  position: relative;
+  padding-left: 22px;
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+ul.wedge-list li::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 0.5em;
+  width: 9px;
+  height: 9px;
+  background: var(--color-primary);
+  clip-path: polygon(0 0, 100% 0, 0 100%);
+}
+
+.text-muted {
+  color: var(--color-slate-500);
+}

@@ -1,0 +1,406 @@
+/*
+Copyright 2026 OÜ KAVAL AI (registry code 17393877)
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+/* The kavalapp console's shell: a charcoal top bar over a granite sidebar and
+   the page. dvh: on a phone 100vh is the height without the browser's bars. */
+.shell {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  grid-template-rows: var(--header-height) minmax(0, 1fr);
+  grid-template-areas:
+    'topbar topbar'
+    'sidebar content';
+}
+
+.topbar {
+  grid-area: topbar;
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  background-color: var(--color-base-content);
+  color: var(--color-primary);
+  box-shadow: var(--shadow-bar);
+}
+
+.topbar-start,
+.topbar-end {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.brand-logo {
+  height: 20px;
+  display: block;
+}
+
+.brand-product {
+  font-family: var(--font-family-accent);
+  font-size: var(--text-xs);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--color-primary);
+  border-left: 1px solid rgba(172, 193, 47, 0.3);
+  padding-left: 14px;
+  opacity: 0.85;
+}
+
+.burger {
+  display: none;
+  color: var(--color-primary);
+}
+
+.topbar .burger:hover {
+  background: rgba(172, 193, 47, 0.15);
+  color: var(--color-primary);
+}
+
+.user-menu {
+  position: relative;
+}
+
+.user-menu ui-menu {
+  width: 280px;
+  max-width: calc(100vw - 24px);
+}
+
+.user-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  color: var(--color-primary);
+  font-family: var(--font-family-body);
+  font-weight: 500;
+  font-size: var(--text-base);
+  cursor: pointer;
+}
+
+.user-button:hover {
+  background: rgba(172, 193, 47, 0.12);
+}
+
+.user-button .fa-chevron-down {
+  font-size: 0.7rem;
+  opacity: 0.7;
+}
+
+.menu-name {
+  font-family: var(--font-family-header);
+  font-weight: 600;
+}
+
+.menu-email {
+  font-size: 0.8rem;
+  color: var(--color-slate-500);
+  word-break: break-all;
+}
+
+.menu-role {
+  display: inline-block;
+  margin-top: 6px;
+}
+
+.menu-error,
+.menu-empty {
+  margin: 0;
+  padding: 8px 12px;
+  font-size: var(--text-sm);
+}
+
+.menu-error {
+  color: var(--color-error);
+}
+
+.menu-empty {
+  color: var(--color-slate-600);
+}
+
+/* Sidebar: granite ground, the project switcher on top, then the destinations. */
+.sidebar {
+  grid-area: sidebar;
+  position: sticky;
+  top: var(--header-height);
+  height: calc(100vh - var(--header-height));
+  height: calc(100dvh - var(--header-height));
+  display: flex;
+  flex-direction: column;
+  background: var(--color-base-200);
+  border-right: 1px solid var(--color-base-300);
+  padding: 16px 12px;
+  overflow-y: auto;
+}
+
+/* The project switcher: the active project and where its runs are. */
+.switcher {
+  position: relative;
+  margin-bottom: 10px;
+}
+
+.switcher-button {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  padding: 10px 34px 10px 12px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-base-300);
+  box-shadow: inset 3px 0 0 var(--color-primary);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--motion-fast);
+}
+
+.switcher-button:hover {
+  border-color: var(--color-slate-300);
+}
+
+.switcher-button:focus-visible {
+  outline: none;
+  box-shadow:
+    inset 3px 0 0 var(--color-primary),
+    var(--focus-ring);
+}
+
+.switcher-label {
+  font-family: var(--font-family-accent);
+  font-size: 0.62rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--color-slate-500);
+}
+
+.switcher-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-family-header);
+  font-weight: 600;
+  font-size: 1rem;
+  color: var(--color-base-content);
+}
+
+.switcher-none {
+  color: var(--color-slate-500);
+}
+
+.switcher-detail {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.72rem;
+  color: var(--color-slate-500);
+}
+
+.switcher-chevron {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.7rem;
+  color: var(--color-slate-500);
+}
+
+.switcher-access {
+  display: inline-block;
+  margin-top: 6px;
+}
+
+/* The sidebar scrolls, which clips anything wider than it: the sheet fits it. */
+.switcher ui-menu {
+  width: 100%;
+  min-width: 0;
+}
+
+.project-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.project-option > i {
+  width: 14px;
+  color: var(--color-lime-700);
+}
+
+.project-option-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
+.project-option-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.project-option.current .project-option-name {
+  color: var(--color-lime-800);
+}
+
+.project-option-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.project-option-detail {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.72rem;
+  color: var(--color-slate-500);
+}
+
+.project-new {
+  border-top: 1px solid var(--color-base-200);
+  margin-top: 4px;
+}
+
+/* Takes the height left over, so the footer sits at the bottom. */
+.sidebar-nav {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sidebar-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 0;
+}
+
+.sidebar-group + .sidebar-group {
+  border-top: 1px solid var(--color-base-300);
+  margin-top: 4px;
+  padding-top: 10px;
+}
+
+.sidebar-heading {
+  font-family: var(--font-family-accent);
+  font-size: 0.65rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--color-slate-500);
+  padding: 4px 12px 6px;
+}
+
+.sidebar-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  font-size: var(--text-sm);
+}
+
+.sidebar-footer a {
+  color: var(--color-slate-600);
+}
+
+.sidebar-footer a:hover {
+  color: var(--color-lime-700);
+}
+
+.sidebar-footer a i {
+  margin-right: 8px;
+  width: 14px;
+}
+
+.content {
+  grid-area: content;
+  width: 100%;
+  max-width: var(--content-max-width);
+  min-width: 0;
+  padding: 28px 32px 56px;
+}
+
+/* The list pages are tables: they take the whole width of a wide screen. */
+.content:has(> app-conversations-page, > app-llm-call-stats-page) {
+  max-width: none;
+}
+
+@media (max-width: 900px) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'topbar'
+      'content';
+  }
+
+  .burger {
+    display: inline-flex;
+  }
+
+  .topbar {
+    padding: 0 8px 0 4px;
+  }
+
+  .brand-logo {
+    height: 18px;
+  }
+
+  .user-name,
+  .brand-product,
+  .user-button .fa-chevron-down {
+    display: none;
+  }
+
+  /* The open sidebar covers the page below the top bar. */
+  .sidebar {
+    position: fixed;
+    left: 0;
+    top: var(--header-height);
+    width: 100%;
+    border-right: none;
+    transform: translateX(-100%);
+    transition: transform var(--motion-base) ease;
+    z-index: 900;
+  }
+
+  .sidebar-open .sidebar {
+    transform: translateX(0);
+  }
+
+  .content {
+    padding: 20px 16px 40px;
+  }
+}

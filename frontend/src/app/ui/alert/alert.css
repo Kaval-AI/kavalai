@@ -1,0 +1,59 @@
+:host {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: var(--space-3) 0;
+  padding: 10px 12px;
+  border: 1px solid;
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+:host(:first-child) {
+  margin-top: 0;
+}
+
+:host > i {
+  margin-top: 3px;
+  font-size: 0.9em;
+}
+
+.ui-alert-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.ui-alert-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.ui-alert-actions:empty {
+  display: none;
+}
+
+:host([tone='error']) {
+  background: rgba(130, 32, 74, 0.08);
+  border-color: var(--color-error);
+  color: var(--color-error);
+}
+
+:host([tone='success']) {
+  background: var(--color-lime-100);
+  border-color: var(--color-lime-300);
+  color: var(--color-lime-800);
+}
+
+:host([tone='warning']) {
+  background: #fdf1e3;
+  border-color: var(--color-warning);
+  color: #9b5608;
+}
+
+:host([tone='info']) {
+  background: var(--color-base-100);
+  border-color: var(--color-base-300);
+  color: var(--color-base-content);
+}

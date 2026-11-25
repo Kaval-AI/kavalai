@@ -13,397 +13,227 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-import { Component, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { Router } from '@angular/router';
+import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { DatePipe, DecimalPipe } from '@angular/common';
+import { RouterLink } from '@angular/router';
+import { Subscription, forkJoin } from 'rxjs';
+import { BaseChartDirective } from 'ng2-charts';
+import { Chart, registerables } from 'chart.js';
 import { AgentService } from '../../services/agent-service';
 import { UserService } from '../../services/user-service';
 import { Agent } from '../../models/agent';
-import { BaseChartDirective } from 'ng2-charts';
-import { ChartConfiguration, ChartOptions, Chart, registerables } from 'chart.js';
+import { errorMessage } from '../../core/http-error';
+import {
+  ACTIVITY_SERIES,
+  DailyStats,
+  TOKEN_SERIES,
+  activityBars,
+  callDurationLines,
+  durationChartOptions,
+  hasActivity,
+  runDurationLines,
+  tokenBars,
+} from '../../core/daily-stats';
+import {
+  BarChart,
+  UiAlert,
+  UiButton,
+  UiCard,
+  UiDialog,
+  UiEmptyState,
+  UiLoading,
+  UiPageHeader,
+  UiStat,
+  UiStats,
+  UiTable,
+} from '../../ui';
 import { JsonTreeComponent } from '../json-tree/json-tree';
 import { WorkflowGraphComponent } from '../workflow-graph/workflow-graph';
-import { NavigationService } from '../../services/navigation-service';
 
 Chart.register(...registerables);
 
+/** `GET /agents/summary-stats/{project}`: totals over the last 30 days. */
+export interface SummaryStats {
+  total_sessions: number;
+  total_runs: number;
+  total_messages: number;
+  total_tasks: number;
+  total_prompt_tokens: number;
+  total_completion_tokens: number;
+  total_embedding_tokens: number;
+}
+
+/** The JSON documents an agent carries, each opened in a dialog. */
+export type AgentDocument = 'workflow' | 'input' | 'output';
+
+const DOCUMENT_TITLES: Record<AgentDocument, string> = {
+  workflow: 'Workflow',
+  input: 'Input schema',
+  output: 'Output schema',
+};
+
+/** The days the charts cover. */
+const CHART_DAYS = 7;
+
+/**
+ * The agents of the active project, as a list beside the selected agent: its
+ * workflow graph, its totals over the last 30 days and its activity, tokens
+ * and durations per day over the last week.
+ */
 @Component({
   selector: 'app-agents-page',
-  standalone: true,
   imports: [
-    CommonModule,
+    DatePipe,
+    DecimalPipe,
+    RouterLink,
     BaseChartDirective,
+    BarChart,
+    UiAlert,
+    UiButton,
+    UiCard,
+    UiDialog,
+    UiEmptyState,
+    UiLoading,
+    UiPageHeader,
+    UiStat,
+    UiStats,
+    UiTable,
     JsonTreeComponent,
     WorkflowGraphComponent,
   ],
   templateUrl: './agents-page.html',
-  styleUrl: './agents-page.css'
+  styleUrl: './agents-page.css',
 })
-export class AgentsPage implements OnInit {
-  private agentService = inject(AgentService);
-  private userService = inject(UserService);
-  private router = inject(Router);
-  private navigationService = inject(NavigationService);
+export class AgentsPage {
+  private readonly agentService = inject(AgentService);
+  private readonly userService = inject(UserService);
+  private readonly destroyRef = inject(DestroyRef);
 
-  agents: Agent[] = [];
-  loading: boolean = false;
-  error: string | null = null;
-  selectedAgent: Agent | null = null;
-  activeProjectId: string | null = null;
+  readonly activitySeries = ACTIVITY_SERIES;
+  readonly tokenSeries = TOKEN_SERIES;
+  readonly durationOptions = durationChartOptions();
+  readonly chartDays = CHART_DAYS;
 
-  showModal: boolean = false;
-  modalTitle: string = '';
-  modalData: any = null;
+  readonly projectId = signal<string | null>(null);
+  readonly agents = signal<Agent[]>([]);
+  readonly loading = signal(false);
+  readonly error = signal<string | null>(null);
 
-  summaryStats: any = null;
-  dailyStats: any = null;
+  readonly selected = signal<Agent | null>(null);
+  readonly summary = signal<SummaryStats | null>(null);
+  readonly daily = signal<DailyStats | null>(null);
+  readonly statsLoading = signal(false);
+  readonly statsError = signal<string | null>(null);
 
-  // Chart state
-  public activityChartData: ChartConfiguration<'line'>['data'] = {
-    datasets: [],
-    labels: []
-  };
-  public tokensChartData: ChartConfiguration<'line'>['data'] = {
-    datasets: [],
-    labels: []
-  };
-  public durationsChartData: ChartConfiguration<'line'>['data'] = {
-    datasets: [],
-    labels: []
-  };
-  public runtimesChartData: ChartConfiguration<'line'>['data'] = {
-    datasets: [],
-    labels: []
-  };
-  public chartOptions: ChartOptions<'line'> = {
-    responsive: true,
-    maintainAspectRatio: false,
-    scales: {
-      y: {
-        beginAtZero: true,
-        ticks: {
-          stepSize: 1
-        }
-      }
-    },
-    plugins: {
-      legend: {
-        display: true,
-        position: 'top',
-        labels: {
-          boxWidth: 10,
-          usePointStyle: true,
-          pointStyle: 'circle'
-        }
-      },
-      tooltip: {
-        mode: 'index',
-        intersect: false
-      }
-    }
-  };
+  readonly document = signal<AgentDocument | null>(null);
+  readonly documentTitle = computed(() => {
+    const document = this.document();
+    return document ? DOCUMENT_TITLES[document] : '';
+  });
+  readonly documentData = computed(() => {
+    const agent = this.selected();
+    const document = this.document();
+    const documents = { workflow: agent?.workflow, input: agent?.input_schema, output: agent?.output_schema };
+    return document ? documents[document] : null;
+  });
 
-  ngOnInit(): void {
-    this.navigationService.setTitle('Agents');
-    this.userService.userDetails.subscribe(user => {
-      if (user) {
-        const newProjectId = (user.active_project_id && user.active_project_id !== 'None') ? user.active_project_id : null;
-        if (newProjectId !== this.activeProjectId) {
-          this.activeProjectId = newProjectId;
-          this.selectedAgent = null;
-          this.summaryStats = null;
-          this.dailyStats = null;
-          this.loadAgents();
-        } else if (newProjectId === null) {
-          this.loadAgents();
-        }
-      }
+  readonly activity = computed(() => {
+    const daily = this.daily();
+    return daily ? activityBars(daily) : [];
+  });
+  readonly tokens = computed(() => {
+    const daily = this.daily();
+    return daily ? tokenBars(daily) : [];
+  });
+  readonly callDurations = computed(() => {
+    const daily = this.daily();
+    return daily ? callDurationLines(daily) : null;
+  });
+  readonly runDurations = computed(() => {
+    const daily = this.daily();
+    return daily ? runDurationLines(daily) : null;
+  });
+  readonly active = computed(() => hasActivity(this.daily()));
+
+  private statsSubscription: Subscription | null = null;
+  /** Whether the first user has been seen: later emissions reload only on a project change. */
+  private started = false;
+
+  constructor() {
+    this.userService.userDetails.pipe(takeUntilDestroyed()).subscribe((user) => {
+      if (!user) return;
+      const projectId =
+        user.active_project_id && user.active_project_id !== 'None' ? user.active_project_id : null;
+      if (this.started && projectId === this.projectId()) return;
+      this.started = true;
+      this.projectId.set(projectId);
+      this.load();
     });
+    this.destroyRef.onDestroy(() => this.statsSubscription?.unsubscribe());
   }
 
-  private loadStats(agentId: string): void {
-    if (!this.activeProjectId) return;
-
-    this.agentService.getSummaryStats(this.activeProjectId, agentId).subscribe({
-      next: (stats) => {
-        this.summaryStats = stats;
-      },
-      error: (err) => {
-        console.error('Failed to load summary stats', err);
-      }
-    });
-
-    this.agentService.getDailyStats(this.activeProjectId, 7, agentId).subscribe({
-      next: (stats) => {
-        this.dailyStats = stats;
-        this.prepareChartData();
-      },
-      error: (err) => {
-        console.error('Failed to load daily stats', err);
-        this.dailyStats = null;
-      }
-    });
+  load(): void {
+    const projectId = this.projectId();
+    this.selected.set(null);
+    this.agents.set([]);
+    if (!projectId) return;
+    this.loading.set(true);
+    this.error.set(null);
+    this.agentService
+      .getAgentsByProject(projectId)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (agents) => {
+          this.agents.set(agents);
+          this.loading.set(false);
+          if (agents.length) this.select(agents[0]);
+        },
+        error: (err) => {
+          this.error.set(errorMessage(err, 'Could not load the agents.'));
+          this.loading.set(false);
+        },
+      });
   }
 
-  private prepareChartData(): void {
-    if (!this.dailyStats) return;
-
-    const labels = this.dailyStats.sessions.map((d: any) => {
-      const date = new Date(d.date);
-      const day = String(date.getDate()).padStart(2, '0');
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      return `${day}-${month}`;
-    });
-
-    const colors = {
-      sessions: '#acc12f',
-      messages: '#1b998b',
-      tasks: '#b185a7',
-      runs: '#6d9999',
-      input: '#e67f0d',
-      output: '#82204a',
-      embedding: '#809537',
-      llm_duration: '#4a90e2',
-      embedding_duration: '#50e3c2'
-    };
-
-    const palette = [
-      '#acc12f', '#1b998b', '#b185a7', '#6d9999', '#e67f0d', '#82204a', '#809537',
-      '#4a90e2', '#50e3c2', '#f5a623', '#bd10e0', '#9013fe'
-    ];
-
-    // Activity Chart
-    this.activityChartData = {
-      labels: labels,
-      datasets: [
-        {
-          data: this.dailyStats.sessions.map((d: any) => d.count),
-          label: 'Sessions',
-          borderColor: colors.sessions,
-          backgroundColor: colors.sessions,
-          fill: false,
-          tension: 0.1,
-          borderWidth: 2,
-          pointRadius: 3,
-          pointHoverRadius: 5
-        },
-        {
-          data: this.dailyStats.messages.map((d: any) => d.count),
-          label: 'Messages',
-          borderColor: colors.messages,
-          backgroundColor: colors.messages,
-          fill: false,
-          tension: 0.1,
-          borderWidth: 2,
-          pointRadius: 3,
-          pointHoverRadius: 5
-        },
-        {
-          data: this.dailyStats.tasks.map((d: any) => d.count),
-          label: 'Tasks',
-          borderColor: colors.tasks,
-          backgroundColor: colors.tasks,
-          fill: false,
-          tension: 0.1,
-          borderWidth: 2,
-          pointRadius: 3,
-          pointHoverRadius: 5
-        },
-        {
-          data: labels.map((_: any, i: number) => {
-            let total = 0;
-            for (const agent of Object.values(this.dailyStats.runs) as any[]) {
-              total += agent[i]?.count || 0;
-            }
-            return total;
-          }),
-          label: 'Workflow Runs',
-          borderColor: colors.runs,
-          backgroundColor: colors.runs,
-          fill: false,
-          tension: 0.1,
-          borderWidth: 2,
-          pointRadius: 3,
-          pointHoverRadius: 5
-        }
-      ]
-    };
-
-    // Tokens Chart
-    this.tokensChartData = {
-      labels: labels,
-      datasets: [
-        {
-          data: labels.map((_: any, i: number) => {
-            let total = 0;
-            for (const model of Object.values(this.dailyStats.llm) as any[]) {
-              total += model[i]?.prompt_tokens || 0;
-            }
-            return total;
-          }),
-          label: 'Input Tokens',
-          borderColor: colors.input,
-          backgroundColor: colors.input,
-          fill: false,
-          tension: 0.1,
-          borderWidth: 2,
-          pointRadius: 3,
-          pointHoverRadius: 5
-        },
-        {
-          data: labels.map((_: any, i: number) => {
-            let total = 0;
-            for (const model of Object.values(this.dailyStats.llm) as any[]) {
-              total += model[i]?.completion_tokens || 0;
-            }
-            return total;
-          }),
-          label: 'Output Tokens',
-          borderColor: colors.output,
-          backgroundColor: colors.output,
-          fill: false,
-          tension: 0.1,
-          borderWidth: 2,
-          pointRadius: 3,
-          pointHoverRadius: 5
-        },
-        {
-          data: labels.map((_: any, i: number) => {
-            let total = 0;
-            for (const model of Object.values(this.dailyStats.embedding) as any[]) {
-              total += model[i]?.total_tokens || 0;
-            }
-            return total;
-          }),
-          label: 'Embedding Tokens',
-          borderColor: colors.embedding,
-          backgroundColor: colors.embedding,
-          fill: false,
-          tension: 0.1,
-          borderWidth: 2,
-          pointRadius: 3,
-          pointHoverRadius: 5
-        }
-      ]
-    };
-
-    // Durations Chart
-    this.durationsChartData = {
-      labels: labels,
-      datasets: [
-        {
-          data: labels.map((_: any, i: number) => {
-            let totalDuration = 0;
-            let totalCount = 0;
-            for (const model of Object.values(this.dailyStats.llm) as any[]) {
-              totalDuration += model[i]?.duration_seconds || 0;
-              totalCount += model[i]?.count || 0;
-            }
-            return totalCount > 0 ? totalDuration / totalCount : 0;
-          }),
-          label: 'Avg LLM Duration (s)',
-          borderColor: colors.llm_duration,
-          backgroundColor: colors.llm_duration,
-          fill: false,
-          tension: 0.1,
-          borderWidth: 2,
-          pointRadius: 3,
-          pointHoverRadius: 5
-        },
-        {
-          data: labels.map((_: any, i: number) => {
-            let totalDuration = 0;
-            let totalCount = 0;
-            for (const model of Object.values(this.dailyStats.embedding) as any[]) {
-              totalDuration += model[i]?.duration_seconds || 0;
-              totalCount += model[i]?.count || 0;
-            }
-            return totalCount > 0 ? totalDuration / totalCount : 0;
-          }),
-          label: 'Avg Embedding Duration (s)',
-          borderColor: colors.embedding_duration,
-          backgroundColor: colors.embedding_duration,
-          fill: false,
-          tension: 0.1,
-          borderWidth: 2,
-          pointRadius: 3,
-          pointHoverRadius: 5
-        }
-      ]
-    };
-
-    // Runtimes Chart
-    this.runtimesChartData = {
-      labels: labels,
-      datasets: Object.keys(this.dailyStats.runs).map((agentName, idx) => ({
-        data: this.dailyStats.runs[agentName].map((d: any) => d.duration_seconds || 0),
-        label: agentName,
-        borderColor: palette[idx % palette.length],
-        backgroundColor: palette[idx % palette.length],
-        fill: false,
-        tension: 0.1,
-        borderWidth: 2,
-        pointRadius: 3,
-        pointHoverRadius: 5
-      }))
-    };
+  select(agent: Agent): void {
+    this.selected.set(agent);
+    this.loadStats();
   }
 
-  private loadAgents(): void {
-    if (!this.activeProjectId) {
-      this.error = 'No active project selected';
-      return;
-    }
+  loadStats(): void {
+    const projectId = this.projectId();
+    const agent = this.selected();
+    if (projectId && agent) this.fetchStats(projectId, agent);
+  }
 
-    this.loading = true;
-    this.error = null;
-    console.log(`Loading agents for project ${this.activeProjectId}`);
-
-    this.agentService.getAgentsByProject(this.activeProjectId).subscribe({
-      next: (agents) => {
-        this.agents = agents;
-        this.loading = false;
-        if (this.agents.length > 0) {
-          this.selectAgent(this.agents[0]);
-        }
+  private fetchStats(projectId: string, agent: Agent): void {
+    this.statsSubscription?.unsubscribe();
+    this.summary.set(null);
+    this.daily.set(null);
+    this.statsLoading.set(true);
+    this.statsError.set(null);
+    this.statsSubscription = forkJoin({
+      summary: this.agentService.getSummaryStats(projectId, agent.id),
+      daily: this.agentService.getDailyStats(projectId, CHART_DAYS, agent.id),
+    }).subscribe({
+      next: ({ summary, daily }) => {
+        this.summary.set(summary);
+        this.daily.set(daily);
+        this.statsLoading.set(false);
       },
       error: (err) => {
-        this.error = 'Failed to load agents';
-        console.error(err);
-        this.loading = false;
-      }
+        this.statsError.set(errorMessage(err, `Could not load the figures of ${agent.name}.`));
+        this.statsLoading.set(false);
+      },
     });
   }
 
-  selectAgent(agent: Agent): void {
-    this.selectedAgent = agent;
-    this.loadStats(agent.id);
+  open(document: AgentDocument): void {
+    this.document.set(document);
   }
 
-  goToConversations(): void {
-    if (this.selectedAgent) {
-      this.router.navigate(['/conversations'], { queryParams: { agentId: this.selectedAgent.id } });
-    }
-  }
-
-  openModal(type: 'workflow' | 'input' | 'output'): void {
-    if (!this.selectedAgent) return;
-
-    this.showModal = true;
-    if (type === 'workflow') {
-      this.modalTitle = 'Workflow JSON';
-      this.modalData = this.selectedAgent.workflow;
-    } else if (type === 'input') {
-      this.modalTitle = 'Input Schema';
-      this.modalData = this.selectedAgent.input_schema;
-    } else if (type === 'output') {
-      this.modalTitle = 'Output Schema';
-      this.modalData = this.selectedAgent.output_schema;
-    }
-  }
-
-  closeModal(): void {
-    this.showModal = false;
-    this.modalData = null;
+  closeDocument(): void {
+    this.document.set(null);
   }
 }

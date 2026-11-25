@@ -1,0 +1,84 @@
+.chart-wrap {
+  width: 100%;
+}
+
+.chart {
+  width: 100%;
+  height: 200px;
+  display: block;
+}
+
+.axis {
+  stroke: var(--color-base-300);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.grid {
+  stroke: var(--color-base-200);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+/* The scale sits in a column of its own: text inside the stretched SVG would
+   be stretched with it. */
+.plot {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  padding-top: 8px;
+}
+
+.y-axis {
+  position: relative;
+  height: 200px;
+  min-width: 2.5rem;
+}
+
+.y-tick {
+  position: absolute;
+  right: 0;
+  transform: translateY(50%);
+  font-family: var(--font-family-accent);
+  font-size: 0.7rem;
+  line-height: 1;
+  color: var(--color-slate-500);
+  white-space: nowrap;
+}
+
+.y-unit {
+  font-family: var(--font-family-accent);
+  font-size: 0.65rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-slate-500);
+}
+
+.chart-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  opacity: 0.7;
+  margin-top: 4px;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  font-size: 0.8rem;
+  margin-top: 8px;
+}
+
+.swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  vertical-align: middle;
+  margin-right: 4px;
+}
+
+.chart-empty {
+  margin: 24px 0;
+}

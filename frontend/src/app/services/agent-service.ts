@@ -15,12 +15,30 @@ limitations under the License.
 */
 
 import { Injectable } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { Agent } from '../models/agent';
 import { SessionSummary, SessionDetails } from '../models/session';
 import { ChatMessage } from '../models/chat-message';
-import { LLMCallStat, LLMCallStatFilters } from '../models/llm-call-stat';
+import { LLMCallStat, LLMCallStatFilters, LLMCallSummary } from '../models/llm-call-stat';
+
+/** The query of the model call list and its summary; empty filters are left out. */
+function modelCallParams(callType: string | undefined, filters: LLMCallStatFilters): HttpParams {
+  const values: Record<string, string | undefined> = {
+    call_type: callType,
+    agent_id: filters.agentId,
+    session_id: filters.sessionId,
+    run_id: filters.runId,
+    search: filters.search,
+    start_date: filters.start,
+    end_date: filters.end,
+  };
+  let params = new HttpParams();
+  for (const [key, value] of Object.entries(values)) {
+    if (value) params = params.set(key, value);
+  }
+  return params;
+}
 
 @Injectable({
   providedIn: 'root'
@@ -109,19 +127,18 @@ export class AgentService {
     offset: number = 0,
     filters: LLMCallStatFilters = {}
   ): Observable<LLMCallStat[]> {
-    let url = `/api/projects/${projectId}/llm-call-stats?limit=${limit}&offset=${offset}`;
-    if (callType) {
-      url += `&call_type=${callType}`;
-    }
-    if (filters.agentId) {
-      url += `&agent_id=${filters.agentId}`;
-    }
-    if (filters.sessionId) {
-      url += `&session_id=${filters.sessionId}`;
-    }
-    if (filters.runId) {
-      url += `&run_id=${filters.runId}`;
-    }
-    return this.http.get<LLMCallStat[]>(url);
+    const params = modelCallParams(callType, filters).set('limit', limit).set('offset', offset);
+    return this.http.get<LLMCallStat[]>(`/api/projects/${projectId}/llm-call-stats`, { params });
+  }
+
+  /** The token usage of every call the same filters select, not one page. */
+  getLLMCallSummary(
+    projectId: string,
+    callType?: string,
+    filters: LLMCallStatFilters = {}
+  ): Observable<LLMCallSummary> {
+    return this.http.get<LLMCallSummary>(`/api/projects/${projectId}/llm-call-stats/summary`, {
+      params: modelCallParams(callType, filters),
+    });
   }
 }

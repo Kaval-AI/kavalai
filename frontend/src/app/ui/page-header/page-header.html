@@ -1,0 +1,21 @@
+<div class="ui-page-header-main">
+  @if (backLink()) {
+    <a class="ui-back-link" [routerLink]="backLink()"
+      ><i class="fa-solid fa-arrow-left" aria-hidden="true"></i> {{ backLabel() }}</a
+    >
+  }
+  @if (tag()) {
+    <span class="section-tag">{{ tag() }}</span>
+  }
+  <div class="ui-page-title">
+    <h1>
+      {{ title() }}
+      @if (section()) {
+        <span class="ui-page-section" data-testid="section-title">{{ section() }}</span>
+      }
+    </h1>
+    <ng-content select="[page-title]" />
+  </div>
+  <div class="ui-page-subtitle"><ng-content /></div>
+</div>
+<div class="ui-page-header-actions"><ng-content select="[page-actions]" /></div>

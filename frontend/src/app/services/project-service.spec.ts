@@ -87,6 +87,49 @@ describe('ProjectService', () => {
     req.flush(null);
   });
 
+  it('announces a created, updated or deleted project, and nothing else', () => {
+    let count = 0;
+    service.changes.subscribe(() => count++);
+
+    service.getAll().subscribe();
+    httpMock.expectOne('/api/projects/all').flush([]);
+    service.create({ name: 'P' }).subscribe();
+    httpMock.expectOne('/api/projects/create').flush({ id: '1', name: 'P' });
+    service.update('1', { name: 'Q' }).subscribe();
+    httpMock.expectOne('/api/projects/update/1').flush({ id: '1', name: 'Q' });
+    service.delete('1').subscribe();
+    httpMock.expectOne('/api/projects/delete/1').flush(null);
+    expect(count).toBe(3);
+
+    service.update('1', { name: 'R' }).subscribe({ error: () => undefined });
+    httpMock
+      .expectOne('/api/projects/update/1')
+      .flush({ detail: 'No' }, { status: 403, statusText: 'Forbidden' });
+    expect(count).toBe(3);
+  });
+
+  it('lists, adds, changes and removes the members of a project', () => {
+    service.getMembers('p1').subscribe();
+    httpMock.expectOne('/api/projects/p1/members').flush([]);
+
+    service.addMember('p1', 'u2', 'viewer').subscribe();
+    const add = httpMock.expectOne('/api/projects/p1/members/add');
+    expect(add.request.method).toBe('POST');
+    expect(add.request.body).toEqual({ user_id: 'u2', role: 'viewer' });
+    add.flush({});
+
+    service.updateMember('p1', 'u2', 'owner').subscribe();
+    const update = httpMock.expectOne('/api/projects/p1/members/update');
+    expect(update.request.method).toBe('PUT');
+    expect(update.request.body).toEqual({ user_id: 'u2', role: 'owner' });
+    update.flush({});
+
+    service.removeMember('p1', 'u2').subscribe();
+    const remove = httpMock.expectOne('/api/projects/p1/members/remove/u2');
+    expect(remove.request.method).toBe('DELETE');
+    remove.flush({});
+  });
+
   it('should test connection', () => {
     const mockRes = { status: 'success' };
     service.testConnection('1').subscribe(res => {
@@ -95,6 +138,15 @@ describe('ProjectService', () => {
     const req = httpMock.expectOne('/api/projects/test-connection/1');
     expect(req.request.method).toBe('POST');
     req.flush(mockRes);
+  });
+
+  it('should ask for the password with a POST', () => {
+    service.revealPassword('1').subscribe(res => {
+      expect(res).toEqual({ db_password: 'pw' });
+    });
+    const req = httpMock.expectOne('/api/projects/1/reveal-password');
+    expect(req.request.method).toBe('POST');
+    req.flush({ db_password: 'pw' });
   });
 
   it('should handle getById with number id', () => {

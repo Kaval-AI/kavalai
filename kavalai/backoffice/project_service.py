@@ -57,13 +57,85 @@ def project_fields(data: Dict[str, Any]) -> Dict[str, Any]:
     return {key: value for key, value in data.items() if key in PROJECT_FIELDS}
 
 
+CONNECTION_IDENTITY = ("db_type", "db_host", "db_port", "db_user", "db_name")
+"""The fields naming the server and account a stored password belongs to. A
+stored password is reused only while all of them stay the same, so changing
+the host cannot send the existing password to another server."""
+
+
+def public_project(project: db.Project, role: Optional[str] = None) -> Dict[str, Any]:
+    """A project as the API returns it: every settable column except
+    ``db_password``, plus ``has_password``.
+
+    The database password never leaves the server through a project listing:
+    every member of a project receives these fields, viewers included, and
+    the password would let them connect to the agent database directly,
+    around their role and around the read-only setting, which the backoffice
+    applies to its own connections only. ``role`` is the caller's role, which
+    the list endpoint adds.
+    """
+    fields: Dict[str, Any] = {
+        key: getattr(project, key) for key in PROJECT_FIELDS - {"db_password"}
+    }
+    fields["id"] = str(project.id)
+    fields["has_password"] = bool(project.db_password)
+    for key in ("created_at", "updated_at"):
+        value = getattr(project, key)
+        fields[key] = value.isoformat() if value is not None else None
+    if role is not None:
+        fields["role"] = role
+    return fields
+
+
+def connection_fields(stored: db.Project, data: Dict[str, Any]) -> Dict[str, Any]:
+    """The columns a change to ``stored`` sets, with the password rules applied.
+
+    The password is write-only, so a form that never received it sends it
+    empty or not at all: an empty or missing ``db_password`` keeps the stored
+    one, and ``None`` clears it. The stored password is kept only while the
+    fields of :data:`CONNECTION_IDENTITY` stay the same; a change to any of
+    them on a PostgreSQL project needs the password again, and without one
+    the change is refused with a 400.
+    """
+    fields = project_fields(data)
+    password = fields.pop("db_password", "")
+    if password is None or password:
+        fields["db_password"] = password
+        return fields
+    if not stored.db_password or fields.get("db_type", stored.db_type) == "sqlite":
+        return fields
+    changed = [
+        key
+        for key in CONNECTION_IDENTITY
+        if key in fields and str(fields[key]) != str(getattr(stored, key))
+    ]
+    if changed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Enter the database password again: it is kept only while the "
+                f"server and user stay the same, and {', '.join(changed)} changed."
+            ),
+        )
+    return fields
+
+
+def merged_project(stored: db.Project, fields: Dict[str, Any]) -> db.Project:
+    """A detached copy of ``stored`` with ``fields`` applied, for testing a
+    connection with settings that are not saved yet."""
+    values = {key: getattr(stored, key) for key in PROJECT_FIELDS}
+    values.update(fields)
+    return db.Project(**values)
+
+
 class ProjectService:
     def __init__(self, session_maker: async_sessionmaker[AsyncSession]):
         self.session_maker = session_maker
 
     async def get_user_projects(self, user_id: UUID) -> List[Dict[str, Any]]:
         async with self.session_maker() as session:
-            return await db.get_user_projects(session, user_id)
+            rows = await db.get_user_projects(session, user_id)
+        return [public_project(project, role.value) for project, role in rows]
 
     async def create_project(self, data: Dict[str, Any], owner_id: UUID) -> db.Project:
         async with self.session_maker() as session:
@@ -80,8 +152,15 @@ class ProjectService:
     async def update_project(
         self, project_id: UUID, data: Dict[str, Any]
     ) -> Optional[db.Project]:
+        """Apply ``data`` to the project, keeping its password as
+        :func:`connection_fields` decides; ``None`` when there is no such
+        project."""
         async with self.session_maker() as session:
-            return await update(session, db.Project, project_id, project_fields(data))
+            stored = await session.get(db.Project, project_id)
+            if stored is None:
+                return None
+            fields = connection_fields(stored, data)
+            return await update(session, db.Project, project_id, fields)
 
     async def delete_project(self, project_id: UUID) -> bool:
         async with self.session_maker() as session:

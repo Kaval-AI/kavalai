@@ -1,0 +1,50 @@
+@if (error()) {
+  <ui-alert data-testid="model-calls-error">
+    {{ error() }}
+    <button alert-actions type="button" uiButton="ghost" size="sm" data-testid="model-calls-retry" (click)="load()">
+      Retry
+    </button>
+  </ui-alert>
+} @else if (loading()) {
+  <ui-loading />
+} @else if (calls().length === 0) {
+  <p class="text-muted" data-testid="model-calls-empty">The run made no model calls.</p>
+} @else {
+  <ui-table clickable dense>
+    <table data-testid="model-calls-table">
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Model</th>
+          <th>Type</th>
+          <th>Status</th>
+          <th class="text-right">Duration</th>
+          <th class="text-right">In</th>
+          <th class="text-right">Out</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (call of calls(); track call.id) {
+          <tr
+            data-testid="model-call-row"
+            tabindex="0"
+            title="Open this call on the Model calls page"
+            (click)="open(call)"
+            (keydown.enter)="open(call)"
+          >
+            <td class="whitespace-nowrap">{{ call.created_at | date: 'mediumTime' }}</td>
+            <td class="mono">{{ call.model }}</td>
+            <td><ui-badge tone="muted">{{ call.call_type }}</ui-badge></td>
+            <td><ui-status-badge [status]="callStatus(call)" /></td>
+            <td class="text-right mono whitespace-nowrap">{{ formatDuration(call.duration_seconds) }}</td>
+            <td class="text-right mono">{{ (call.prompt_tokens | number) ?? '—' }}</td>
+            <td class="text-right mono">{{ (call.completion_tokens | number) ?? '—' }}</td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  </ui-table>
+  @if (calls().length >= limit) {
+    <p class="form-hint" data-testid="model-calls-capped">The first {{ limit }} calls of the run.</p>
+  }
+}

@@ -1,0 +1,44 @@
+/*
+Copyright 2026 OÜ KAVAL AI (registry code 17393877)
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+import { Component, computed, input } from '@angular/core';
+
+/** A determinate progress bar; `tone="warning"` once a limit is reached. */
+@Component({
+  selector: 'ui-progress',
+  templateUrl: './progress.html',
+  styleUrl: './progress.css',
+  host: {
+    role: 'progressbar',
+    '[attr.aria-valuenow]': 'value()',
+    'aria-valuemin': '0',
+    '[attr.aria-valuemax]': 'max()',
+    '[attr.aria-label]': 'label()',
+    '[attr.tone]': 'tone()',
+  },
+})
+export class UiProgress {
+  readonly value = input.required<number>();
+  readonly max = input(100);
+  readonly label = input('Progress');
+  readonly tone = input<'default' | 'warning'>('default');
+
+  readonly percent = computed(() => {
+    const max = this.max();
+    if (max <= 0) return 0;
+    return Math.max(0, Math.min(100, (this.value() / max) * 100));
+  });
+}

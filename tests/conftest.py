@@ -24,7 +24,7 @@ def caplog_loguru(caplog):
 
 @pytest.fixture(scope="session")
 def postgres_container():
-    with PostgresContainer("pgvector/pgvector:pg15-trixie") as postgres:
+    with PostgresContainer("pgvector/pgvector:pg18-trixie") as postgres:
         yield postgres
 
 

@@ -217,7 +217,7 @@ Backoffice
      - Interface ``python -m kavalai.backoffice.server`` binds to. Default
        ``127.0.0.1``.
    * - ``KAVALAI_BO_PORT``
-     - Port for the backoffice server. Default ``8000``.
+     - Port for the backoffice server. Default ``12800``.
    * - ``KAVALAI_BO_GOOGLE_CLIENT_ID``
      - Google OAuth client id. Optional: with neither this nor the secret
        set, users sign in with a password only.
@@ -277,7 +277,7 @@ A ``.env`` for local development against Docker Compose:
    # Optional: Google sign-in beside passwords.
    KAVALAI_BO_GOOGLE_CLIENT_ID=...
    KAVALAI_BO_GOOGLE_CLIENT_SECRET=...
-   KAVALAI_BO_FRONTEND_URL=http://localhost:4200
+   KAVALAI_BO_FRONTEND_URL=http://localhost:8400
 
 .. warning::
 

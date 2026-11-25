@@ -236,8 +236,18 @@ async def test_train_pca_endpoint(
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         # Use a timeout to avoid hanging if SSE fails
-        response = await ac.get(
-            f"/projects/{project.id}/rag/train-pca?collection_name={collection}",
+        # A GET, which an image would send, starts nothing.
+        refused = await ac.get(
+            f"/projects/{project.id}/rag/train-pca?collection_name={collection}"
+        )
+        assert refused.status_code == 405
+        missing = await ac.post(f"/projects/{project.id}/rag/train-pca", json={})
+        assert missing.status_code == 400
+        assert missing.json()["detail"] == "A collection name is required."
+
+        response = await ac.post(
+            f"/projects/{project.id}/rag/train-pca",
+            json={"collection_name": collection},
             timeout=10,
         )
 

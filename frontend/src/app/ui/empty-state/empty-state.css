@@ -1,0 +1,40 @@
+/* A card-like surface with an icon, a title and a call to action. */
+:host {
+  display: block;
+  filter: var(--elevation-1);
+}
+
+.ui-empty {
+  padding: 48px 24px;
+  background: var(--color-surface);
+  text-align: center;
+  clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+}
+
+.ui-empty > i {
+  display: block;
+  margin-bottom: 12px;
+  font-size: 2rem;
+  color: var(--color-primary);
+}
+
+.ui-empty h2 {
+  margin-bottom: 6px;
+}
+
+.ui-empty p {
+  margin: 0 auto;
+  max-width: 48ch;
+  color: var(--color-slate-600);
+}
+
+.ui-empty-actions {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: var(--space-4);
+}
+
+.ui-empty-actions:empty {
+  display: none;
+}

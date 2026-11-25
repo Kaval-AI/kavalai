@@ -13,25 +13,67 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-import { Component, Input } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input, linkedSignal } from '@angular/core';
 import { Task } from '../../models/task';
+import { UiAlert, UiBadge, UiButton, UiEmptyState, UiStatusBadge, UiTable } from '../../ui';
 import { JsonTreeComponent } from '../json-tree/json-tree';
+import { formatDuration } from '../../core/format';
 
+/**
+ * The steps of one run as a table, in execution order (`seq`), so the list
+ * is the path the run took. A row opens into the step's prompt, inputs,
+ * output and errors; a failed step starts open. Tool calls an agent chose
+ * for itself are indented under the node that made them.
+ */
 @Component({
   selector: 'app-tasks-list',
   standalone: true,
-  imports: [CommonModule, JsonTreeComponent],
+  imports: [JsonTreeComponent, UiAlert, UiBadge, UiButton, UiEmptyState, UiStatusBadge, UiTable],
   templateUrl: './tasks-list.html',
   styleUrl: './tasks-list.css',
 })
 export class TasksList {
-  @Input() tasks: Task[] = [];
-  @Input() runId: string = '';
+  readonly tasks = input<Task[]>([]);
+  readonly runId = input<string>('');
 
-  formatDate(dateStr: string): string {
-    const date = new Date(dateStr);
-    return date.toLocaleString();
+  /**
+   * The ids of the rows that are open: the failed ones, and those the reader
+   * opened, which stay open when the same run is loaded again.
+   */
+  readonly open = linkedSignal<Task[], ReadonlySet<string>>({
+    source: this.tasks,
+    computation: (tasks, previous) => {
+      const kept = previous?.value ?? new Set<string>();
+      return new Set(tasks.filter((t) => this.failed(t) || kept.has(t.id)).map((t) => t.id));
+    },
+  });
+
+  readonly formatDuration = formatDuration;
+
+  isOpen(task: Task): boolean {
+    return this.open().has(task.id);
+  }
+
+  toggle(task: Task): void {
+    const next = new Set(this.open());
+    if (next.has(task.id)) {
+      next.delete(task.id);
+    } else {
+      next.add(task.id);
+    }
+    this.open.set(next);
+  }
+
+  openAll(): void {
+    this.open.set(new Set(this.tasks().map((t) => t.id)));
+  }
+
+  closeAll(): void {
+    this.open.set(new Set());
+  }
+
+  failed(task: Task): boolean {
+    return !!task.errors && task.errors.length > 0;
   }
 
   /**
@@ -59,7 +101,7 @@ export class TasksList {
     const expr = task.inputs?.['expr'] ?? '';
     const value = JSON.stringify(task.inputs?.['value']);
     const taken = task.output?.['taken'] ?? 'nowhere';
-    return `${expr} = ${value} \u2192 ${taken}`;
+    return `${expr} = ${value} → ${taken}`;
   }
 
   /** A `switch` that matched no case fell through to its default. */

@@ -1,0 +1,188 @@
+<div class="shell" [class.sidebar-open]="sidebarOpen()">
+  <header class="topbar">
+    <div class="topbar-start">
+      <button
+        type="button"
+        uiButton="icon"
+        class="burger"
+        (click)="toggleSidebar()"
+        aria-label="Toggle navigation"
+        [attr.aria-expanded]="sidebarOpen()"
+        data-testid="burger"
+      >
+        <i class="fa-solid" [class.fa-bars]="!sidebarOpen()" [class.fa-xmark]="sidebarOpen()"></i>
+      </button>
+      <a routerLink="/" class="brand">
+        <img src="assets/images/logo.svg" alt="Kaval.AI" class="brand-logo" />
+        <span class="brand-product">Backoffice</span>
+      </a>
+    </div>
+
+    <div class="topbar-end">
+      <div class="user-menu" (focusout)="closeOnFocusOut($event, closeMenu.bind(this))">
+        <button
+          type="button"
+          class="user-button"
+          (click)="toggleMenu()"
+          [attr.aria-expanded]="menuOpen()"
+          aria-haspopup="menu"
+          data-testid="user-button"
+        >
+          <ui-avatar
+            [name]="user()?.name || user()?.email || '?'"
+            [src]="user()?.picture || null"
+            size="sm"
+            round
+          />
+          <span class="user-name">{{ user()?.name || user()?.email }}</span>
+          <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
+        </button>
+        @if (menuOpen()) {
+          <ui-menu data-testid="user-menu">
+            <div menu-header>
+              <div class="menu-name">{{ user()?.name || 'Signed in' }}</div>
+              <div class="menu-email">{{ user()?.email }}</div>
+              @if (isAdmin()) {
+                <ui-badge tone="primary" class="menu-role">administrator</ui-badge>
+              }
+            </div>
+            <button
+              type="button"
+              uiMenuItem
+              (mousedown)="$event.preventDefault()"
+              (click)="openProfile()"
+              data-testid="profile"
+            >
+              <i class="fa-solid fa-user" aria-hidden="true"></i> Profile
+            </button>
+            <button
+              type="button"
+              uiMenuItem
+              danger
+              (mousedown)="$event.preventDefault()"
+              (click)="signOut()"
+              data-testid="sign-out"
+            >
+              <i class="fa-solid fa-right-from-bracket" aria-hidden="true"></i> Sign out
+            </button>
+          </ui-menu>
+        }
+      </div>
+    </div>
+  </header>
+
+  <aside class="sidebar" aria-label="Navigation">
+    <div class="switcher" (focusout)="closeOnFocusOut($event, closeSwitcher.bind(this))">
+      <button
+        type="button"
+        class="switcher-button"
+        (click)="toggleSwitcher()"
+        [attr.aria-expanded]="switcherOpen()"
+        aria-haspopup="menu"
+        data-testid="project-switcher"
+      >
+        <span class="switcher-label">Project</span>
+        @if (activeProject(); as project) {
+          <span class="switcher-name">{{ project.name }}</span>
+          <span class="switcher-detail mono">{{ database(project) }}</span>
+        } @else {
+          <span class="switcher-name switcher-none">
+            {{ projects().length ? 'Choose a project' : 'No project yet' }}
+          </span>
+        }
+        <i class="fa-solid fa-chevron-down switcher-chevron" aria-hidden="true"></i>
+      </button>
+      @if (activeProject()?.read_only === false) {
+        <ui-badge tone="warning" class="switcher-access" title="The backoffice may write to this database">
+          read-write
+        </ui-badge>
+      }
+      @if (switcherOpen()) {
+        <ui-menu align="start" data-testid="project-menu">
+          @if (projectsError()) {
+            <p class="menu-error" role="alert">The projects could not be loaded.</p>
+          }
+          @for (project of projects(); track project.id) {
+            <button
+              type="button"
+              uiMenuItem
+              class="project-option"
+              [class.current]="project.id === activeProject()?.id"
+              [attr.aria-current]="project.id === activeProject()?.id ? 'true' : null"
+              (mousedown)="$event.preventDefault()"
+              (click)="chooseProject(project)"
+              [attr.data-testid]="'project-option-' + project.id"
+            >
+              <i class="fa-solid" [class.fa-check]="project.id === activeProject()?.id" aria-hidden="true"></i>
+              <span class="project-option-text">
+                <span class="project-option-name">{{ project.name }}</span>
+                <span class="project-option-meta">
+                  <span class="project-option-detail mono">{{ database(project) }}</span>
+                  <ui-badge [tone]="project.role === 'owner' ? 'primary' : 'muted'">{{ project.role }}</ui-badge>
+                </span>
+              </span>
+            </button>
+          } @empty {
+            @if (!projectsError()) {
+              <p class="menu-empty">
+                You are not a member of any project yet.
+                @if (!isAdmin()) {
+                  Ask an administrator to add you to one.
+                }
+              </p>
+            }
+          }
+          @if (isAdmin()) {
+            <button
+              type="button"
+              uiMenuItem
+              class="project-new"
+              (mousedown)="$event.preventDefault()"
+              (click)="newProject()"
+              data-testid="new-project"
+            >
+              <i class="fa-solid fa-plus" aria-hidden="true"></i> New project
+            </button>
+          }
+        </ui-menu>
+      }
+    </div>
+
+    <nav class="sidebar-nav" aria-label="Backoffice">
+      <div class="sidebar-group" data-testid="project-nav">
+        @for (item of projectNav; track item.link) {
+          <ui-nav-item [link]="item.link" [icon]="item.icon" [label]="item.label" [exact]="!!item.exact" />
+        }
+      </div>
+
+      @if (activeProject()) {
+        <div class="sidebar-group" data-testid="settings-nav">
+          @for (item of settingsNav; track item.link) {
+            <ui-nav-item [link]="item.link" [icon]="item.icon" [label]="item.label" />
+          }
+        </div>
+      }
+
+      @if (isAdmin()) {
+        <div class="sidebar-group" data-testid="admin-nav">
+          <div class="sidebar-heading">Administration</div>
+          @for (item of adminNav; track item.link) {
+            <ui-nav-item [link]="item.link" [icon]="item.icon" [label]="item.label" />
+          }
+        </div>
+      }
+    </nav>
+
+    <div class="sidebar-footer">
+      @for (link of resourceLinks; track link.href) {
+        <a [href]="link.href" target="_blank" rel="noopener"
+          ><i [class]="link.icon" aria-hidden="true"></i>{{ link.label }}</a
+        >
+      }
+    </div>
+  </aside>
+
+  <main class="content">
+    <router-outlet />
+  </main>
+</div>

@@ -1,0 +1,5 @@
+@if (src()) {
+  <img [class]="classes()" [src]="src()" alt="" referrerpolicy="no-referrer" />
+} @else {
+  <span [class]="classes()" aria-hidden="true">{{ initials() }}</span>
+}

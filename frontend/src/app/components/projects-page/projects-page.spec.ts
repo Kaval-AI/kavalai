@@ -13,305 +13,355 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-
+import { HttpErrorResponse } from '@angular/common/http';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { CommonModule } from '@angular/common';
-import { FormsModule } from '@angular/forms';
-import { of, throwError } from 'rxjs';
-import { ProjectsPage } from './projects-page';
-import { ProjectService } from '../../services/project-service';
-import { AgentService } from '../../services/agent-service';
-import { UserService } from '../../services/user-service';
-import { ToastService } from '../../services/toast-service';
+import { provideRouter } from '@angular/router';
+import { BehaviorSubject, NEVER, Observable, of, throwError } from 'rxjs';
+import { DailyStats } from '../../core/daily-stats';
 import { Project } from '../../models/project';
-import { Router } from '@angular/router';
+import { UserDetails } from '../../models/user-details';
+import { AgentService } from '../../services/agent-service';
+import { ProjectService } from '../../services/project-service';
+import { UserService } from '../../services/user-service';
+import { Role, makeProject, makeUser, settle, signedInAs } from '../../../testing';
+import { ProjectsPage, activeProjectOf, connectionStrings, databaseLabel } from './projects-page';
+
+const SUMMARY = {
+  total_sessions: 12,
+  total_messages: 30,
+  total_tasks: 41,
+  total_runs: 15,
+  total_prompt_tokens: 3729,
+  total_completion_tokens: 394,
+  total_embedding_tokens: 0,
+};
+
+function daily(runs: DailyStats['runs'] = { pulse_answer: [{ date: '2026-11-24', count: 2, duration_seconds: 8 }] }): DailyStats {
+  return {
+    sessions: [
+      { date: '2026-11-23', count: 0 },
+      { date: '2026-11-24', count: 1 },
+    ],
+    messages: [
+      { date: '2026-11-23', count: 0 },
+      { date: '2026-11-24', count: 2 },
+    ],
+    tasks: [
+      { date: '2026-11-23', count: 0 },
+      { date: '2026-11-24', count: 5 },
+    ],
+    runs,
+    llm: { 'scaleway/glm-5.3': [{ date: '2026-11-24', count: 1, prompt_tokens: 10, completion_tokens: 5, duration_seconds: 2 }] },
+    embedding: {},
+  };
+}
+
+function httpError(status: number, detail?: string): HttpErrorResponse {
+  return new HttpErrorResponse({ status, error: detail ? { detail } : null });
+}
 
 describe('ProjectsPage', () => {
-  let component: ProjectsPage;
   let fixture: ComponentFixture<ProjectsPage>;
-  let projectServiceSpy: jasmine.SpyObj<ProjectService>;
-  let agentServiceSpy: jasmine.SpyObj<AgentService>;
-  let userServiceSpy: jasmine.SpyObj<UserService>;
-  let toastServiceSpy: jasmine.SpyObj<ToastService>;
-  let routerSpy: jasmine.SpyObj<Router>;
+  let el: HTMLElement;
+  let projects: jasmine.SpyObj<ProjectService>;
+  let agents: jasmine.SpyObj<AgentService>;
+  let users: jasmine.SpyObj<UserService>;
+  let details: BehaviorSubject<UserDetails | null>;
+
+  function query<T extends Element = HTMLElement>(testId: string): T | null {
+    return el.querySelector<T>(`[data-testid="${testId}"]`);
+  }
+
+  function text(testId: string): string {
+    return query(testId)?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+  }
+
+  /** Sign in as `role`, with `list` as the user's projects, and render the page. */
+  async function render(
+    role: Role = 'owner',
+    list: Project[] | Observable<Project[]> = [makeProject({ role: role === 'viewer' ? 'viewer' : 'owner' })],
+    user: Partial<UserDetails> = {}
+  ): Promise<void> {
+    users = signedInAs(role, user);
+    // A subject of the spec's own, so a test can switch the active project as the sidebar does.
+    details = new BehaviorSubject<UserDetails | null>(makeUser({ is_admin: role === 'admin', ...user }));
+    (Object.getOwnPropertyDescriptor(users, 'userDetails')!.get as jasmine.Spy).and.returnValue(details.asObservable());
+    users.getIsAdmin.and.callFake(() => !!details.value?.is_admin);
+    projects.getAll.and.returnValue(Array.isArray(list) ? of(list) : list);
+    TestBed.overrideProvider(UserService, { useValue: users });
+    fixture = TestBed.createComponent(ProjectsPage);
+    el = fixture.nativeElement;
+    fixture.detectChanges();
+    await settle(fixture);
+  }
 
   beforeEach(async () => {
-    projectServiceSpy = jasmine.createSpyObj('ProjectService', ['getAll', 'delete', 'update', 'getMembers', 'addMember', 'updateMember', 'removeMember']);
-    agentServiceSpy = jasmine.createSpyObj('AgentService', ['getSummaryStats', 'getDailyStats']);
-    userServiceSpy = jasmine.createSpyObj('UserService', ['getIsAdmin', 'setActiveProject', 'getActiveProjectId', 'getUsers'], { userDetails: of({ id: 'u1' }) });
-    toastServiceSpy = jasmine.createSpyObj('ToastService', ['success', 'error', 'show']);
-    routerSpy = jasmine.createSpyObj('Router', ['navigate']);
-
-    projectServiceSpy.getAll.and.returnValue(of([]));
-    projectServiceSpy.getMembers.and.returnValue(of([]));
-    agentServiceSpy.getSummaryStats.and.returnValue(of({ total_sessions: 0 }));
-    agentServiceSpy.getDailyStats.and.returnValue(of({
-      sessions: [],
-      messages: [],
-      tasks: [],
-      runs: {},
-      llm: {},
-      embedding: {}
-    }));
-    userServiceSpy.getIsAdmin.and.returnValue(true);
-    userServiceSpy.getActiveProjectId.and.returnValue(null);
-    userServiceSpy.getUsers.and.returnValue(of([]));
-
+    projects = jasmine.createSpyObj<ProjectService>('ProjectService', ['getAll', 'revealPassword']);
+    agents = jasmine.createSpyObj<AgentService>('AgentService', ['getSummaryStats', 'getDailyStats']);
+    agents.getSummaryStats.and.returnValue(of(SUMMARY));
+    agents.getDailyStats.and.returnValue(of(daily()));
     await TestBed.configureTestingModule({
-      imports: [ProjectsPage, CommonModule, FormsModule],
+      imports: [ProjectsPage],
       providers: [
-        { provide: ProjectService, useValue: projectServiceSpy },
-        { provide: AgentService, useValue: agentServiceSpy },
-        { provide: UserService, useValue: userServiceSpy },
-        { provide: ToastService, useValue: toastServiceSpy },
-        { provide: Router, useValue: routerSpy }
-      ]
+        provideRouter([]),
+        { provide: ProjectService, useValue: projects },
+        { provide: AgentService, useValue: agents },
+        { provide: UserService, useValue: signedInAs() },
+      ],
     }).compileComponents();
-
-    fixture = TestBed.createComponent(ProjectsPage);
-    component = fixture.componentInstance;
-    fixture.detectChanges();
   });
 
-  it('should create', () => {
-    expect(component).toBeTruthy();
+
+  describe('loading the project', () => {
+    it('shows a spinner while the projects load', async () => {
+      await render('owner', NEVER);
+      expect(query('loading')).not.toBeNull();
+    });
+
+    it('shows the server’s reason and loads again on Retry', async () => {
+      await render('owner', throwError(() => httpError(503, 'Backoffice database is not connected.')));
+      expect(text('load-error')).toContain('Backoffice database is not connected.');
+
+      projects.getAll.and.returnValue(of([makeProject()]));
+      query<HTMLButtonElement>('retry')!.click();
+      await settle(fixture);
+      expect(query('load-error')).toBeNull();
+      expect(el.querySelector('h1')!.textContent).toContain('Pulse local');
+    });
+
+    it('offers administrators a new project when there is none', async () => {
+      await render('admin', []);
+      expect(text('no-project')).toContain('No project yet');
+      expect(query<HTMLAnchorElement>('new-project')!.getAttribute('href')).toBe('/projects/new');
+    });
+
+    it('tells everyone else to ask an administrator', async () => {
+      await render('viewer', []);
+      expect(text('no-project')).toContain('Ask an administrator');
+      expect(query('new-project')).toBeNull();
+    });
+
+    it('asks to choose a project when none of the user’s projects is active', async () => {
+      await render('owner', [makeProject()], { active_project_id: 'None' });
+      expect(text('no-project')).toContain('No active project');
+      expect(text('no-project')).toContain('Choose a project in the sidebar');
+      expect(agents.getSummaryStats).not.toHaveBeenCalled();
+    });
+
+    it('follows the project the sidebar switches to', async () => {
+      const other = makeProject({ id: 'p2', name: 'Kaval.AI examples', db_schema: 'agents' });
+      await render('owner', [makeProject(), other]);
+      expect(el.querySelector('h1')!.textContent).toContain('Pulse local');
+
+      details.next(makeUser({ active_project_id: 'p2' }));
+      await settle(fixture);
+      expect(el.querySelector('h1')!.textContent).toContain('Kaval.AI examples');
+      expect(agents.getSummaryStats).toHaveBeenCalledWith('p2');
+    });
+
+    it('waits for the user to be signed in', async () => {
+      await render('owner', [makeProject()]);
+      projects.getAll.calls.reset();
+      details.next(null);
+      await settle(fixture);
+      expect(projects.getAll).not.toHaveBeenCalled();
+    });
   });
 
-  it('should load projects on init and select first', () => {
-    const mockProjects: Project[] = [{ id: '1', name: 'Project 1' } as Project];
-    projectServiceSpy.getAll.and.returnValue(of(mockProjects));
-    userServiceSpy.getActiveProjectId.and.returnValue(null);
+  describe('the loaded project', () => {
+    it('heads the page with the name, description, role, access and database', async () => {
+      await render();
+      expect(el.querySelector('h1')!.textContent).toContain('Pulse local');
+      expect(text('description')).toBe('Runs recorded by the local Pulse API.');
+      expect(text('role-badge')).toBe('owner');
+      expect(text('access-badge')).toBe('read-only');
+      expect(text('database')).toBe('localhost:6543 / kavalai_dev / pulse');
+      expect(query<HTMLAnchorElement>('settings-link')!.getAttribute('href')).toBe('/settings');
+    });
 
-    component.ngOnInit();
+    it('marks a read-write project and leaves out a missing description', async () => {
+      await render('viewer', [makeProject({ role: 'viewer', read_only: false, description: '' })]);
+      expect(text('access-badge')).toBe('read-write');
+      expect(text('role-badge')).toBe('viewer');
+      expect(query('description')).toBeNull();
+    });
 
-    expect(projectServiceSpy.getAll).toHaveBeenCalled();
-    expect(component.projects).toEqual(mockProjects);
-    expect(component.selectedProject).toEqual(mockProjects[0]);
+    it('shows the figures of the last days', async () => {
+      await render();
+      expect(agents.getDailyStats).toHaveBeenCalledWith('p1', 7);
+      expect(text('stat-sessions')).toContain('12');
+      expect(text('stat-runs')).toContain('15');
+      expect(text('stat-messages')).toContain('30');
+      expect(text('stat-tasks')).toContain('41');
+      expect(text('stat-input')).toContain('3,729');
+      expect(text('stat-output')).toContain('394');
+      expect(text('stat-embedding')).toContain('0');
+    });
+
+    it('counts a missing figure as zero', async () => {
+      agents.getSummaryStats.and.returnValue(
+        of({ total_sessions: 0, total_messages: 0, total_tasks: 0 })
+      );
+      await render();
+      expect(text('stat-runs')).toContain('0');
+      expect(text('stat-input')).toContain('0');
+    });
+
+    it('draws the activity, tokens and duration charts', async () => {
+      await render();
+      expect(query('activity-chart')!.querySelector('svg')).not.toBeNull();
+      expect(query('token-chart')!.querySelector('svg')).not.toBeNull();
+      expect(query('call-duration-chart')!.querySelector('canvas')).not.toBeNull();
+      expect(query('run-duration-chart')!.querySelector('canvas')).not.toBeNull();
+    });
+
+    it('says so when no agent ran', async () => {
+      agents.getDailyStats.and.returnValue(of(daily({})));
+      await render();
+      expect(text('no-runs')).toBe('No runs in the last 7 days.');
+    });
+
+    it('shows a spinner while the database is read', async () => {
+      agents.getSummaryStats.and.returnValue(NEVER);
+      await render();
+      expect(query('stats-loading')).not.toBeNull();
+    });
+
+    it('shows why the database could not be read and reads it again on Retry', async () => {
+      agents.getSummaryStats.and.returnValue(throwError(() => httpError(503, 'Database is not connected.')));
+      await render();
+      expect(text('stats-error')).toContain('Database is not connected.');
+      expect(query('connection-card')).not.toBeNull();
+
+      agents.getSummaryStats.and.returnValue(of(SUMMARY));
+      query<HTMLButtonElement>('stats-retry')!.click();
+      await settle(fixture);
+      expect(query('stats-error')).toBeNull();
+      expect(text('stat-sessions')).toContain('12');
+    });
   });
 
-  it('should select active project on init if it exists', () => {
-    const mockProjects: Project[] = [
-      { id: '1', name: 'Project 1' } as Project,
-      { id: '2', name: 'Project 2' } as Project
-    ];
-    projectServiceSpy.getAll.and.returnValue(of(mockProjects));
-    userServiceSpy.getActiveProjectId.and.returnValue('2');
+  describe('connection strings', () => {
+    function values(): string[] {
+      return Array.from(el.querySelectorAll('[data-testid="string-value"]')).map((e) => e.textContent!.trim());
+    }
 
-    component.ngOnInit();
+    it('lists the PostgreSQL strings with the password masked, each with a copy button', async () => {
+      await render();
+      expect(text('string-sqlalchemy')).toContain('SQLAlchemy (PostgreSQL)');
+      expect(values()).toEqual([
+        'postgresql://kavalai_dev:••••••••@localhost:6543/kavalai_dev',
+        'postgresql+asyncpg://kavalai_dev:••••••••@localhost:6543/kavalai_dev',
+        'jdbc:postgresql://localhost:6543/kavalai_dev?user=kavalai_dev&password=••••••••',
+        'KAVALAI_DB_URI=postgresql://kavalai_dev:••••••••@localhost:6543/kavalai_dev',
+      ]);
+      expect(query('connection-card')!.querySelectorAll('ui-copy-button').length).toBe(4);
+    });
 
-    expect(component.selectedProject).toEqual(mockProjects[1]);
+    it('names SQLite for a SQLite project and offers no password', async () => {
+      await render('admin', [makeProject({ db_type: 'sqlite', db_name: '/data/agents.db', has_password: false })]);
+      expect(text('string-sqlalchemy')).toContain('SQLAlchemy (SQLite)');
+      expect(text('string-jdbc')).toContain('JDBC (SQLite)');
+      expect(values()).toEqual([
+        'sqlite:////data/agents.db',
+        'sqlite+aiosqlite:////data/agents.db',
+        'jdbc:sqlite:/data/agents.db',
+        'KAVALAI_DB_URI=sqlite:////data/agents.db',
+      ]);
+      expect(text('database')).toBe('/data/agents.db');
+      expect(query('toggle-password')).toBeNull();
+    });
+
+    it('lets only administrators show the password', async () => {
+      await render('owner');
+      expect(query('toggle-password')).toBeNull();
+      expect(text('connection-card')).toContain('an administrator can show it');
+    });
+
+    it('offers nothing to show when no password is stored', async () => {
+      await render('admin', [makeProject({ has_password: false })]);
+      expect(query('toggle-password')).toBeNull();
+    });
+
+    it('asks the server for the password once, then shows and hides it', async () => {
+      projects.revealPassword.and.returnValue(of({ db_password: 's3cret/+' }));
+      await render('admin');
+      const toggle = query<HTMLButtonElement>('toggle-password')!;
+      expect(toggle.textContent).toContain('Show password');
+
+      toggle.click();
+      await settle(fixture);
+      expect(projects.revealPassword).toHaveBeenCalledOnceWith('p1');
+      expect(values()[0]).toBe('postgresql://kavalai_dev:s3cret%2F%2B@localhost:6543/kavalai_dev');
+      expect(toggle.textContent).toContain('Hide password');
+
+      toggle.click();
+      await settle(fixture);
+      expect(values()[0]).toContain('••••••••');
+
+      toggle.click();
+      await settle(fixture);
+      expect(projects.revealPassword).toHaveBeenCalledTimes(1);
+      expect(values()[0]).toContain('s3cret');
+    });
+
+    it('treats a missing password as empty', async () => {
+      projects.revealPassword.and.returnValue(of({ db_password: null }));
+      await render('admin');
+      query<HTMLButtonElement>('toggle-password')!.click();
+      await settle(fixture);
+      expect(values()[0]).toBe('postgresql://kavalai_dev:@localhost:6543/kavalai_dev');
+    });
+
+    it('holds a spinner while the password is fetched', async () => {
+      projects.revealPassword.and.returnValue(NEVER);
+      await render('admin');
+      query<HTMLButtonElement>('toggle-password')!.click();
+      await settle(fixture);
+      expect(query<HTMLButtonElement>('toggle-password')!.disabled).toBeTrue();
+      expect(query('toggle-password')!.querySelector('ui-spinner')).not.toBeNull();
+    });
+
+    it('shows why the password could not be shown', async () => {
+      projects.revealPassword.and.returnValue(throwError(() => httpError(403, 'Only administrators can see it.')));
+      await render('admin');
+      query<HTMLButtonElement>('toggle-password')!.click();
+      await settle(fixture);
+      expect(text('reveal-error')).toBe('Only administrators can see it.');
+      expect(values()[0]).toContain('••••••••');
+    });
+
+    it('hides a revealed password when the project changes', async () => {
+      projects.revealPassword.and.returnValue(of({ db_password: 'pw' }));
+      await render('admin', [makeProject(), makeProject({ id: 'p2', name: 'Other' })]);
+      query<HTMLButtonElement>('toggle-password')!.click();
+      await settle(fixture);
+      details.next(makeUser({ is_admin: true, active_project_id: 'p2' }));
+      await settle(fixture);
+      expect(values()[0]).toContain('••••••••');
+    });
   });
 
-  it('should enter edit mode and open access details', () => {
-    component.selectedProject = { id: '1', name: 'P1' } as Project;
-    component.accessDetailsCollapsed = true;
-    component.editProject();
-    expect(component.isEditing).toBeTrue();
-    expect(component.editableProject.name).toBe('P1');
-    expect(component.accessDetailsCollapsed).toBeFalse();
-  });
+  describe('helpers', () => {
+    it('fills in defaults for a sparse PostgreSQL project', () => {
+      const strings = connectionStrings(
+        makeProject({ db_user: undefined, db_host: undefined, db_port: undefined, db_name: undefined }),
+        '••••••••'
+      );
+      expect(strings[0].value).toBe('postgresql://user:••••••••@localhost:5432/kavalai');
+    });
 
-  it('should save project and exit edit mode', () => {
-    const originalProject = { id: '1', name: 'P1' } as Project;
-    const updatedProject = { id: '1', name: 'Updated' } as Project;
-    component.selectedProject = originalProject;
-    component.editableProject = { name: 'Updated' };
-    component.isEditing = true;
-    projectServiceSpy.update.and.returnValue(of(updatedProject));
-    projectServiceSpy.getAll.and.returnValue(of([updatedProject]));
+    it('names a default SQLite file', () => {
+      expect(connectionStrings(makeProject({ db_type: 'sqlite', db_name: undefined }), '')[0].value).toBe(
+        'sqlite:///agents.db'
+      );
+      expect(databaseLabel(makeProject({ db_type: 'sqlite', db_name: undefined }))).toBe('SQLite file');
+    });
 
-    component.saveProject();
-
-    expect(projectServiceSpy.update).toHaveBeenCalledWith('1', { name: 'Updated' });
-    expect(component.isEditing).toBeFalse();
-    expect(component.selectedProject?.name).toBe('Updated');
-  });
-
-  it('should navigate to create page', () => {
-    component.startNewProject();
-    expect(routerSpy.navigate).toHaveBeenCalledWith(['/project-edit', 'new']);
-  });
-
-  it('should delete a project after confirmation', () => {
-    const existingProject = { id: '1', name: 'Existing' } as Project;
-    component.selectedProject = existingProject;
-    component.deleteConfirmationName = 'Existing';
-    projectServiceSpy.delete.and.returnValue(of(undefined));
-    projectServiceSpy.getAll.and.returnValue(of([]));
-
-    component.deleteProject();
-
-    expect(projectServiceSpy.delete).toHaveBeenCalledWith('1');
-    expect(component.selectedProject).toBeNull();
-  });
-
-  it('should not delete a project if name does not match', () => {
-    const existingProject = { id: '1', name: 'Existing' } as Project;
-    component.selectedProject = existingProject;
-    component.deleteConfirmationName = 'Wrong';
-
-    component.deleteProject();
-
-    expect(projectServiceSpy.delete).not.toHaveBeenCalled();
-  });
-
-  it('should handle project selection from event', () => {
-    const mockProjects: Project[] = [
-      { id: '1', name: 'P1' } as Project,
-      { id: '2', name: 'P2' } as Project
-    ];
-    component.projects = mockProjects;
-
-    component.selectProject(mockProjects[1]);
-
-    expect(component.selectedProject?.id).toBe('2');
-    expect(projectServiceSpy.getMembers).toHaveBeenCalledWith('2');
-  });
-
-  it('should handle project selection from select element', () => {
-    const mockProjects: Project[] = [
-      { id: '1', name: 'P1' } as Project,
-      { id: '2', name: 'P2' } as Project
-    ];
-    component.projects = mockProjects;
-    const event = { target: { value: '2' } } as any;
-
-    component.onProjectSelect(event);
-
-    expect(userServiceSpy.setActiveProject).toHaveBeenCalledWith('2');
-    expect(component.selectedProject?.id).toBe('2');
-  });
-
-  it('should toggle access details section collapse', () => {
-    expect(component.accessDetailsCollapsed).toBeTrue();
-    component.accessDetailsCollapsed = false;
-    expect(component.accessDetailsCollapsed).toBeFalse();
-    component.accessDetailsCollapsed = true;
-    expect(component.accessDetailsCollapsed).toBeTrue();
-  });
-
-  it('should toggle connection strings section collapse', () => {
-    expect(component.connectionStringsCollapsed).toBeTrue();
-    component.connectionStringsCollapsed = false;
-    expect(component.connectionStringsCollapsed).toBeFalse();
-    component.connectionStringsCollapsed = true;
-    expect(component.connectionStringsCollapsed).toBeTrue();
-  });
-
-  it('should get db uri with masked password by default', () => {
-    component.selectedProject = {
-      db_user: 'myuser',
-      db_password: 'mypassword',
-      db_host: 'myhost',
-      db_port: 5432,
-      db_name: 'mydb'
-    } as Project;
-
-    const uri = component.getDbUri('postgresql');
-    expect(uri).toContain('••••••••');
-    expect(uri).not.toContain('mypassword');
-  });
-
-  it('should get db uri with plain password when maskPassword is false', () => {
-    component.selectedProject = {
-      db_user: 'myuser',
-      db_password: 'mypassword',
-      db_host: 'myhost',
-      db_port: 5432,
-      db_name: 'mydb'
-    } as Project;
-
-    const uri = component.getDbUri('postgresql', false);
-    expect(uri).toContain('mypassword');
-    expect(uri).not.toContain('••••••••');
-  });
-
-  it('should carry the RAG schema and the access switch into the editable copy', () => {
-    component.selectedProject = {
-      id: '1', name: 'p', db_schema: 'agents_production', rag_schema: 'rag_production', read_only: true
-    } as Project;
-
-    component.editProject();
-
-    expect(component.editableProject.rag_schema).toBe('rag_production');
-    expect(component.editableProject.read_only).toBeTrue();
-  });
-
-  it('should render file URIs for a SQLite project', () => {
-    component.selectedProject = { db_type: 'sqlite', db_name: '/data/agents.db' } as Project;
-
-    expect(component.getDbUri('postgresql')).toBe('sqlite:////data/agents.db');
-    expect(component.getDbUri('asyncpg')).toBe('sqlite+aiosqlite:////data/agents.db');
-    expect(component.getDbUri('jdbc')).toBe('jdbc:sqlite:/data/agents.db');
-    expect(component.getDbUri('env')).toBe('KAVALAI_DB_URI=sqlite:////data/agents.db');
-  });
-
-  it('should copy text to clipboard and show success toast with position', async () => {
-    const text = 'test connection string';
-    const event = { clientX: 100, clientY: 200 } as MouseEvent;
-    spyOn(navigator.clipboard, 'writeText').and.returnValue(Promise.resolve());
-
-    component.copyToClipboard(text, event);
-
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(text);
-    // Wait for the promise to resolve
-    await fixture.whenStable();
-    expect(toastServiceSpy.success).toHaveBeenCalledWith('Copied to clipboard', 1500, { x: 100, y: 200 });
-  });
-
-  it('should update member role and show success toast', () => {
-    component.selectedProject = { id: 'p1' } as Project;
-    projectServiceSpy.updateMember.and.returnValue(of({}));
-    projectServiceSpy.getMembers.and.returnValue(of([]));
-
-    component.updateMemberRole('u1', 'owner');
-
-    expect(projectServiceSpy.updateMember).toHaveBeenCalledWith('p1', 'u1', 'owner');
-    expect(toastServiceSpy.success).toHaveBeenCalledWith('Role updated');
-  });
-
-  it('should show error toast when member role update fails', () => {
-    component.selectedProject = { id: 'p1' } as Project;
-    const errorResponse = { error: { detail: 'Cannot demote the last owner' } };
-    projectServiceSpy.updateMember.and.returnValue(throwError(() => errorResponse));
-
-    component.updateMemberRole('u1', 'viewer');
-
-    expect(toastServiceSpy.error).toHaveBeenCalledWith('Cannot demote the last owner', 3000, undefined);
-  });
-
-  it('should display member avatar image if picture exists', () => {
-    const mockMembers = [
-      { id: 'u1', name: 'User 1', email: 'u1@example.com', picture: 'https://example.com/u1.jpg', role: 'owner' }
-    ];
-    component.projects = [{ id: 'p1', name: 'P1' } as Project];
-    component.selectedProject = component.projects[0];
-    component.projectMembers = mockMembers;
-    fixture.detectChanges();
-
-    const img = fixture.nativeElement.querySelector('td img');
-    expect(img).toBeTruthy();
-    expect(img.src).toBe('https://example.com/u1.jpg');
-    expect(img.alt).toBe('User 1');
-
-    const placeholder = fixture.nativeElement.querySelector('td .avatar.placeholder span');
-    expect(placeholder).toBeFalsy();
-  });
-
-  it('should display placeholder if member picture is missing', () => {
-    const mockMembers = [
-      { id: 'u2', name: 'User 2', email: 'u2@example.com', picture: null, role: 'viewer' }
-    ];
-    component.projects = [{ id: 'p1', name: 'P1' } as Project];
-    component.selectedProject = component.projects[0];
-    component.projectMembers = mockMembers;
-    fixture.detectChanges();
-
-    const img = fixture.nativeElement.querySelector('td img');
-    expect(img).toBeFalsy();
-
-    const placeholder = fixture.nativeElement.querySelector('td .avatar.placeholder span');
-    expect(placeholder).toBeTruthy();
-    expect(placeholder.textContent).toContain('U');
+    it('reads no active project from an empty or "None" id', () => {
+      expect(activeProjectOf(makeUser({ active_project_id: undefined }))).toBe('');
+      expect(activeProjectOf(makeUser({ active_project_id: 'None' }))).toBe('');
+      expect(activeProjectOf(makeUser({ active_project_id: 'p1' }))).toBe('p1');
+    });
   });
 });

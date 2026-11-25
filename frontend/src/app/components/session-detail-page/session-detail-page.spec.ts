@@ -13,139 +13,271 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { HttpErrorResponse } from '@angular/common/http';
+import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
+import { NEVER, of, throwError } from 'rxjs';
 import { SessionDetailPage } from './session-detail-page';
 import { AgentService } from '../../services/agent-service';
 import { UserService } from '../../services/user-service';
-import { NavigationService } from '../../services/navigation-service';
-import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
-import { of, BehaviorSubject, throwError } from 'rxjs';
-import { ChatMessage } from '../../models/chat-message';
-import { Run } from '../../models/run';
-import { Task } from '../../models/task';
-import { JsonTreeComponent } from '../json-tree/json-tree';
+import { SessionDetails } from '../../models/session';
+import { makeMessage, makeModelCall, makeRun, makeTask, settle, signedInAs } from '../../../testing';
+import { OPEN_ALL_RUNS } from './session-detail-page';
 
 describe('SessionDetailPage', () => {
-  let component: SessionDetailPage;
   let fixture: ComponentFixture<SessionDetailPage>;
-  let agentServiceSpy: jasmine.SpyObj<AgentService>;
-  let userServiceSpy: any;
-  let navigationServiceSpy: jasmine.SpyObj<NavigationService>;
-  let userDetailsSubject: BehaviorSubject<any>;
+  let el: HTMLElement;
+  let agentService: jasmine.SpyObj<AgentService>;
 
-  const mockSessionDetails = {
-    session_id: 'sess1',
-    messages: [
-      { id: 'm1', role: 'user', content: 'Hello', created_at: '2026-03-26T10:00:00Z', run_id: 'run1' } as ChatMessage,
-      { id: 'm2', role: 'assistant', content: 'Hi there', created_at: '2026-03-26T10:00:05Z', run_id: 'run1' } as ChatMessage,
-    ],
+  /** Two runs, listed out of order, the second with an error and no context. */
+  const details: SessionDetails = {
+    session_id: 's1',
     runs: [
-      { id: 'run1', session_id: 'sess1', tasks_count: 1, duration_seconds: 4.25, created_at: '2026-03-26T10:00:01Z' } as Run,
+      makeRun({
+        id: 'r2-0000000000',
+        created_at: '2026-11-24T10:05:00Z',
+        duration_seconds: 75,
+        tasks_count: 2,
+        context: null,
+      }),
+      makeRun({
+        id: 'r1-0000000000',
+        created_at: '2026-11-24T10:00:00Z',
+        duration_seconds: 0.25,
+        context: { run_templates: {} },
+      }),
+    ],
+    messages: [
+      makeMessage({ id: 'm2', run_id: 'r1-0000000000', role: 'assistant', content: '{"cards": [1]}', created_at: '2026-11-24T10:00:04Z' }),
+      makeMessage({ id: 'm1', run_id: 'r1-0000000000', role: 'user', content: 'How many claims?', created_at: '2026-11-24T10:00:01Z' }),
+      makeMessage({ id: 'm3', run_id: 'r1-0000000000', role: 'assistant', content: '   ', created_at: '2026-11-24T10:00:05Z' }),
+      makeMessage({ id: 'm4', run_id: null, role: 'system', content: 'Imported', created_at: '2026-11-24T09:00:00Z' }),
     ],
     tasks: [
-      { id: 't1', run_id: 'run1', session_id: 'sess1', agent_id: 'a1', name: 'Task 1', created_at: '2026-03-26T10:00:02Z', updated_at: '2026-03-26T10:00:02Z', duration_seconds: 1.5, errors: [], inputs: {}, output: {}, prompt: '' } as Task,
-    ]
+      makeTask({ id: 't2', run_id: 'r1-0000000000', name: 'answer', seq: 2 }),
+      makeTask({ id: 't1', run_id: 'r1-0000000000', name: 'fetch', seq: 1 }),
+      makeTask({ id: 't3', run_id: 'r1-0000000000', name: 'sql_tool', seq: 3, parent_task_name: 'fetch' }),
+      makeTask({ id: 't4', run_id: 'r2-0000000000', name: null, seq: null, errors: ['boom', 'bang'] }),
+      makeTask({ id: 't5', run_id: 'r2-0000000000', name: 'fetch', seq: null, errors: null }),
+    ],
   };
 
-  beforeEach(async () => {
-    agentServiceSpy = jasmine.createSpyObj('AgentService', ['getSessionDetails']);
-    navigationServiceSpy = jasmine.createSpyObj('NavigationService', ['setBreadcrumbs']);
-    userDetailsSubject = new BehaviorSubject({ active_project_id: 'proj1' });
-    userServiceSpy = {
-      userDetails: userDetailsSubject.asObservable()
-    };
+  async function render(project: string | null = 'p1'): Promise<void> {
+    TestBed.overrideProvider(UserService, {
+      useValue: signedInAs('owner', { active_project_id: project as never }),
+    });
+    fixture = TestBed.createComponent(SessionDetailPage);
+    el = fixture.nativeElement;
+    fixture.detectChanges();
+    await settle(fixture);
+  }
 
+  function query<T extends Element = HTMLElement>(testId: string, root: Element = el): T | null {
+    return root.querySelector<T>(`[data-testid="${testId}"]`);
+  }
+
+  function all(testId: string, root: Element = el): HTMLElement[] {
+    return Array.from(root.querySelectorAll<HTMLElement>(`[data-testid="${testId}"]`));
+  }
+
+  beforeEach(async () => {
+    agentService = jasmine.createSpyObj('AgentService', ['getSessionDetails', 'getLLMCallStats']);
+    agentService.getLLMCallStats.and.returnValue(of([]));
     await TestBed.configureTestingModule({
-      imports: [SessionDetailPage, JsonTreeComponent],
+      imports: [SessionDetailPage],
       providers: [
         provideRouter([]),
-        { provide: AgentService, useValue: agentServiceSpy },
-        { provide: UserService, useValue: userServiceSpy },
-        { provide: NavigationService, useValue: navigationServiceSpy },
-        {
-          provide: ActivatedRoute,
-          useValue: {
-            paramMap: of(convertToParamMap({ sessionId: 'sess1' }))
-          }
-        }
-      ]
+        { provide: AgentService, useValue: agentService },
+        { provide: UserService, useValue: signedInAs('owner') },
+        { provide: ActivatedRoute, useValue: { paramMap: of(convertToParamMap({ sessionId: 's1-abcdefghij' })) } },
+      ],
     }).compileComponents();
-
-    fixture = TestBed.createComponent(SessionDetailPage);
-    component = fixture.componentInstance;
   });
 
-  it('should create', () => {
-    agentServiceSpy.getSessionDetails.and.returnValue(of(mockSessionDetails));
-    fixture.detectChanges();
-    expect(component).toBeTruthy();
+  it('opens with a header leading back to the conversations', async () => {
+    agentService.getSessionDetails.and.returnValue(of(details));
+    await render();
+    expect(el.querySelector('ui-page-header h1')!.textContent).toContain('Conversation');
+    expect(el.querySelector('ui-page-header h1')!.textContent).toContain('s1-abcde');
+    expect(el.querySelector<HTMLAnchorElement>('.ui-back-link')!.getAttribute('href')).toBe('/conversations');
+    expect(query<HTMLAnchorElement>('session-model-calls')!.getAttribute('href')).toBe(
+      '/llm-call-stats?session_id=s1-abcdefghij'
+    );
+    expect(agentService.getSessionDetails).toHaveBeenCalledOnceWith('p1', 's1-abcdefghij');
   });
 
-  it('should load session details and build timeline', () => {
-    agentServiceSpy.getSessionDetails.and.returnValue(of(mockSessionDetails));
-    fixture.detectChanges();
-
-    expect(agentServiceSpy.getSessionDetails).toHaveBeenCalledWith('proj1', 'sess1');
-    expect(component.runBlocks.length).toBe(1);
-    const block = component.runBlocks[0];
-    expect(block.run.id).toBe('run1');
-    expect(block.timeline.length).toBe(3);
-
-    // Check order: message (10:00:00), task (10:00:02), message (10:00:05)
-    expect(component.isChatMessage(block.timeline[0])).toBeTrue();
-    expect((block.timeline[0] as ChatMessage).id).toBe('m1');
-
-    expect(component.isTask(block.timeline[1])).toBeTrue();
-    expect((block.timeline[1] as Task).id).toBe('t1');
-
-    expect(component.isChatMessage(block.timeline[2])).toBeTrue();
-    expect((block.timeline[2] as ChatMessage).id).toBe('m2');
-
-    const header = fixture.nativeElement.textContent as string;
-    expect(header).toContain('1 tasks executed');
-    expect(header).toContain('4.25s');
+  it('shows a loading state while the conversation is fetched', async () => {
+    agentService.getSessionDetails.and.returnValue(NEVER);
+    await render();
+    expect(query('loading')).not.toBeNull();
+    expect(all('run').length).toBe(0);
   });
 
-  it('should show no duration for a run that recorded none', () => {
-    const details = {
-      ...mockSessionDetails,
-      runs: [{ ...mockSessionDetails.runs[0], duration_seconds: null }]
-    };
-    agentServiceSpy.getSessionDetails.and.returnValue(of(details));
-    fixture.detectChanges();
+  it('shows the server error with a Retry that loads again', async () => {
+    agentService.getSessionDetails.and.returnValue(
+      throwError(() => new HttpErrorResponse({ status: 404, error: { detail: 'Session not found' } }))
+    );
+    await render();
+    expect(query('error')!.textContent).toContain('Session not found');
 
-    expect(fixture.nativeElement.textContent).not.toContain('4.25s');
+    agentService.getSessionDetails.and.returnValue(of(details));
+    query<HTMLButtonElement>('retry')!.click();
+    await settle(fixture);
+    expect(query('error')).toBeNull();
+    expect(all('run').length).toBe(2);
   });
 
-  it('should handle error when loading details', () => {
-    agentServiceSpy.getSessionDetails.and.returnValue(throwError(() => new Error('API Error')));
-    spyOn(console, 'error');
-    fixture.detectChanges();
-
-    expect(component.error).toBe('Failed to load session details');
-    expect(component.loading).toBeFalse();
+  it('says so when the session recorded nothing', async () => {
+    agentService.getSessionDetails.and.returnValue(of({ session_id: 's1', runs: [], messages: [], tasks: [] }));
+    await render();
+    expect(query('empty')!.textContent).toContain('No runs or messages');
+    expect(all('run').length).toBe(0);
   });
 
-  it('should identify chat messages and tasks correctly', () => {
-    const msg = { role: 'user' } as ChatMessage;
-    const task = { run_id: 'r1', agent_id: 'a1' } as Task;
-
-    expect(component.isChatMessage(msg)).toBeTrue();
-    expect(component.isChatMessage(task as any)).toBeFalse();
-
-    expect(component.isTask(task)).toBeTrue();
-    expect(component.isTask(msg as any)).toBeFalse();
+  it('asks for a project when none is active, and loads nothing', async () => {
+    await render(null);
+    expect(query('no-project')).not.toBeNull();
+    expect(agentService.getSessionDetails).not.toHaveBeenCalled();
   });
 
-  it('should get task name and errors count', () => {
-    const taskWithName = { name: 'My Task', errors: ['err1'] } as Task;
-    const taskWithoutName = { id: 't1', name: null, errors: null } as Task;
+  it('groups the transcript by run, in the order the runs started', async () => {
+    agentService.getSessionDetails.and.returnValue(of(details));
+    await render();
+    const runs = all('run');
+    expect(runs.length).toBe(2);
+    expect(runs[0].querySelector('.ui-card-title')!.textContent).toContain('Run 1');
+    expect(runs[0].textContent).toContain('r1-00000');
+    expect(query('run-duration', runs[0])!.textContent).toContain('250 ms');
+    expect(query('run-steps', runs[0])!.textContent).toContain('fetch → answer');
+    expect(query('run-errors', runs[0])).toBeNull();
 
-    expect(component.getTaskName(taskWithName)).toBe('My Task');
-    expect(component.getTaskName(taskWithoutName)).toBe('Task');
+    const messages = all('message', runs[0]);
+    expect(messages.map((m) => m.dataset['role'])).toEqual(['user', 'assistant']);
+    expect(messages[0].classList).toContain('from-user');
+    expect(messages[0].textContent).toContain('User');
+    expect(messages[0].textContent).toContain('How many claims?');
+    expect(messages[1].textContent).toContain('Agent');
+    expect(messages[1].querySelector('pre')!.textContent).toBe('{\n  "cards": [\n    1\n  ]\n}');
 
-    expect(component.getTaskErrorsCount(taskWithName)).toBe(1);
-    expect(component.getTaskErrorsCount(taskWithoutName)).toBe(0);
+    expect(runs[1].querySelector('.ui-card-title')!.textContent).toContain('Run 2');
+    expect(query('run-duration', runs[1])!.textContent).toContain('1 min 15 s');
+    expect(query('run-errors', runs[1])!.textContent).toContain('2 errors');
+    expect(query('run-steps', runs[1])!.textContent).toContain('t4 → fetch');
+    expect(query('transcript', runs[1])).toBeNull();
+    expect(runs[1].textContent).toContain('This run recorded no messages.');
+
+    const outside = query('unassigned')!;
+    expect(outside.textContent).toContain('Imported');
+    expect(outside.textContent).toContain('system');
+  });
+
+  it('links each run to its tasks and model calls', async () => {
+    agentService.getSessionDetails.and.returnValue(of(details));
+    await render();
+    const first = all('run')[0];
+    // The run's steps and calls are in its card, so it has no link to the run page.
+    expect(query('open-tasks', first)).toBeNull();
+    expect(query<HTMLAnchorElement>('run-model-calls', first)!.getAttribute('href')).toBe(
+      '/llm-call-stats?session_id=s1&run_id=r1-0000000000'
+    );
+  });
+
+  it('shows a run payload as a JSON tree in a dialog, and closes it', async () => {
+    agentService.getSessionDetails.and.returnValue(of(details));
+    await render();
+    const dialog = el.querySelector<HTMLDialogElement>('dialog')!;
+    expect(dialog.open).toBeFalse();
+
+    query<HTMLButtonElement>('show-input', all('run')[0])!.click();
+    await settle(fixture);
+    expect(dialog.open).toBeTrue();
+    expect(dialog.textContent).toContain('Run 1 input');
+    expect(dialog.querySelector('app-json-tree')).not.toBeNull();
+    expect(dialog.textContent).toContain('question');
+
+    query<HTMLButtonElement>('close-json')!.click();
+    await settle(fixture);
+    expect(dialog.open).toBeFalse();
+    expect(dialog.querySelector('app-json-tree')).toBeNull();
+
+    query<HTMLButtonElement>('show-output', all('run')[0])!.click();
+    await settle(fixture);
+    expect(dialog.textContent).toContain('Run 1 output');
+    dialog.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await settle(fixture);
+    expect(dialog.open).toBeFalse();
+
+    query<HTMLButtonElement>('show-context', all('run')[0])!.click();
+    await settle(fixture);
+    expect(dialog.textContent).toContain('Run 1 context');
+  });
+
+  it('disables the payload a run did not record', async () => {
+    agentService.getSessionDetails.and.returnValue(of(details));
+    await render();
+    const second = all('run')[1];
+    expect(query<HTMLButtonElement>('show-context', second)!.disabled).toBeTrue();
+    expect(query<HTMLButtonElement>('show-input', second)!.disabled).toBeFalse();
+  });
+
+  it('shows text that only looks like JSON as text', async () => {
+    agentService.getSessionDetails.and.returnValue(
+      of({
+        ...details,
+        messages: [makeMessage({ run_id: 'r1-0000000000', role: 'assistant', content: '{not json' })],
+      })
+    );
+    await render();
+    const message = all('message')[0];
+    expect(message.querySelector('pre')).toBeNull();
+    expect(message.textContent).toContain('{not json');
+  });
+  it("shows each run's timeline, steps and model calls in its card", async () => {
+    agentService.getSessionDetails.and.returnValue(of(details));
+    agentService.getLLMCallStats.and.callFake((_p, _a, _l, _o, filters) =>
+      of(filters?.runId === 'r1-0000000000' ? [makeModelCall({ id: 'c1', run_id: 'r1-0000000000' })] : [])
+    );
+    await render();
+    const [first, second] = Array.from(el.querySelectorAll<HTMLElement>('[data-testid="run"]'));
+    expect(first.querySelector('[data-testid="run-timeline"] app-task-timeline-chart')).not.toBeNull();
+    expect(first.querySelectorAll('[data-testid="run-step-list"] app-tasks-list').length).toBe(1);
+    expect(first.querySelectorAll('[data-testid="run-calls"] [data-testid="model-call-row"]').length).toBe(1);
+    expect(second.querySelector('[data-testid="run-calls"] [data-testid="model-calls-empty"]')).not.toBeNull();
+    // Two runs: both open, one request for the model calls of each.
+    expect(agentService.getLLMCallStats).toHaveBeenCalledTimes(2);
+  });
+
+  it('hides and shows a run\'s steps and model calls', async () => {
+    agentService.getSessionDetails.and.returnValue(of(details));
+    await render();
+    const first = el.querySelector<HTMLElement>('[data-testid="run"]')!;
+    const toggle = query<HTMLButtonElement>('toggle-run-details', first)!;
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(toggle.textContent).toContain('Hide steps and model calls');
+
+    toggle.click();
+    await settle(fixture);
+    expect(query('run-step-list', first)).toBeNull();
+    expect(query('run-calls', first)).toBeNull();
+    expect(toggle.textContent).toContain('Show steps and model calls');
+    // The timeline stays: it needs no request.
+    expect(query('run-timeline', first)).not.toBeNull();
+
+    toggle.click();
+    await settle(fixture);
+    expect(query('run-step-list', first)).not.toBeNull();
+  });
+
+  it('opens only the latest run of a long conversation', async () => {
+    const runs = Array.from({ length: OPEN_ALL_RUNS + 1 }, (_, i) =>
+      makeRun({ id: `run-${i}`, created_at: `2026-11-24T10:0${i}:00Z` })
+    );
+    agentService.getSessionDetails.and.returnValue(of({ session_id: 's1', runs, messages: [], tasks: [] }));
+    await render();
+    const cards = Array.from(el.querySelectorAll<HTMLElement>('[data-testid="run"]'));
+    expect(cards.length).toBe(OPEN_ALL_RUNS + 1);
+    expect(cards.map((c) => !!query('run-step-list', c))).toEqual([false, false, false, true]);
+    expect(agentService.getLLMCallStats).toHaveBeenCalledTimes(1);
+    expect(query('run-timeline', cards[0])!.textContent).toContain('no steps');
   });
 });

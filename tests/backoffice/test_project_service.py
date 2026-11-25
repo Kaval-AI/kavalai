@@ -19,7 +19,10 @@ from sqlalchemy.exc import OperationalError
 from kavalai.backoffice.project_service import (
     PROJECT_FIELDS,
     ProjectService,
+    connection_fields,
     describe_project_database,
+    merged_project,
+    public_project,
     project_fields,
     project_db_uri,
     project_rag_schema,
@@ -235,3 +238,89 @@ async def test_creating_ignores_what_the_server_owns(backoffice_db):
     assert project.name == "p"
     assert project.read_only is True
     assert project.created_at.year >= 2026
+
+
+def test_a_public_project_carries_everything_but_the_password():
+    """Every member of a project receives it, so the password stays behind."""
+    project = _postgres_project()
+
+    public = public_project(project, "viewer")
+
+    assert "db_password" not in public
+    assert "secret" not in str(public)
+    assert public["has_password"] is True
+    assert public["role"] == "viewer"
+    assert public["id"] == str(project.id)
+    assert set(PROJECT_FIELDS) - {"db_password"} <= set(public)
+    assert public_project(_sqlite_project("a.db"))["has_password"] is False
+    assert "role" not in public_project(project)
+
+
+def test_an_empty_password_keeps_the_stored_one_and_none_clears_it():
+    stored = _postgres_project()
+
+    assert "db_password" not in connection_fields(stored, {"db_schema": "x"})
+    assert "db_password" not in connection_fields(stored, {"db_password": ""})
+    assert connection_fields(stored, {"db_password": None}) == {"db_password": None}
+    assert connection_fields(stored, {"db_password": "new"}) == {"db_password": "new"}
+
+
+def test_the_stored_password_is_not_reused_for_another_server():
+    """Otherwise anyone who may edit the host could send it elsewhere."""
+    stored = _postgres_project()
+
+    for change in (
+        {"db_host": "elsewhere"},
+        {"db_port": 5432},
+        {"db_user": "other"},
+        {"db_name": "other"},
+    ):
+        with pytest.raises(HTTPException) as refused:
+            connection_fields(stored, change)
+        assert refused.value.status_code == 400
+        assert next(iter(change)) in refused.value.detail
+
+    assert connection_fields(stored, {"db_host": "elsewhere", "db_password": "p"})
+    # The form sends the port back as text; an unchanged port is not a change.
+    assert connection_fields(stored, {"db_port": "5433", "db_host": "h"}) == {
+        "db_port": "5433",
+        "db_host": "h",
+    }
+    # Nothing to protect: SQLite has no password, nor does a project without one.
+    assert connection_fields(stored, {"db_type": "sqlite", "db_name": "a.db"})
+    no_password = _postgres_project()
+    no_password.db_password = None
+    assert connection_fields(no_password, {"db_host": "elsewhere"})
+
+
+def test_a_merged_project_applies_unsaved_changes_to_a_copy():
+    stored = _postgres_project()
+
+    merged = merged_project(stored, {"db_schema": "other"})
+
+    assert merged.db_schema == "other"
+    assert merged.db_password == "secret"
+    assert stored.db_schema == "agents"
+
+
+@pytest.mark.asyncio
+async def test_updating_keeps_the_password_the_form_never_received(backoffice_db):
+    service = ProjectService(db.AsyncBackofficeSession)
+    owner = await _user(backoffice_db)
+    created = await service.create_project(
+        {"name": "p", "db_host": "h", "db_user": "u", "db_password": "secret"}, owner
+    )
+    (listed,) = [
+        p for p in await service.get_user_projects(owner) if p["id"] == str(created.id)
+    ]
+    assert "db_password" not in listed
+
+    updated = await service.update_project(
+        created.id, {**listed, "description": "now described"}
+    )
+    assert updated.description == "now described"
+    assert updated.db_password == "secret"
+
+    with pytest.raises(HTTPException):
+        await service.update_project(created.id, {**listed, "db_host": "elsewhere"})
+    assert await service.update_project(uuid4(), {"name": "x"}) is None

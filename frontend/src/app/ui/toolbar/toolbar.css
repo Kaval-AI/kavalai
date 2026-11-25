@@ -1,0 +1,27 @@
+/* Toolbar: a wrapping row of filters and actions above a table or list.
+
+   Unencapsulated: the inputs and selects it sizes are projected by the page. */
+ui-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: var(--space-3);
+}
+
+ui-toolbar input[type='search'],
+ui-toolbar input[type='text'],
+ui-toolbar input:not([type]) {
+  flex: 1;
+  min-width: 200px;
+}
+
+ui-toolbar select,
+ui-toolbar input[type='date'],
+ui-toolbar input[type='number'] {
+  width: auto;
+}
+
+ui-toolbar .ui-toolbar-end {
+  margin-left: auto;
+}

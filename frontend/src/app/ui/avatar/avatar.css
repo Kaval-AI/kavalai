@@ -1,0 +1,38 @@
+/* Initials in a chamfered charcoal box, or a round picture. The class is on
+   the img or span the component renders, so the host stays inline-flex. */
+.ui-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  background: var(--color-base-content);
+  color: var(--color-primary);
+  font-family: var(--font-family-header);
+  font-weight: 600;
+  font-size: 0.9rem;
+  line-height: 1;
+  object-fit: cover;
+  clip-path: polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 9px 100%, 0 calc(100% - 9px));
+}
+
+.ui-avatar-sm {
+  width: 26px;
+  height: 26px;
+  font-size: 0.65rem;
+  clip-path: polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 6px 100%, 0 calc(100% - 6px));
+}
+
+.ui-avatar-lg {
+  width: 56px;
+  height: 56px;
+  font-size: 1.2rem;
+}
+
+.ui-avatar-round {
+  border-radius: 50%;
+  clip-path: none;
+  background: var(--color-primary);
+  color: var(--color-primary-content);
+}

@@ -1,0 +1,58 @@
+/* Dialog: the card's chamfered surface, centred over a dimmed page. The
+   <dialog> itself has no padding, so a click that lands on it (and not on the
+   body inside) is a click on the backdrop. */
+.ui-dialog {
+  width: min(32rem, calc(100vw - 2 * var(--space-4)));
+  max-height: calc(100vh - 2 * var(--space-8));
+  /* The browser centres a modal dialog with an automatic margin, which
+     Tailwind's reset removes. */
+  margin: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  filter: var(--elevation-1);
+}
+
+/* A dialog holding a document — JSON, a log — rather than a decision. */
+.ui-dialog[data-size='lg'] {
+  width: min(48rem, calc(100vw - 2 * var(--space-4)));
+}
+
+.ui-dialog[data-size='xl'] {
+  width: min(64rem, calc(100vw - 2 * var(--space-4)));
+}
+
+.ui-dialog::backdrop {
+  background: rgba(39, 62, 71, 0.55);
+}
+
+.ui-dialog-body {
+  background: var(--color-surface);
+  padding: var(--space-6);
+  clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+}
+
+.ui-dialog-title {
+  margin: 0 0 var(--space-4);
+  font-family: var(--font-family-header);
+  font-size: var(--text-md);
+}
+
+.ui-dialog-content > :first-child {
+  margin-top: 0;
+}
+
+.ui-dialog-content > :last-child {
+  margin-bottom: 0;
+}
+
+.ui-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-6);
+}
+
+.ui-dialog-actions:empty {
+  display: none;
+}

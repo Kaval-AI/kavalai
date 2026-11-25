@@ -13,58 +13,56 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-import { Component, OnInit } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { HttpErrorResponse } from '@angular/common/http';
 import { UserService } from '../../services/user-service';
+import { errorMessage } from '../../core/http-error';
+import { UiAlert, UiButton, UiField, UiSpinner } from '../../ui';
 
+/**
+ * The sign-in page: a password form, and Google above it when the server has
+ * a Google client (`GET /auth/methods`). There is no sign-up: accounts are
+ * created by an administrator, on the Users page or with
+ * `python -m kavalai.backoffice.users`.
+ */
 @Component({
   selector: 'app-login-page',
-  standalone: true,
-  imports: [
-    CommonModule,
-    FormsModule,
-  ],
+  imports: [FormsModule, UiAlert, UiButton, UiField, UiSpinner],
   templateUrl: './login-page.html',
-  styleUrls: ['./login-page.css'],
+  styleUrl: './login-page.css',
 })
 export class LoginPage implements OnInit {
+  private userService = inject(UserService);
+
   email = '';
   password = '';
-  errorMessage = '';
-  isSubmitting = false;
-  googleEnabled = false;
-
-  constructor(
-    private userService: UserService
-  ) {}
+  readonly errorMessage = signal('');
+  readonly isSubmitting = signal(false);
+  readonly googleEnabled = signal(false);
 
   ngOnInit(): void {
     this.userService.getAuthMethods().subscribe({
-      next: (methods) => {
-        this.googleEnabled = methods.google;
-      },
-      error: () => {
-        this.googleEnabled = false;
-      },
+      next: (methods) => this.googleEnabled.set(methods.google),
+      error: () => this.googleEnabled.set(false),
     });
   }
 
   loginWithPassword(): void {
-    if (!this.email || !this.password || this.isSubmitting) return;
+    if (!this.email || !this.password || this.isSubmitting()) return;
 
-    this.isSubmitting = true;
-    this.errorMessage = '';
+    this.isSubmitting.set(true);
+    this.errorMessage.set('');
     this.userService.loginWithPassword(this.email, this.password).subscribe({
-      next: () => {
-        this.isSubmitting = false;
-      },
-      error: (err) => {
-        this.isSubmitting = false;
+      next: () => this.isSubmitting.set(false),
+      error: (err: unknown) => {
+        this.isSubmitting.set(false);
         this.password = '';
-        this.errorMessage = err.status === 401
-          ? 'Invalid email or password.'
-          : 'Sign-in failed. Please try again.';
+        this.errorMessage.set(
+          err instanceof HttpErrorResponse && err.status === 401
+            ? 'Invalid email or password.'
+            : errorMessage(err, 'Sign-in failed. Please try again.')
+        );
       },
     });
   }

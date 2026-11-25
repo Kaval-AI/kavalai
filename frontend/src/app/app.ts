@@ -14,15 +14,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 import { Component, OnInit } from '@angular/core';
-import { Header } from './components/header/header';
+import { Shell } from './layout/shell';
 import { LoginPage } from './components/login-page/login-page';
 import { Toast } from './components/toast/toast';
 import { UserService } from './services/user-service';
-import { RouterOutlet } from '@angular/router';
 
 @Component({
   selector: 'app-root',
-  imports: [LoginPage, Header, RouterOutlet, Toast],
+  imports: [LoginPage, Shell, Toast],
   templateUrl: './app.html',
   styleUrl: './app.css',
 })

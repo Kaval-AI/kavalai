@@ -1,166 +1,435 @@
-<div class="centered">
-  <main>
-    <form [formGroup]="projectForm" (ngSubmit)="saveProject()" class="form-container">
-      <div class="form-field">
-        <label for="name">Project Name</label>
-        <input id="name" type="text" formControlName="name" placeholder="Enter project name">
-      </div>
+@if (loading()) {
+  <ui-loading label="Loading the settings" data-testid="loading" />
+} @else if (creating && !isAdmin()) {
+  <ui-page-header tag="Project" title="New project" />
+  <ui-empty-state icon="fa-lock" title="Only administrators create projects" data-testid="create-forbidden">
+    Ask an administrator to create the project and add you to it.
+  </ui-empty-state>
+} @else if (!creating && loadError()) {
+  <ui-page-header tag="Project" title="Settings" />
+  <ui-alert data-testid="load-error">
+    {{ loadError() }}
+    <button alert-actions type="button" uiButton="ghost" size="sm" (click)="load()" data-testid="retry">Retry</button>
+  </ui-alert>
+} @else if (!creating && !project()) {
+  <ui-page-header tag="Project" title="Settings" />
+  <ui-empty-state
+    icon="fa-folder-open"
+    [title]="hasProjects() ? 'No active project' : 'No project yet'"
+    data-testid="no-project"
+  >
+    @if (hasProjects()) {
+      Choose a project in the sidebar to change its settings.
+    } @else if (isAdmin()) {
+      Create a project to point the backoffice at an agent database.
+    } @else {
+      You are not a member of any project. Ask an administrator to add you to one.
+    }
+    @if (isAdmin()) {
+      <a empty-actions uiButton="primary" routerLink="/projects/new" data-testid="new-project">
+        <i class="fa-solid fa-plus" aria-hidden="true"></i> New project
+      </a>
+    }
+  </ui-empty-state>
+} @else {
+  @if (creating) {
+    <ui-page-header tag="Project" title="New project">
+      <p>The project points the backoffice at an agent database. You become its owner.</p>
+    </ui-page-header>
+  } @else {
+    <ui-page-header tag="Project" [title]="project()!.name" section="Settings">
+      <ui-badge page-title [tone]="project()!.role === 'owner' ? 'primary' : 'muted'" data-testid="role-badge">
+        {{ project()!.role }}
+      </ui-badge>
+    </ui-page-header>
+    @if (!canEdit()) {
+      <ui-alert tone="info" data-testid="viewer-note">
+        You are a viewer of this project, so its settings are shown read-only. An owner can change them.
+      </ui-alert>
+    }
+  }
 
-      <div class="form-field">
-        <label for="desc">Description</label>
-        <textarea id="desc" formControlName="description" rows="2"></textarea>
-      </div>
-
-      <fieldset class="db-settings">
-        <legend>Database Connection</legend>
-
-        <div class="form-row">
-          <div class="form-field">
-            <label for="db_type">Database Type</label>
-            <select id="db_type" formControlName="db_type">
-              <option value="postgresql">PostgreSQL</option>
-              <option value="sqlite">SQLite (local file)</option>
-            </select>
-          </div>
-        </div>
-
-        @if (isSqlite) {
-          <div class="form-row">
-            <div class="form-field">
-              <label for="db_name">Database File</label>
-              <input id="db_name" type="text" formControlName="db_name" placeholder="/path/to/agents.db">
-            </div>
-          </div>
-        } @else {
-          <div class="form-row">
-            <div class="form-field">
-              <label for="db_host">Host</label>
-              <input id="db_host" type="text" formControlName="db_host" placeholder="localhost">
-            </div>
-            <div class="form-field port-field">
-              <label for="db_port">Port</label>
-              <input id="db_port" type="number" formControlName="db_port">
-            </div>
-          </div>
-
-          <div class="form-row">
-            <div class="form-field">
-              <label for="db_name">Database Name</label>
-              <input id="db_name" type="text" formControlName="db_name">
-            </div>
-            <div class="form-field">
-              <label for="db_schema">Schema</label>
-              <input id="db_schema" type="text" formControlName="db_schema">
-            </div>
-            <div class="form-field">
-              <label for="rag_schema">RAG Schema</label>
-              <input id="rag_schema" type="text" formControlName="rag_schema" placeholder="same as schema">
-            </div>
-          </div>
-
-          <div class="form-row">
-            <div class="form-field">
-              <label for="db_user">Username</label>
-              <input id="db_user" type="text" formControlName="db_user">
-            </div>
-            <div class="form-field">
-              <label for="db_password">Password</label>
-              <input id="db_password" type="password" formControlName="db_password">
-            </div>
-          </div>
-        }
-
-        <div class="form-row">
-          <div class="form-field">
-            <label for="read_only" class="checkbox-label">
-              <input id="read_only" type="checkbox" formControlName="read_only">
-              Read-only: every connection the backoffice opens refuses writes at the database
-            </label>
-          </div>
-        </div>
-
-        @if (projectId) {
-          <div class="test-connection-row">
-            <button type="button"
-                    (click)="testConnection()"
-                    [disabled]="isTestingConnection || (projectId === 'new' && projectForm.invalid)">
-              {{ isTestingConnection ? 'Testing...' : 'Test Connection' }}
-            </button>
-            @if (connectionStatus) {
-              <span class="status-msg" [class.success]="connectionStatus.status === 'success'" [class.error]="connectionStatus.status === 'error'">
-                {{ connectionStatus.message }}
-              </span>
+  <ui-card title="General" icon="fa-circle-info" data-testid="general-card">
+    <form [formGroup]="general" (ngSubmit)="saveGeneral()" novalidate>
+      <ui-field label="Name" for="name" [error]="fieldError(general.controls.name, 'The name')">
+        <input id="name" type="text" formControlName="name" autocomplete="off" data-testid="name" />
+      </ui-field>
+      <ui-field label="Description" for="description" hint="Shown under the name on the overview.">
+        <textarea id="description" formControlName="description" rows="2" data-testid="description"></textarea>
+      </ui-field>
+      @if (generalError()) {
+        <ui-alert data-testid="general-error">{{ generalError() }}</ui-alert>
+      }
+      @if (!creating && canEdit()) {
+        <div class="card-actions-bar">
+          <button type="submit" uiButton [disabled]="saving() === 'general'" data-testid="save-general">
+            @if (saving() === 'general') {
+              <ui-spinner />
             }
-          </div>
+            Save
+          </button>
+        </div>
+      }
+    </form>
+  </ui-card>
+
+  <ui-card title="Database" icon="fa-database" data-testid="database-card">
+    <form [formGroup]="db" (ngSubmit)="saveDatabase()" novalidate>
+      <ui-field label="Type" for="db_type">
+        <select id="db_type" formControlName="db_type" data-testid="db-type">
+          <option value="postgresql">PostgreSQL</option>
+          <option value="sqlite">SQLite file</option>
+        </select>
+      </ui-field>
+
+      @if (isSqlite()) {
+        <ui-field
+          label="Database file"
+          for="db_name"
+          hint="The path of the SQLite file on the machine the backoffice runs on."
+          [error]="fieldError(db.controls.db_name, 'The file path')"
+        >
+          <input id="db_name" type="text" formControlName="db_name" placeholder="/path/to/agents.db" data-testid="db-name" />
+        </ui-field>
+      } @else {
+        <div class="field-row">
+          <ui-field label="Host" for="db_host" class="grow">
+            <input id="db_host" type="text" formControlName="db_host" placeholder="localhost" data-testid="db-host" />
+          </ui-field>
+          <ui-field label="Port" for="db_port" class="port" [error]="fieldError(db.controls.db_port, 'The port')">
+            <input id="db_port" type="number" formControlName="db_port" data-testid="db-port" />
+          </ui-field>
+        </div>
+        <div class="field-row">
+          <ui-field label="User" for="db_user" class="grow">
+            <input id="db_user" type="text" formControlName="db_user" autocomplete="off" data-testid="db-user" />
+          </ui-field>
+          <ui-field
+            label="Password"
+            for="db_password"
+            class="grow"
+            [error]="db.controls.db_password.touched && passwordMissing()
+              ? 'Type the password again: the server, user or database changed.'
+              : ''"
+          >
+            <input
+              id="db_password"
+              type="password"
+              formControlName="db_password"
+              autocomplete="new-password"
+              [placeholder]="project()?.has_password ? 'Unchanged — type to replace' : ''"
+              data-testid="db-password"
+            />
+          </ui-field>
+        </div>
+        @if (project()?.has_password) {
+          <p class="form-hint field-note" data-testid="password-hint">
+            The stored password is kept while the server, port, user and database stay the same; changing
+            any of them asks for it again.
+          </p>
         }
-      </fieldset>
-
-      <div class="button-row">
-        <button type="submit" [disabled]="projectForm.invalid">Save</button>
-        <button type="button" (click)="cancel()">Cancel</button>
-      </div>
-
-      @if (projectId && projectId !== 'new' && canManageMembers) {
-        <fieldset class="members-section">
-          <legend>Project Members</legend>
-
-          <div class="members-list">
-            <table>
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Role</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (member of members; track member.id) {
-                  <tr>
-                    <td>{{ member.name }}</td>
-                    <td>{{ member.email }}</td>
-                    <td>
-                      <div class="role-dropdown-container">
-                        <button type="button" class="role-button" (click)="toggleRoleDropdown(member.id)">
-                          {{ member.role | titlecase }}
-                          <span class="arrow">▼</span>
-                        </button>
-                        @if (activeRoleDropdown === member.id) {
-                          <div class="role-dropdown-menu">
-                            <button type="button" (click)="changeRole(member, 'owner')">Owner</button>
-                            <button type="button" (click)="changeRole(member, 'viewer')">Viewer</button>
-                          </div>
-                        }
-                      </div>
-                    </td>
-                    <td>
-                      <button type="button" class="btn-danger" (click)="removeMember(member.id)">Remove</button>
-                    </td>
-                  </tr>
-                }
-              </tbody>
-            </table>
-          </div>
-
-          <div class="add-member-row">
-            <h4>Add Member</h4>
-            <div class="form-row">
-              <select [(ngModel)]="selectedUserId" [ngModelOptions]="{standalone: true}">
-                <option value="">Select a user...</option>
-                @for (user of filteredUsers; track user.id) {
-                  <option [value]="user.id">{{ user.name }} ({{ user.email }})</option>
-                }
-              </select>
-              <select [(ngModel)]="selectedRole" [ngModelOptions]="{standalone: true}">
-                <option value="owner">Owner</option>
-                <option value="viewer">Viewer</option>
-              </select>
-              <button type="button" (click)="addMember()" [disabled]="!selectedUserId">Add</button>
-            </div>
-          </div>
-        </fieldset>
+        <ui-field label="Database" for="db_name" [error]="fieldError(db.controls.db_name, 'The database')">
+          <input id="db_name" type="text" formControlName="db_name" data-testid="db-name" />
+        </ui-field>
+        <div class="field-row">
+          <ui-field
+            label="Schema"
+            for="db_schema"
+            class="grow"
+            hint="Where the agent tables (sessions, runs, tasks) are."
+          >
+            <input id="db_schema" type="text" formControlName="db_schema" placeholder="public" data-testid="db-schema" />
+          </ui-field>
+          <ui-field
+            label="RAG schema"
+            for="rag_schema"
+            class="grow"
+            hint="Where the RAG collections are, when apart from the agent tables. Empty means the schema."
+          >
+            <input id="rag_schema" type="text" formControlName="rag_schema" placeholder="same as the schema" data-testid="rag-schema" />
+          </ui-field>
+        </div>
       }
 
+      @if (testResult(); as result) {
+        <ui-alert [tone]="result.ok ? 'success' : 'error'" data-testid="test-result">{{ result.message }}</ui-alert>
+      }
+      @if (dbError()) {
+        <ui-alert data-testid="database-error">{{ dbError() }}</ui-alert>
+      }
+
+      <div class="card-actions-bar">
+        <button type="button" uiButton="ghost" [disabled]="testing()" (click)="testConnection()" data-testid="test-connection">
+          @if (testing()) {
+            <ui-spinner />
+          } @else {
+            <i class="fa-solid fa-plug" aria-hidden="true"></i>
+          }
+          Test connection
+        </button>
+        @if (!creating && canEdit()) {
+          <button type="submit" uiButton [disabled]="saving() === 'database'" data-testid="save-database">
+            @if (saving() === 'database') {
+              <ui-spinner />
+            }
+            Save
+          </button>
+        }
+        @if (!creating && !canEdit()) {
+          <span class="form-hint inline-hint">Tests the saved settings.</span>
+        }
+      </div>
     </form>
-  </main>
-</div>
+  </ui-card>
+
+  <ui-card title="Access" icon="fa-lock" data-testid="access-card">
+    <form [formGroup]="access" novalidate>
+      <label class="switch" for="read_only">
+        <input
+          id="read_only"
+          type="checkbox"
+          role="switch"
+          formControlName="read_only"
+          (change)="creating || saveAccess()"
+          data-testid="read-only"
+        />
+        <span class="switch-track" aria-hidden="true"></span>
+        <span class="switch-label">Read-only</span>
+        @if (saving() === 'access') {
+          <ui-spinner />
+        }
+      </label>
+      <p class="form-hint access-hint">
+        Every connection the backoffice opens to this database refuses writes, at the database itself.
+      </p>
+      @if (accessError()) {
+        <ui-alert data-testid="access-error">{{ accessError() }}</ui-alert>
+      }
+    </form>
+  </ui-card>
+
+  @if (creating) {
+    <div class="create-bar">
+      @if (createError()) {
+        <ui-alert data-testid="create-error">{{ createError() }}</ui-alert>
+      }
+      <div class="create-actions">
+        <button type="button" uiButton="primary" [disabled]="saving() === 'create'" (click)="create()" data-testid="create">
+          @if (saving() === 'create') {
+            <ui-spinner />
+          }
+          Create project
+        </button>
+        <a uiButton="ghost" routerLink="/" data-testid="cancel">Cancel</a>
+      </div>
+    </div>
+  } @else {
+    <ui-card title="Members" icon="fa-users" data-testid="members-card">
+      @if (membersLoading()) {
+        <ui-loading data-testid="members-loading" />
+      } @else if (membersError()) {
+        <ui-alert data-testid="members-load-error">
+          {{ membersError() }}
+          <button alert-actions type="button" uiButton="ghost" size="sm" (click)="loadMembers()" data-testid="members-retry">
+            Retry
+          </button>
+        </ui-alert>
+      } @else {
+        @if (memberError()) {
+          <ui-alert data-testid="member-error">{{ memberError() }}</ui-alert>
+        }
+        <ui-table dense>
+          <table data-testid="members-table">
+            <thead>
+              <tr>
+                <th>Person</th>
+                <th>Role</th>
+                <th class="actions"></th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (m of members(); track m.id) {
+                <tr [attr.data-testid]="'member-' + m.id">
+                  <td>
+                    <div class="person">
+                      <ui-avatar [name]="displayName(m)" [src]="m.picture" size="sm" round />
+                      <div class="person-text">
+                        <span class="person-name">
+                          {{ displayName(m) }}
+                          @if (m.id === userId()) {
+                            <span class="text-muted" data-testid="you">(you)</span>
+                          }
+                        </span>
+                        @if (m.name) {
+                          <span class="person-email mono">{{ m.email }}</span>
+                        }
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    @if (canManageMembers()) {
+                      <select
+                        class="role-select"
+                        [value]="m.role"
+                        [disabled]="!!memberBusy() || isLastOwner(m)"
+                        (change)="setRole(m, $any($event.target))"
+                        [attr.aria-label]="'Role of ' + displayName(m)"
+                        data-testid="member-role"
+                      >
+                        <option value="owner" [selected]="m.role === 'owner'">owner</option>
+                        <option value="viewer" [selected]="m.role === 'viewer'">viewer</option>
+                      </select>
+                      @if (isLastOwner(m)) {
+                        <p class="form-hint" data-testid="last-owner">
+                          The only owner. Make someone else an owner first.
+                        </p>
+                      }
+                    } @else {
+                      <ui-badge [tone]="m.role === 'owner' ? 'primary' : 'muted'">{{ m.role }}</ui-badge>
+                    }
+                  </td>
+                  <td class="actions">
+                    @if (canManageMembers()) {
+                      @if (confirmingRemove() === m.id) {
+                        <span class="confirm">
+                          <button
+                            type="button"
+                            uiButton="danger"
+                            size="sm"
+                            [disabled]="!!memberBusy()"
+                            (click)="remove(m)"
+                            data-testid="confirm-remove-member"
+                          >
+                            {{ m.id === userId() ? 'Leave the project' : 'Remove ' + displayName(m) }}
+                          </button>
+                          <button type="button" uiButton="ghost" size="sm" (click)="cancelRemove()" data-testid="cancel-remove">
+                            Cancel
+                          </button>
+                        </span>
+                      } @else {
+                        <button
+                          type="button"
+                          uiButton="ghost"
+                          size="sm"
+                          [disabled]="!!memberBusy() || isLastOwner(m)"
+                          [attr.title]="isLastOwner(m) ? 'The only owner cannot be removed.' : null"
+                          (click)="remove(m)"
+                          data-testid="remove-member"
+                        >
+                          @if (memberBusy() === m.id) {
+                            <ui-spinner />
+                          }
+                          Remove
+                        </button>
+                      }
+                    }
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </ui-table>
+
+        @if (canManageMembers()) {
+          @if (usersForbidden()) {
+            <p class="form-hint" data-testid="users-forbidden">
+              Only administrators can list the users of the backoffice, so ask an administrator to add members.
+            </p>
+          } @else if (usersError()) {
+            <ui-alert data-testid="users-error">{{ usersError() }}</ui-alert>
+          } @else if (candidates().length === 0) {
+            <p class="form-hint" data-testid="no-candidates">Every user of the backoffice is a member already.</p>
+          } @else {
+            <form class="add-form" (ngSubmit)="addMember()" data-testid="add-form">
+              <ui-field label="Add a user" for="new-member" class="grow">
+                <select id="new-member" name="user" [(ngModel)]="newMemberId" data-testid="new-member">
+                  <option value="">Choose a user</option>
+                  @for (u of candidates(); track u.id) {
+                    <option [value]="u.id">{{ u.name || u.email }} ({{ u.email }})</option>
+                  }
+                </select>
+              </ui-field>
+              <ui-field label="Role" for="new-member-role">
+                <select id="new-member-role" name="role" [(ngModel)]="newMemberRole" data-testid="new-member-role">
+                  <option value="viewer">viewer</option>
+                  <option value="owner">owner</option>
+                </select>
+              </ui-field>
+              <button type="submit" uiButton [disabled]="!!memberBusy() || !newMemberId" data-testid="add-member">
+                @if (memberBusy() === 'add') {
+                  <ui-spinner />
+                } @else {
+                  <i class="fa-solid fa-user-plus" aria-hidden="true"></i>
+                }
+                Add
+              </button>
+            </form>
+          }
+        }
+      }
+    </ui-card>
+
+    @if (project()!.role === 'owner') {
+      <ui-card title="Danger zone" icon="fa-triangle-exclamation" tone="danger" data-testid="danger-card">
+        <p>
+          Deleting the project removes it and its members from the backoffice. The agent database it points
+          at is not touched. This cannot be undone.
+        </p>
+        <button type="button" uiButton="danger" (click)="openDelete()" data-testid="delete-project">
+          <i class="fa-solid fa-trash" aria-hidden="true"></i> Delete project
+        </button>
+      </ui-card>
+
+      <ui-dialog [open]="deleteOpen()" title="Delete project" (closed)="closeDelete()">
+        <p>
+          Type <strong class="mono">{{ project()!.name }}</strong> to delete the project. Its members lose
+          access to it; the agent database stays as it is.
+        </p>
+        <ui-field label="Project name" for="confirm-delete-name">
+          <input
+            id="confirm-delete-name"
+            type="text"
+            autocomplete="off"
+            spellcheck="false"
+            [ngModel]="deleteName()"
+            (ngModelChange)="deleteName.set($event)"
+            [placeholder]="project()!.name"
+            data-testid="confirm-delete-name"
+          />
+        </ui-field>
+        @if (deleteError()) {
+          <ui-alert data-testid="delete-error">{{ deleteError() }}</ui-alert>
+        }
+        <button dialog-actions type="button" uiButton="ghost" [disabled]="deleting()" (click)="closeDelete()" data-testid="cancel-delete">
+          Cancel
+        </button>
+        <button
+          dialog-actions
+          type="button"
+          uiButton="danger"
+          [disabled]="deleting() || deleteName().trim() !== project()!.name"
+          (click)="deleteProject()"
+          data-testid="confirm-delete"
+        >
+          @if (deleting()) {
+            <ui-spinner />
+          }
+          Delete project
+        </button>
+      </ui-dialog>
+    }
+
+    <ui-dialog [open]="demotingSelf() !== null" title="Make yourself a viewer" (closed)="demotingSelf.set(null)">
+      <p>
+        As a viewer you can no longer change this project's settings{{ isAdmin() ? '' : ' or its members' }}.
+        Another owner can make you an owner again.
+      </p>
+      <button dialog-actions type="button" uiButton="ghost" (click)="demotingSelf.set(null)" data-testid="cancel-demote">
+        Cancel
+      </button>
+      <button dialog-actions type="button" uiButton="danger" (click)="confirmDemoteSelf()" data-testid="confirm-demote">
+        Make me a viewer
+      </button>
+    </ui-dialog>
+  }
+}

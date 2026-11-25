@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import func, select
@@ -116,6 +116,15 @@ async def get_summary_stats(
     }
 
 
+def _day(value: date | str) -> date:
+    """A grouped ``date(created_at)`` as a ``date``.
+
+    PostgreSQL returns a ``date``; SQLite has no date type and returns the
+    ISO string, which would never match the ``date`` keys of the series.
+    """
+    return date.fromisoformat(value) if isinstance(value, str) else value
+
+
 async def get_daily_stats(
     session: AsyncSession, days: int = 7, agent_id: str | None = None
 ) -> dict[str, Any]:
@@ -181,12 +190,12 @@ async def get_daily_stats(
         if model is Run:
             runs_by_agent = {}
             for row in result.all():
-                runs_by_agent.setdefault(row.agent_name, {})[row.date] = {
+                runs_by_agent.setdefault(row.agent_name, {})[_day(row.date)] = {
                     "count": row.count,
                     "duration_seconds": float(row.duration_seconds or 0),
                 }
             return runs_by_agent
-        return {row.date: row.count for row in result.all()}
+        return {_day(row.date): row.count for row in result.all()}
 
     async def get_model_stats(call_type: str):
         model_name_col = ModelCallStat.model.label("model_name")
@@ -213,7 +222,7 @@ async def get_daily_stats(
 
         stats_by_model = {}
         for row in result.all():
-            stats_by_model.setdefault(row.model_name, {})[row.date] = {
+            stats_by_model.setdefault(row.model_name, {})[_day(row.date)] = {
                 "count": row.count,
                 "duration_seconds": float(row.duration_seconds or 0),
                 "prompt_tokens": int(row.prompt_tokens or 0),

@@ -1,0 +1,126 @@
+/* Buttons: button[uiButton], a[uiButton]. Primary is the brand's lime,
+   chamfered, tracked-uppercase call to action; the others are quiet.
+
+   Global, imported by ui.css: UiButton is a directive on the native element,
+   and an Angular directive cannot carry a stylesheet. */
+.ui-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 18px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-base-content);
+  font-family: var(--font-family-header);
+  font-size: var(--text-base);
+  font-weight: 600;
+  line-height: 1.2;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast),
+    border-color var(--motion-fast),
+    color var(--motion-fast),
+    box-shadow var(--motion-fast);
+}
+
+.ui-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.ui-btn:disabled,
+.ui-btn[aria-disabled='true'] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ui-btn i {
+  font-size: 0.9em;
+}
+
+.ui-btn-primary {
+  background: var(--color-primary);
+  color: var(--color-primary-content);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  border-radius: 0;
+  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+}
+
+.ui-btn-primary:hover:not(:disabled) {
+  background: var(--color-lime-600);
+  color: var(--color-primary-content);
+}
+
+.ui-btn-primary:active:not(:disabled) {
+  background: var(--color-lime-700);
+  color: #fff;
+}
+
+/* clip-path clips an outer ring, so the primary button focuses with an inset one. */
+.ui-btn-primary:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--color-base-content);
+}
+
+.ui-btn-secondary {
+  border-color: rgba(39, 62, 71, 0.35);
+}
+
+.ui-btn-secondary:hover:not(:disabled) {
+  background: rgba(39, 62, 71, 0.06);
+  border-color: var(--color-base-content);
+  color: var(--color-base-content);
+}
+
+.ui-btn-ghost:hover:not(:disabled) {
+  background: rgba(39, 62, 71, 0.08);
+  color: var(--color-base-content);
+}
+
+.ui-btn-danger {
+  border-color: var(--color-error);
+  color: var(--color-error);
+}
+
+.ui-btn-danger:hover:not(:disabled) {
+  background: var(--color-error);
+  color: #fff;
+}
+
+.ui-btn-icon {
+  width: 36px;
+  min-height: 36px;
+  padding: 0;
+  border-radius: var(--radius-sm);
+}
+
+.ui-btn-icon:hover:not(:disabled) {
+  background: rgba(39, 62, 71, 0.1);
+  color: var(--color-base-content);
+}
+
+.ui-btn-sm {
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: var(--text-sm);
+}
+
+.ui-btn-sm.ui-btn-icon {
+  width: 30px;
+  min-height: 30px;
+}
+
+.ui-btn-lg {
+  min-height: 46px;
+  padding: 0 24px;
+  font-size: 1rem;
+}
+
+.ui-btn-block {
+  width: 100%;
+}

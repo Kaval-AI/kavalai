@@ -1,268 +1,211 @@
-<div class="p-6 max-w-6xl mx-auto space-y-6">
-  @if (ragStats) {
-    <div class="stats stats-vertical lg:stats-horizontal shadow bg-base-100 border border-base-200 w-full">
-      <div class="stat">
-        <div class="stat-title uppercase text-xs font-bold">Collections</div>
-        <div class="stat-value text-primary">{{ ragStats.total_collections }}</div>
-      </div>
-      <div class="stat">
-        <div class="stat-title uppercase text-xs font-bold">Total Entries</div>
-        <div class="stat-value text-secondary">{{ ragStats.total_entries }}</div>
-      </div>
-    </div>
+<ui-page-header tag="Project" title="RAG">
+  Query a collection as a <code>rag_query</code> node does, and see which entries come back and how close they are.
+</ui-page-header>
+
+@if (!projectId()) {
+  <ui-empty-state icon="fa-folder-open" title="No project selected" data-testid="rag-no-project">
+    Choose a project in the sidebar to search its collections.
+  </ui-empty-state>
+} @else if (loading()) {
+  <ui-loading label="Loading collections" />
+} @else if (error()) {
+  <ui-alert data-testid="rag-error">
+    {{ error() }}
+    <button alert-actions type="button" uiButton="ghost" size="sm" (click)="load()" data-testid="rag-retry">
+      Retry
+    </button>
+  </ui-alert>
+} @else if (collections().length === 0) {
+  <ui-empty-state icon="fa-database" title="No collections yet" data-testid="rag-empty">
+    This project's database holds no RAG collection. Index documents into it with a RAG service, for example
+    <code>examples/ragindex/index_csv.py</code>, and they appear here.
+  </ui-empty-state>
+} @else {
+  @if (stats(); as s) {
+    <ui-stats data-testid="rag-stats">
+      <ui-stat label="Collections">{{ s.total_collections | number }}</ui-stat>
+      <ui-stat label="Entries">{{ s.total_entries | number }}</ui-stat>
+    </ui-stats>
   }
 
-  <div class="card bg-base-100 shadow-xl border border-base-200">
-    <div class="card-body">
-      <h2 class="card-title mb-4">
-        <i class="fas fa-search text-primary"></i>
-        RAG Query
-      </h2>
+  <form class="rag-form" (ngSubmit)="query()" data-testid="rag-form">
+    <ui-toolbar>
+      <input
+        name="query"
+        type="search"
+        [(ngModel)]="queryText"
+        placeholder="What a user would ask"
+        aria-label="Query text"
+        data-testid="rag-query"
+      />
+      <select name="collection" [(ngModel)]="collectionName" aria-label="Collection" data-testid="rag-collection">
+        @for (c of collections(); track c.name) {
+          <option [ngValue]="c.name">{{ c.name }} ({{ c.count | number }})</option>
+        }
+      </select>
+      <select name="topK" [(ngModel)]="topK" aria-label="Results" data-testid="rag-top-k">
+        @for (k of topKOptions; track k) {
+          <option [ngValue]="k">Top {{ k }}</option>
+        }
+      </select>
+      <button
+        type="submit"
+        uiButton="primary"
+        size="sm"
+        [disabled]="querying() || !queryText.trim()"
+        data-testid="rag-search"
+      >
+        @if (querying()) {
+          <ui-spinner />
+        } @else {
+          <i class="fa-solid fa-play" aria-hidden="true"></i>
+        }
+        Search
+      </button>
+      <button
+        type="button"
+        uiButton
+        size="sm"
+        (click)="computePca()"
+        [disabled]="trainingPca() || !collectionName"
+        data-testid="rag-train-pca"
+      >
+        @if (trainingPca()) {
+          <ui-spinner />
+        } @else {
+          <i class="fa-solid fa-microchip" aria-hidden="true"></i>
+        }
+        Compute PCA
+      </button>
+    </ui-toolbar>
+    @if (collectionModel(); as model) {
+      <p class="form-hint" data-testid="rag-model">
+        Queries are embedded with <span class="mono">{{ model }}</span>, the model the collection was indexed with.
+      </p>
+    }
 
-      <div class="form-control w-full mb-4">
-        <label class="label">
-          <span class="label-text font-bold text-base-content/70">Query Text (Enter to submit)</span>
+    <details class="rag-options">
+      <summary>More options</summary>
+      <div class="rag-options-grid">
+        <ui-field label="Source IDs" for="rag-source-ids" hint="Comma-separated; only these sources are searched.">
+          <input id="rag-source-ids" name="sourceIds" type="text" [(ngModel)]="sourceIdsInput" placeholder="id1, id2" />
+        </ui-field>
+        <ui-field label="Normalizer YAML" for="rag-normalizer" hint="Applied to the query and the entries before ranking.">
+          <textarea
+            id="rag-normalizer"
+            name="normalizer"
+            rows="3"
+            class="mono"
+            [(ngModel)]="normalizerYaml"
+            placeholder="l2: true&#10;center: false"
+          ></textarea>
+        </ui-field>
+        <label class="rag-checkbox">
+          <input name="keepBest" type="checkbox" [(ngModel)]="keepBest" data-testid="rag-keep-best" />
+          Keep only the best match per source
         </label>
-        <input type="text" id="queryText" [(ngModel)]="queryText" placeholder="Enter your query here..."
-                  class="input input-bordered w-full"
-                  (keydown.enter)="onQuery()">
       </div>
+    </details>
+  </form>
 
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-        <div class="form-control">
-          <label class="label">
-            <span class="label-text font-bold text-base-content/70">Collection</span>
-          </label>
-          <select id="collectionName" [(ngModel)]="collectionName" class="select select-bordered w-full">
-            @for (col of collections; track col.name) {
-              <option [value]="col.name">
-                {{ col.name }} ({{ col.count }})
-              </option>
-            } @empty {
-              <option value="" disabled>No collections</option>
-            }
-          </select>
-        </div>
-
-        <div class="form-control">
-          <label class="label">
-            <span class="label-text font-bold text-base-content/70">Embedding Model</span>
-          </label>
-          <input type="text" id="embeddingModel" [value]="collectionModel ?? ''" readonly
-                 class="input input-bordered w-full bg-base-200 font-mono text-sm"
-                 placeholder="Recorded with the collection"
-                 title="The model the collection was indexed with; queries are embedded with it">
-        </div>
-
-        <div class="form-control">
-          <label class="label">
-            <span class="label-text font-bold text-base-content/70">Source IDs</span>
-          </label>
-          <input type="text" id="sourceIds" [(ngModel)]="sourceIdsInput"
-                 class="input input-bordered w-full" placeholder="id1, id2...">
-        </div>
-
-        <div class="form-control">
-          <label class="label">
-            <span class="label-text font-bold text-base-content/70">Top K</span>
-          </label>
-          <input type="number" id="topK" [(ngModel)]="topK" min="1" max="100"
-                 class="input input-bordered w-full">
-        </div>
-
-        <div class="form-control">
-          <label class="label cursor-pointer flex justify-start gap-4 h-full pt-8">
-            <input type="checkbox" [(ngModel)]="keepBest" class="toggle toggle-primary">
-            <span class="label-text font-bold text-base-content/70">Keep Best Only</span>
-          </label>
-        </div>
-      </div>
-
-      <div class="collapse collapse-arrow bg-base-200 mt-4 border border-base-300">
-        <input type="checkbox" />
-        <div class="collapse-title font-bold text-base-content/70">
-          Normalizer YAML (optional)
-        </div>
-        <div class="collapse-content">
-          <div class="form-control w-full">
-            <textarea id="normalizerYaml" [(ngModel)]="normalizerYaml"
-                      placeholder="l1: false&#10;l2: true&#10;center: false&#10;center_vector: [0.1, 0.2, ...]"
-                      class="textarea textarea-bordered h-24 font-mono text-sm bg-base-100"
-                      rows="3"></textarea>
-          </div>
-        </div>
-      </div>
-
-      <div class="card-actions justify-end mt-6">
-        <button class="btn btn-secondary" (click)="onComputePca()" [disabled]="trainingPca || !collectionName">
-          @if (trainingPca) {
-            <span class="loading loading-spinner"></span>
-            Training...
-          } @else {
-            <i class="fas fa-microchip"></i>
-            Compute PCA
-          }
-        </button>
-        <button class="btn btn-primary" (click)="onQuery()" [disabled]="loading || !queryText">
-          @if (loading) {
-            <span class="loading loading-spinner"></span>
-            Querying...
-          } @else {
-            <i class="fas fa-play"></i>
-            Query
-          }
-        </button>
-      </div>
-    </div>
-  </div>
-
-  @if (error) {
-    <div class="alert alert-error shadow-lg">
-      <i class="fas fa-exclamation-circle text-xl"></i>
-      <span>{{ error }}</span>
-    </div>
+  @if (queryError()) {
+    <ui-alert data-testid="rag-query-error">{{ queryError() }}</ui-alert>
   }
 
-  @if (pcaData) {
-    <div class="card bg-base-100 shadow-xl border border-base-200 overflow-hidden">
-      <div class="collapse collapse-arrow">
-        <input type="checkbox" [checked]="isPcaExpanded" (change)="isPcaExpanded = !isPcaExpanded" />
-        <div class="collapse-title p-0">
-          <div class="p-6 border-b border-base-200">
-            <h3 class="card-title">Embedding Projection (PCA)</h3>
-          </div>
-        </div>
-        <div class="collapse-content p-0">
-          <div class="card-body p-0">
-            <div class="p-6 flex flex-col items-center">
-              <svg viewBox="0 0 600 400" class="w-full max-w-2xl bg-base-200 rounded-lg shadow-inner">
-                <!-- Sample points (gray) -->
-                @for (p of pcaData.samples; track $index) {
-                  <circle [attr.cx]="getScaleX(p.x)" [attr.cy]="getScaleY(p.y)" r="3" fill="#9ca3af" opacity="0.5"
-                          (mouseenter)="onPointHover(p, $event)" (mousemove)="onPointMove($event)" (mouseleave)="onPointLeave()">
-                    <title>{{ p.label }}</title>
-                  </circle>
-                }
-                <!-- Result points (blue) -->
-                @for (p of pcaData.results; track $index) {
-                  <circle [attr.cx]="getScaleX(p.x)" [attr.cy]="getScaleY(p.y)" r="5" fill="#3b82f6"
-                          (mouseenter)="onPointHover(p, $event)" (mousemove)="onPointMove($event)" (mouseleave)="onPointLeave()">
-                    <title>{{ p.label }}</title>
-                  </circle>
-                }
-                <!-- Query point (red) -->
-                <circle [attr.cx]="getScaleX(pcaData.query.x)" [attr.cy]="getScaleY(pcaData.query.y)" r="7" fill="#ef4444"
-                        (mouseenter)="onPointHover(pcaData.query, $event)" (mousemove)="onPointMove($event)" (mouseleave)="onPointLeave()">
-                  <title>Query: {{ pcaData.query.label }}</title>
-                </circle>
-              </svg>
-              <div class="flex gap-6 mt-4 text-sm font-medium">
-                <div class="flex items-center gap-2">
-                  <span class="w-3 h-3 rounded-full bg-red-500"></span> Query
-                </div>
-                <div class="flex items-center gap-2">
-                  <span class="w-3 h-3 rounded-full bg-blue-500"></span> Closest Matches
-                </div>
-                <div class="flex items-center gap-2">
-                  <span class="w-3 h-3 rounded-full bg-gray-400 opacity-50"></span> Training Samples
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  } @else if (!loading && results.length > 0) {
-    <div class="alert alert-info shadow-lg">
-      <i class="fas fa-info-circle text-xl"></i>
-      <span>No PCA model computed for this collection.</span>
-    </div>
-  }
-
-  @if (hoveredPoint) {
-    <div class="fixed z-[100] bg-base-300 text-base-content text-xs p-2 rounded shadow-lg pointer-events-none border border-base-content/20 max-w-xs break-words"
-         [style.left.px]="tooltipPos.x"
-         [style.top.px]="tooltipPos.y">
-      {{ hoveredPoint.label }}
-    </div>
-  }
-
-  @if (results.length > 0) {
-    <div class="card bg-base-100 shadow-xl border border-base-200">
-      <div class="card-body p-0">
-        <div class="p-6 border-b border-base-200">
-          <h3 class="card-title">Results ({{ results.length }})</h3>
-        </div>
-        <div class="overflow-x-auto">
-          <table class="table table-zebra w-full">
+  @if (results(); as results) {
+    <ui-card [title]="'Results (' + results.length + ')'" icon="fa-list-ol" data-testid="rag-results">
+      @if (results.length === 0) {
+        <p class="text-muted" data-testid="rag-no-results">Nothing matched.</p>
+      } @else {
+        <ui-table top>
+          <table>
             <thead>
-              <tr class="bg-base-200/50">
-                <th class="w-24">Similarity</th>
-                <th class="w-32">Source ID</th>
+              <tr>
+                <th>Similarity</th>
+                <th>Source</th>
                 <th>Content</th>
-                <th class="w-32">Collection</th>
-                <th class="w-64">Metadata</th>
+                <th>Metadata</th>
               </tr>
             </thead>
             <tbody>
-              @for (result of results; track $index) {
-                <tr class="hover">
-                  <td class="font-bold text-success">{{ result.similarity | percent:'1.2-2' }}</td>
+              @for (r of results; track $index) {
+                <tr data-testid="rag-result">
+                  <td class="rag-similarity-cell">
+                    <span class="rag-score" [title]="'Similarity ' + r.similarity.toFixed(3)">{{ percent(r.similarity) }}%</span>
+                    <ui-progress class="rag-bar" [value]="percent(r.similarity)" label="Similarity" />
+                  </td>
+                  <td class="mono rag-source" [title]="r.source_id">{{ shortId(r.source_id) }}</td>
+                  <td><div class="rag-content">{{ r.content }}</div></td>
                   <td>
-                    <div class="badge badge-outline badge-info font-mono text-xs whitespace-nowrap">
-                      {{ result.source_id }}
-                    </div>
-                  </td>
-                  <td class="max-w-md">
-                    <div class="line-clamp-3 hover:line-clamp-none transition-all duration-300">
-                      {{ result.content }}
-                    </div>
-                  </td>
-                  <td class="text-xs opacity-70">{{ result.collection_name }}</td>
-                  <td class="p-2">
-                    <div class="bg-base-200 rounded p-2 text-[10px] font-mono whitespace-pre-wrap max-h-32 overflow-y-auto">
-                      {{ result.rag_metadata | json }}
-                    </div>
+                    @if (r.rag_metadata) {
+                      <pre class="rag-metadata">{{ r.rag_metadata | json }}</pre>
+                    }
                   </td>
                 </tr>
               }
             </tbody>
           </table>
+        </ui-table>
+      }
+    </ui-card>
+
+    @if (pcaData(); as pca) {
+      <ui-card title="Embedding projection (PCA)" icon="fa-braille" data-testid="rag-projection">
+        <svg
+          class="rag-plot"
+          [attr.viewBox]="'0 0 ' + plot.width + ' ' + plot.height"
+          role="img"
+          aria-label="The query, its matches and a sample of the collection, projected onto two principal components"
+        >
+          @for (p of pca.samples; track $index) {
+            <circle class="point" [attr.cx]="scaleX(p.x)" [attr.cy]="scaleY(p.y)" r="3" [attr.fill]="colors.slate" opacity="0.45">
+              <title>{{ p.label }}</title>
+            </circle>
+          }
+          @for (p of pca.results; track $index) {
+            <circle class="point" [attr.cx]="scaleX(p.x)" [attr.cy]="scaleY(p.y)" r="5" [attr.fill]="colors.lime">
+              <title>{{ p.label }}</title>
+            </circle>
+          }
+          <circle
+            class="point"
+            [attr.cx]="scaleX(pca.query.x)"
+            [attr.cy]="scaleY(pca.query.y)"
+            r="7"
+            [attr.fill]="colors.raspberry"
+          >
+            <title>Query: {{ pca.query.label }}</title>
+          </circle>
+        </svg>
+        <div class="rag-legend">
+          <span><i class="swatch" [style.background]="colors.raspberry"></i> Query</span>
+          <span><i class="swatch" [style.background]="colors.lime"></i> Matches</span>
+          <span><i class="swatch swatch-sample" [style.background]="colors.slate"></i> Sample of the collection</span>
         </div>
-      </div>
-    </div>
+      </ui-card>
+    } @else if (results.length > 0) {
+      <ui-alert tone="info" data-testid="rag-no-pca">
+        No PCA model has been trained for this collection; Compute PCA trains one and the next query is projected.
+      </ui-alert>
+    }
   }
+}
 
-  @if (!loading && results.length === 0 && !error) {
-    <div class="flex flex-col items-center justify-center py-12 text-center space-y-4 opacity-40">
-      <div class="text-6xl"><i class="fas fa-search"></i></div>
-      <p class="text-lg italic">Execute a query to see results.</p>
-    </div>
-  }
-
-  <!-- PCA Modal -->
-  @if (showPcaModal) {
-    <div class="modal modal-open">
-      <div class="modal-box max-w-2xl">
-        <h3 class="font-bold text-lg mb-4">Training PCA</h3>
-
-        <div class="bg-base-200 rounded-lg p-4 font-mono text-sm h-64 overflow-y-auto mb-4 flex flex-col-reverse">
-          <div class="flex flex-col">
-            @for (msg of pcaMessages; track $index) {
-              <div class="py-1 border-b border-base-300 last:border-0">
-                <span class="text-primary">></span> {{ msg }}
-              </div>
-            }
-          </div>
-        </div>
-
-        <div class="modal-action">
-          <button class="btn btn-error" (click)="stopPca()">
-            {{ trainingPca ? 'Stop' : 'Close' }}
-          </button>
-        </div>
-      </div>
-      <div class="modal-backdrop" (click)="stopPca()"></div>
-    </div>
-  }
-</div>
+<ui-dialog size="lg" [open]="showPca()" title="Training PCA" (closed)="stopPca()">
+  <div class="pca-log" data-testid="pca-log">
+    @for (line of pcaMessages(); track $index) {
+      <div>{{ line }}</div>
+    } @empty {
+      <div class="pca-waiting">Waiting for the server…</div>
+    }
+  </div>
+  <button
+    dialog-actions
+    type="button"
+    [uiButton]="trainingPca() ? 'danger' : 'secondary'"
+    (click)="stopPca()"
+    data-testid="pca-close"
+  >
+    {{ trainingPca() ? 'Stop' : 'Close' }}
+  </button>
+</ui-dialog>

@@ -36,6 +36,6 @@ ENV PYTHONPATH=/app
 # Make entrypoint script executable
 RUN chmod +x /app/dockerfiles/backoffice.entrypoint.sh
 
-EXPOSE 80 8000
+EXPOSE 80 12800
 
 ENTRYPOINT ["/app/dockerfiles/backoffice.entrypoint.sh"]

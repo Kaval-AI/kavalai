@@ -1,0 +1,18 @@
+@if (link()) {
+  <a class="ui-chip" [routerLink]="link()" [attr.title]="title() || null">
+    <ui-avatar [name]="text()" size="sm" />
+    <span class="ui-chip-text">{{ text() }}</span>
+    @if (detail()) {
+      <span class="ui-chip-detail">{{ detail() }}</span>
+    }
+    <i class="fa-solid fa-right-left" aria-hidden="true"></i>
+  </a>
+} @else {
+  <span class="ui-chip">
+    <ui-avatar [name]="text()" size="sm" />
+    <span class="ui-chip-text">{{ text() }}</span>
+    @if (detail()) {
+      <span class="ui-chip-detail">{{ detail() }}</span>
+    }
+  </span>
+}

@@ -19,7 +19,19 @@ from typing import Any, AsyncIterator, Dict, List, Optional, Sequence, TypedDict
 from uuid import UUID
 
 from pydantic import BaseModel
-from sqlalchemy import asc, case, delete, desc, func, null, or_, select, update
+from sqlalchemy import (
+    Text,
+    asc,
+    case,
+    cast,
+    delete,
+    desc,
+    func,
+    null,
+    or_,
+    select,
+    update,
+)
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from kavalai.db import (
     Agent,
@@ -64,6 +76,136 @@ class SessionSummary(BaseModel):
 class SessionsResponse(TypedDict):
     sessions: list[SessionSummary]
     total_count: int
+
+
+class ModelCallTotals(BaseModel):
+    """Model calls added up: how many, how many failed (a response code
+    outside 2xx; a call without one is not counted as failed), their tokens,
+    and the average call in seconds (``None`` without calls)."""
+
+    calls: int = 0
+    errors: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    cached_prompt_tokens: int = 0
+    reasoning_tokens: int = 0
+    total_tokens: int = 0
+    average_seconds: float | None = None
+
+
+class ModelCallModelTotals(ModelCallTotals):
+    """The totals of one model and call type."""
+
+    model: str
+    call_type: str
+
+
+class ModelCallDay(BaseModel):
+    """One day of model calls: the input and output tokens of the LLM calls,
+    and the tokens of the embedding calls. ``date`` is ``YYYY-MM-DD``, the
+    day in the database's time zone."""
+
+    date: str
+    calls: int
+    prompt_tokens: int
+    completion_tokens: int
+    embedding_tokens: int
+
+
+class ModelCallSummary(BaseModel):
+    """What :meth:`AgentService.summarise_model_calls` answers: the totals,
+    the totals per model (most tokens first) and the tokens per day (oldest
+    first, only the days with calls)."""
+
+    totals: ModelCallTotals
+    by_model: list[ModelCallModelTotals]
+    by_day: list[ModelCallDay]
+
+
+def _like_pattern(text: str) -> str:
+    """``%text%`` with the wildcards of ``text`` escaped by a backslash."""
+    escaped = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
+def _model_call_filters(
+    *,
+    call_type: Optional[str] = None,
+    agent_id: Optional[UUID] = None,
+    session_id: Optional[UUID] = None,
+    run_id: Optional[UUID] = None,
+    search: Optional[str] = None,
+    start: Optional[datetime] = None,
+    end: Optional[datetime] = None,
+) -> list[Any]:
+    """The conditions the model call list and its summary share.
+
+    ``search`` is a case-insensitive substring of the model name or of the
+    request or response payload, read as text; ``start`` and ``end`` bound the
+    time the call was recorded, both inclusive.
+    """
+    filters: list[Any] = []
+    if call_type:
+        filters.append(ModelCallStat.call_type == call_type)
+    if agent_id:
+        filters.append(ModelCallStat.agent_id == agent_id)
+    if session_id:
+        filters.append(ModelCallStat.session_id == session_id)
+    if run_id:
+        filters.append(ModelCallStat.run_id == run_id)
+    if search:
+        pattern = _like_pattern(search)
+        filters.append(
+            or_(
+                ModelCallStat.model.ilike(pattern, escape="\\"),
+                cast(ModelCallStat.request_data, Text).ilike(pattern, escape="\\"),
+                cast(ModelCallStat.response_data, Text).ilike(pattern, escape="\\"),
+            )
+        )
+    if start:
+        filters.append(ModelCallStat.created_at >= start)
+    if end:
+        filters.append(ModelCallStat.created_at <= end)
+    return filters
+
+
+def _model_call_sums() -> list[Any]:
+    """The aggregate columns of a :class:`ModelCallTotals`, in its order."""
+    failed = case(
+        (
+            ModelCallStat.response_code.is_not(None)
+            & (
+                (ModelCallStat.response_code < 200)
+                | (ModelCallStat.response_code >= 300)
+            ),
+            1,
+        ),
+        else_=0,
+    )
+    return [
+        func.count(ModelCallStat.id),
+        func.coalesce(func.sum(failed), 0),
+        func.coalesce(func.sum(ModelCallStat.prompt_tokens), 0),
+        func.coalesce(func.sum(ModelCallStat.completion_tokens), 0),
+        func.coalesce(func.sum(ModelCallStat.cached_prompt_tokens), 0),
+        func.coalesce(func.sum(ModelCallStat.reasoning_tokens), 0),
+        func.coalesce(func.sum(ModelCallStat.total_tokens), 0),
+        func.avg(ModelCallStat.duration_seconds),
+    ]
+
+
+def _totals(row: Any) -> Dict[str, Any]:
+    calls, errors, prompt, completion, cached, reasoning, total, average = row
+    return {
+        "calls": int(calls),
+        "errors": int(errors),
+        "prompt_tokens": int(prompt),
+        "completion_tokens": int(completion),
+        "cached_prompt_tokens": int(cached),
+        "reasoning_tokens": int(reasoning),
+        "total_tokens": int(total),
+        "average_seconds": float(average) if average is not None else None,
+    }
 
 
 def _orm_stat(stats: Any) -> ModelCallStat:
@@ -665,6 +807,9 @@ class AgentService:
         agent_id: Optional[UUID] = None,
         session_id: Optional[UUID] = None,
         run_id: Optional[UUID] = None,
+        search: Optional[str] = None,
+        start: Optional[datetime] = None,
+        end: Optional[datetime] = None,
     ) -> List[ModelCallStat]:
         """Model call records, newest first, optionally filtered.
 
@@ -673,25 +818,118 @@ class AgentService:
             agent_id: Calls attributed to this agent.
             session_id: Calls made by runs of this session.
             run_id: Calls made by this run.
+            search: Case-insensitive text in the model name, the request or
+                the response.
+            start: Calls recorded at or after this time.
+            end: Calls recorded at or before this time.
         """
+        filters = _model_call_filters(
+            call_type=call_type,
+            agent_id=agent_id,
+            session_id=session_id,
+            run_id=run_id,
+            search=search,
+            start=start,
+            end=end,
+        )
         async with self.session_maker() as session:
             stmt = (
                 select(ModelCallStat)
+                .where(*filters)
                 .order_by(ModelCallStat.created_at.desc())
                 .limit(limit)
                 .offset(offset)
             )
-            if call_type:
-                stmt = stmt.where(ModelCallStat.call_type == call_type)
-            if agent_id:
-                stmt = stmt.where(ModelCallStat.agent_id == agent_id)
-            if session_id:
-                stmt = stmt.where(ModelCallStat.session_id == session_id)
-            if run_id:
-                stmt = stmt.where(ModelCallStat.run_id == run_id)
-
             result = await session.execute(stmt)
             return list(result.scalars().all())
+
+    async def summarise_model_calls(
+        self,
+        call_type: Optional[str] = None,
+        *,
+        agent_id: Optional[UUID] = None,
+        session_id: Optional[UUID] = None,
+        run_id: Optional[UUID] = None,
+        search: Optional[str] = None,
+        start: Optional[datetime] = None,
+        end: Optional[datetime] = None,
+    ) -> ModelCallSummary:
+        """The token usage of the calls :meth:`get_model_call_stats` would
+        list with the same filters, all of them rather than one page.
+
+        Tokens are what the providers reported; no cost is derived, since
+        cached input is priced differently enough that a total would be wrong.
+        """
+        filters = _model_call_filters(
+            call_type=call_type,
+            agent_id=agent_id,
+            session_id=session_id,
+            run_id=run_id,
+            search=search,
+            start=start,
+            end=end,
+        )
+        is_llm = ModelCallStat.call_type == "llm"
+        is_embedding = ModelCallStat.call_type == "embedding"
+        day = func.date(ModelCallStat.created_at)
+        async with self.session_maker() as session:
+            totals = (
+                await session.execute(select(*_model_call_sums()).where(*filters))
+            ).one()
+            by_model = (
+                await session.execute(
+                    select(
+                        ModelCallStat.model,
+                        ModelCallStat.call_type,
+                        *_model_call_sums(),
+                    )
+                    .where(*filters)
+                    .group_by(ModelCallStat.model, ModelCallStat.call_type)
+                    .order_by(
+                        desc(func.coalesce(func.sum(ModelCallStat.total_tokens), 0)),
+                        ModelCallStat.model,
+                    )
+                )
+            ).all()
+            by_day = (
+                await session.execute(
+                    select(
+                        day,
+                        func.count(ModelCallStat.id),
+                        func.coalesce(
+                            func.sum(case((is_llm, ModelCallStat.prompt_tokens))), 0
+                        ),
+                        func.coalesce(
+                            func.sum(case((is_llm, ModelCallStat.completion_tokens))),
+                            0,
+                        ),
+                        func.coalesce(
+                            func.sum(case((is_embedding, ModelCallStat.total_tokens))),
+                            0,
+                        ),
+                    )
+                    .where(*filters)
+                    .group_by(day)
+                    .order_by(day)
+                )
+            ).all()
+        return ModelCallSummary(
+            totals=ModelCallTotals(**_totals(totals)),
+            by_model=[
+                ModelCallModelTotals(model=row[0], call_type=row[1], **_totals(row[2:]))
+                for row in by_model
+            ],
+            by_day=[
+                ModelCallDay(
+                    date=str(row[0])[:10],
+                    calls=int(row[1]),
+                    prompt_tokens=int(row[2]),
+                    completion_tokens=int(row[3]),
+                    embedding_tokens=int(row[4]),
+                )
+                for row in by_day
+            ],
+        )
 
     async def list_sessions(
         self,

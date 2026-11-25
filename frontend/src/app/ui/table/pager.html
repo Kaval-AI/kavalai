@@ -1,0 +1,9 @@
+<span class="text-muted" data-testid="pager-range">{{ range() }}</span>
+<span class="ui-pager-buttons">
+  <button type="button" uiButton size="sm" (click)="previous.emit()" [disabled]="!hasPrevious() || busy()">
+    <i class="fa-solid fa-chevron-left" aria-hidden="true"></i> Previous
+  </button>
+  <button type="button" uiButton size="sm" (click)="next.emit()" [disabled]="!hasNext() || busy()">
+    Next <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+  </button>
+</span>
